@@ -65,7 +65,16 @@ kernelcache*
 *.inf
 *.sys
 *.cat
+*.msi
 *.aml
+*.jsn
+tcblaunch*.exe
+# Surface Pro 11 (docs/SURFACE-PRO-11.md): the upper-case name FAT media uses for
+# the operator's tcblaunch.exe (git matches case exactly on a case-sensitive
+# checkout), and firmware tables dumped from a real machine by probes/uefi. The
+# SMBIOS files in a dump can hold serial numbers and UUIDs.
+TCBLAUNCH.EXE
+SP11DUMP/
 *.jsonl
 *.pem
 *.key
