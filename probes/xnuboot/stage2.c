@@ -18,6 +18,9 @@
  * does not come back. The attribute bits are in stage2.h.
  */
 #define S2_TXSZ    28u             /* 36-bit IPA: one 64-entry level-1 table */
+#if SNAP_PLATFORM_SP11
+#include "../../compat/ipa-geometry.h"
+#endif
 
 static int guard_add(struct context *c, struct vcpu *v, uint64_t root,
                      uint64_t pa, uint64_t mode)
@@ -233,6 +236,22 @@ static int vcpu_stage2_prepare(struct context *c, struct vcpu *v)
         int rows = display_timing_rows(display_timing_block(p), ranges + count);
         if (rows < 0) return -43;
         count += (unsigned)rows;
+    }
+#endif
+#if SNAP_PLATFORM_SP11
+    /* The SP11's DRAM can end past 1 << (64 - S2_TXSZ) (compat/ipa-geometry.h), and stage2_build can only answer -10
+     * to that, without a reason and without looking at PARange. A16 never reaches this check. */
+    {
+        struct ipag_span spans[sizeof(ranges) / sizeof(ranges[0])];
+        uint64_t parange;
+        _Static_assert(sizeof(ranges) / sizeof(ranges[0]) <= IPAG_MAX_WINDOWS, "range list exceeds the span check");
+        __asm__ volatile("mrs %0, id_aa64mmfr0_el1" : "=r"(parange));
+        for (unsigned n = 0; n < count; n++) {
+            spans[n].lo = ranges[n].lo;
+            spans[n].hi = ranges[n].hi;
+        }
+        int why = ipag_check_spans(spans, count, 64u - S2_TXSZ, (unsigned)(parange & 0xf), 0);
+        if (why) return -(IPAG_HOOK_RETURN_BASE + why);
     }
 #endif
     int built = stage2_build(&s2, ranges, count);

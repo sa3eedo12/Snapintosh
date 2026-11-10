@@ -21,6 +21,14 @@ struct secondary {
     uint64_t initial_cpacr, initial_cptr, final_cpacr, final_cptr;
 };
 _Static_assert(sizeof(struct secondary_config)==160,"secondary host ABI");
+#if SNAP_PLATFORM_SP11
+/* GUEST_CPU_COUNT is overridable on SP11 only (compat/cpu.h); the host fills one entry per vCPU slot. */
+#include "../compat/cpu.h"
+_Static_assert(sizeof(((struct secondary_config *)0)->affinity)==GUEST_CPU_COUNT*sizeof(uint64_t),
+               "secondary_config.affinity has one entry per guest vCPU");
+_Static_assert(sizeof(((struct secondary_config *)0)->redistributor)==GUEST_CPU_COUNT*sizeof(uint64_t),
+               "secondary_config.redistributor has one entry per guest vCPU");
+#endif
 _Static_assert(sizeof(struct secondary)==37*8,"secondary report ABI");
 _Static_assert(__builtin_offsetof(struct secondary,stack)==40,"secondary stack ABI");
 _Static_assert(__builtin_offsetof(struct secondary,vectors)==64,"secondary vector ABI");

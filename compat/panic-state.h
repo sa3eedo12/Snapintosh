@@ -12,6 +12,12 @@ struct sptm_panic_state {
     uint64_t cpu_entries[6];
 };
 _Static_assert(sizeof(struct sptm_panic_state)==88,"panic-state audit layout");
+#if SNAP_PLATFORM_SP11
+/* GUEST_CPU_COUNT is overridable on SP11 only (compat/cpu.h); sptm_panic_enter indexes cpu_entries by vCPU slot. */
+#include "cpu.h"
+_Static_assert(sizeof(((struct sptm_panic_state *)0)->cpu_entries)==GUEST_CPU_COUNT*sizeof(uint64_t),
+               "panic state keeps one entry per guest vCPU");
+#endif
 void sptm_panic_init(struct sptm_panic_state *);
 int sptm_panic_enter(struct sptm_panic_state *, unsigned cpu);
 /* The panic-only dispatch/diagnostic return protocol is not implemented yet.

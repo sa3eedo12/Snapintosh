@@ -4,6 +4,11 @@
 #include "sprr.h"
 #include "../shadow/shadow.h"
 #define SPTM_ROOT_CPUS 6u
+#if SNAP_PLATFORM_SP11
+/* GUEST_CPU_COUNT is overridable on SP11 only (compat/cpu.h); the per-CPU arrays below index by vCPU slot. */
+#include "cpu.h"
+_Static_assert(SPTM_ROOT_CPUS==GUEST_CPU_COUNT,"SPTM_ROOT_CPUS must equal GUEST_CPU_COUNT");
+#endif
 /* SNAP_ROOT_CACHE_WIDE (compat/root-wide.h): 192 cached user roots instead of
  * 64. struct context keeps a 64-slot twin of this state at the define-free
  * offsets host readers use; the live state lives in monitor arena pages. */

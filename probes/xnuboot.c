@@ -57,7 +57,9 @@
 #include "xnuboot/feature_flags.c"
 #include "../compat/device.h"
 #include "../compat/mmio.h"
-
+#if SNAP_PLATFORM_SP11
+#include "../compat/board-info.h"
+#endif
 /* What the host puts in memory for us. Laid out by probes/xnuboot.py; the two
  * sides are checked against each other by the size assertion below. */
 #include "../compat/sptm.h"

@@ -104,12 +104,22 @@ static int64_t ans_window_prepare(struct context *c)
     if (!ans_window(c)) return 0;
     const struct device_model *m=ans_nvme_model(c);
     uint64_t res=m->config[0];
+#if SNAP_PLATFORM_SP11
+    /* nvmeh_adopt re-proves the controller's registers and nothing else, so on an SP11 it would adopt a disk the board
+     * descriptor never named. nvmeh_sp11_adopt (compat/nvme-host.h) needs the target, the adoption record and the
+     * per-run pins, and none of the three reaches the monitor yet (docs/SP11-NVME-WINDOW.md, section 3, row 17):
+     * refuse. The state stays not-adopted, so any later read, write or flush is refused before a doorbell. Replace this
+     * with a call of nvmeh_sp11_adopt once its inputs exist; never with nvmeh_adopt. */
+    ANS_NVMEH_STATE(res)->prepare=(uint64_t)(int64_t)NVMEH_SP11_STATUS_UNWIRED;
+    return NVMEH_SP11_STATUS_UNWIRED;
+#else
 #if SNAP_ANS_ASYNC
     /* The schedule's lock-free readers (timer_arm, the fast tick) find the state here; window mode only. */
     c->root_ext->ans=(struct ans_state *)res;
 #endif
     return nvmeh_adopt(&nvmeh_direct,ANS_NVMEH_PARAMS(res),ANS_NVMEH_STATE(res),
                        c->params->mem_low,c->params->mem_high);
+#endif
 }
 static void ans_window_stop(struct context *c)
 {

@@ -129,7 +129,13 @@ MULTI = {'pauth-address': ['probes/pauth-address.S','compat/pauth-native.S'],
 # Units linked only when their opt-in define is in FLAGS, after MULTI's, so a build without the define links exactly
 # the objects it always did and its ELF stays byte-identical.
 OPTIONAL = {'xnuboot': (('-DSNAP_ADRENO_COHERENT=1', 'compat/adreno-coherent.c'),
-                        ('-DSNAP_EDP_BACKLIGHT=1', 'compat/edp-backlight.c'))}
+                        ('-DSNAP_EDP_BACKLIGHT=1', 'compat/edp-backlight.c'),
+                        ('-DSNAP_PLATFORM_SP11=1', 'compat/board-info.c'),
+                        ('-DSNAP_PLATFORM_SP11=1', 'compat/nv2-gate.c'),
+                        ('-DSNAP_PLATFORM_SP11=1', 'compat/oryon-idregs.c'),
+                        ('-DSNAP_PLATFORM_SP11=1', 'compat/topology.c'),
+                        ('-DSNAP_PLATFORM_SP11=1', 'compat/ipa-geometry.c'),
+                        ('-DSNAP_PLATFORM_SP11=1', 'compat/hamoa-thermal.c'))}
 
 
 def optional_sources(name, flags):
@@ -531,6 +537,26 @@ EV_EARLY_STOP, EV_EARLY_STOP_REQUEST = 52, 53
 # none is missing: three of them were added to the probe and never named, so a
 # prepare that failed on the TTBR0 shadow printed a bare "-8" -- a number with
 # no story, on the one path where the run produced nothing else to read.
+#
+# Status bands (one allocation, shared by every unit; tools/test-sp11-integration.py pins it):
+#   -1 .. -83      the A16 monitor, unchanged. -80 .. -83 are also what nvmeh_adopt returns through ans_window_prepare
+#                  (NVMEH_E_PARAMS, _GUEST, _CTRL and _QUEUES, compat/nvme-host.h); -80 .. -82 share their numbers
+#                  with the boot relocation's names below, so the physical NVMe state's `prepare` word tells them apart.
+#   -84 .. -89     unused; kept free so the A16 band can grow without touching the SP11 ones.
+#   -90 .. -95     SNAP_PLATFORM_SP11 launch gate: NV2 and PAuth (compat/nv2-gate.h, compat/oryon-idregs.h).
+#   -96 .. -145    SNAP_PLATFORM_SP11 NVMe window (compat/nvme-host.h): NVMEH_E_SP11_* at -96 .. -144 and
+#                  NVMEH_SP11_STATUS_UNWIRED at -145, which ans_window_prepare returns until nvmeh_sp11_adopt has its
+#                  inputs. The same number is stored in the physical NVMe state's `prepare` word.
+#   -146           SNAP_PLATFORM_SP11 vCPU count that needs the fair service lock and the build has none
+#                  (GUEST_CPU_STATUS_FAIR_LOCK, compat/cpu.h; returned first by xnuboot_prepare).
+#   -147 .. -255   unused; the next SP11 refusal that reaches the host takes the first free number here.
+#   -256           never returned: it would be enum ipag_reason 0, which means OK.
+#   -257 .. -274   SNAP_PLATFORM_SP11 stage-2 geometry, -(IPAG_HOOK_RETURN_BASE + enum ipag_reason)
+#                  (compat/ipa-geometry.h, probes/xnuboot/stage2.c).
+#   -275 and below unused.
+# The board-info validator (compat/board-info.h), the topology model and the Hamoa thermal guard return their own
+# non-negative codes and are not called from the prepare path yet; whoever wires one takes a number from the
+# first unused band above and adds a row here and a name below.
 PREPARE_FAILURES = {
     -28: 'A16 thermal preflight refused; inspect the thermal report',
     -1: 'no room for the shadow root',
@@ -578,6 +604,101 @@ PREPARE_FAILURES = {
     -82: 'vCPU 0 relocation: the target CPU stopped before guest entry (record 0 error: 0x100 GIC, 0x103 '
          'registers, 0x104/0x105 FP, 0x107 an ID register the shared preparation used differs, 0x108 '
          'CNTVOFF_EL2 or CNTFRQ_EL0 differs from q1n1\'s CPU)',
+    # The NVMe window adoption (compat/nvme-host.h NVMEH_E_QUEUES): ans_window_prepare returns it as nvmeh_adopt does.
+    -83: 'NVMe window adoption: AQA, ASQ or ACQ is not the admin queue q1n1 adopted (the same adoption returns '
+         '-80 .. -82, whose names above are the boot relocation\'s: read the physical NVMe state\'s prepare word)',
+    # SNAP_PLATFORM_SP11 launch gate (compat/nv2-gate.h, compat/oryon-idregs.h): a CPU was refused before it
+    # wrote VNCR_EL2 or set HCR_EL2.NV/NV2. EV_OTHER pc 0x4e56, 0x4e57 and 0x5041 hold the verdicts and IDs.
+    -90: 'SP11 NV2 gate: no valid functional record is embedded (absent, wrong length, magic, version, '
+         'checksum or reserved bytes); tools/nv2_record.py ingest builds one from a measurement',
+    -91: 'SP11 NV2 gate: the functional record is for another SoC or core (SoC, MIDR_EL1, REVIDR_EL1 or the '
+         'recorded NV2 ID fields differ from this CPU\'s)',
+    -92: 'SP11 NV2 gate: this CPU\'s ID registers do not advertise FEAT_NV2, so HCR_EL2.NV/NV2 stay clear',
+    -93: 'SP11 NV2 gate: the record holds no passing VNCR redirect, no passing negative control, or an '
+         'evidence label other than VERIFIED or OBSERVED',
+    -94: 'SP11 PAuth normalization: MIDR_EL1 is not a recorded Oryon v1 or A16 core, so the ID fields '
+         'cannot be mapped to the J700 view',
+    -95: 'SP11 PAuth normalization: the PAuth ID fields are not a recognised shape (implementation-defined '
+         'algorithm, both families, no PAuth, or not address 5 with PACGA)',
+    # SNAP_PLATFORM_SP11 NVMe window (compat/nvme-host.h): nvmeh_sp11_adopt's refusals, -96 .. -144, and the monitor's own
+    # until that adoption has inputs, -145. Each text is "SP11 NVMe window: " plus nvmeh_sp11_strerror's, which
+    # tools/test-sp11-integration.py holds equal. The same number is stored in the physical NVMe state's prepare word.
+    -96: 'SP11 NVMe window: target or record ABI revision is not 1',
+    -97: 'SP11 NVMe window: a reserved word, unknown known-bit or unknown flag is set',
+    -98: 'SP11 NVMe window: the descriptor has no measured ECAM window for the SSD\'s segment',
+    -99: 'SP11 NVMe window: the endpoint\'s bus/device/function is not pinned',
+    -100: 'SP11 NVMe window: the PCIe SMMU is unknown or ambiguous',
+    -101: 'SP11 NVMe window: the RID to StreamID mapping is not pinned',
+    -102: 'SP11 NVMe window: the namespace identity is not pinned',
+    -103: 'SP11 NVMe window: the run identity is not pinned',
+    -104: 'SP11 NVMe window: the descriptor does not say the NVMe device is present',
+    -105: 'SP11 NVMe window: a pinned value is zero, unaligned, out of range or '
+          'self-contradicting',
+    -106: 'SP11 NVMe window: the adoption record is not a clean hand-off',
+    -107: 'SP11 NVMe window: the adoption record belongs to another run',
+    -108: 'SP11 NVMe window: the record\'s PCI segment is not the descriptor\'s',
+    -109: 'SP11 NVMe window: the record\'s ECAM base is not the descriptor\'s',
+    -110: 'SP11 NVMe window: the record\'s bus is outside the descriptor\'s MCFG range',
+    -111: 'SP11 NVMe window: the record\'s bus/device/function is not the one the descriptor '
+          'pins',
+    -112: 'SP11 NVMe window: the record\'s config address is not the ECAM address of the pinned '
+          'BDF',
+    -113: 'SP11 NVMe window: the endpoint is not an NVM Express controller',
+    -114: 'SP11 NVMe window: the record\'s namespace is not the pinned one',
+    -115: 'SP11 NVMe window: the record\'s SMMU is not the descriptor\'s',
+    -116: 'SP11 NVMe window: the SSD\'s stream is neither bypass nor an identity stage 2',
+    -117: 'SP11 NVMe window: the DMA window was not proven reachable for the SSD',
+    -118: 'SP11 NVMe window: the StreamID is not the descriptor\'s mapping of the endpoint\'s RID',
+    -119: 'SP11 NVMe window: the current LBA format is not 512 bytes',
+    -120: 'SP11 NVMe window: the current LBA format carries per-block metadata',
+    -121: 'SP11 NVMe window: the params disagree with the record about the LBA size',
+    -122: 'SP11 NVMe window: the namespace size or GPT usable range is impossible',
+    -123: 'SP11 NVMe window: the protected-extent list is empty, malformed or too long',
+    -124: 'SP11 NVMe window: the window has zero size, wrapped size or first after last',
+    -125: 'SP11 NVMe window: the window is smaller than the two synthesized edges',
+    -126: 'SP11 NVMe window: the window reaches past the end of the namespace',
+    -127: 'SP11 NVMe window: the window reaches into the primary or backup GPT zone',
+    -128: 'SP11 NVMe window: the window start or size is not a whole number of MiB',
+    -129: 'SP11 NVMe window: the window is closer than the guard to another extent or a GPT '
+          'zone',
+    -130: 'SP11 NVMe window: the window shares an LBA with another partition',
+    -131: 'SP11 NVMe window: the write window is wrong for the write flag or reaches an edge '
+          'MiB',
+    -132: 'SP11 NVMe window: writes were requested without the per-run authorisation',
+    -133: 'SP11 NVMe window: config space reads as no device',
+    -134: 'SP11 NVMe window: Memory Space or Bus Master is off',
+    -135: 'SP11 NVMe window: the endpoint\'s header type is not 0',
+    -136: 'SP11 NVMe window: BAR0 is not the memory BAR the params name',
+    -137: 'SP11 NVMe window: the admin phase is neither takeover nor adopted',
+    -138: 'SP11 NVMe window: the admin opcode is not on the allow-list',
+    -139: 'SP11 NVMe window: Identify is allowed for namespace and controller only',
+    -140: 'SP11 NVMe window: Get Log Page is allowed for error, SMART and firmware slot only',
+    -141: 'SP11 NVMe window: the feature is not on the allow-list for this command',
+    -142: 'SP11 NVMe window: Set Features with the Save bit is refused',
+    -143: 'SP11 NVMe window: the I/O opcode is not Read, Write or Flush',
+    -144: 'SP11 NVMe window: Write while the window is read-only',
+    -145: 'SP11 NVMe window: the monitor does not yet receive the SP11 target, record and '
+          'per-run pins, so it refuses to adopt the SSD',
+    # SNAP_PLATFORM_SP11 launch configuration (compat/cpu.h): vCPUs spanning more than one cluster need the queued lock.
+    -146: 'SP11 vCPU count: the guest vCPUs span more than one cluster and this build has no fair service lock '
+          '(compat/topology.h NEEDS_FAIR_LOCK; build with -DSNAP_FAIR_TOKEN=1)',
+    # SNAP_PLATFORM_SP11 stage-2 geometry (compat/ipa-geometry.h): the monitor's own range list was refused
+    # before stage2_build, as -(256 + enum ipag_reason). The reasons the host-only planner alone can give
+    # (policy, overflow, unsorted, MMIO in DRAM, carve) never reach this path.
+    -258: 'SP11 stage-2 geometry: the IPA width taken from S2_TXSZ is outside 32..48 bits',
+    -259: 'SP11 stage-2 geometry: ID_AA64MMFR0_EL1.PARange is not a decoded encoding (above 6)',
+    -261: 'SP11 stage-2 geometry: the stage-2 range list is empty',
+    -262: 'SP11 stage-2 geometry: the stage-2 range list is longer than the span check accepts (64); '
+          'unreachable while the compile-time assertion holds',
+    -263: 'SP11 stage-2 geometry: a stage-2 range is empty',
+    -264: 'SP11 stage-2 geometry: a stage-2 range ends before it starts',
+    -266: 'SP11 stage-2 geometry: a stage-2 range is not 4 KiB aligned',
+    -268: 'SP11 stage-2 geometry: two stage-2 ranges overlap',
+    -270: 'SP11 stage-2 geometry: a stage-2 range ends beyond the physical address space the CPU reports (PARange)',
+    -271: 'SP11 stage-2 geometry: a stage-2 range starts at or above the IPA limit, 1 << (64 - S2_TXSZ); '
+          'the DRAM map does not fit this stage-2 width',
+    -272: 'SP11 stage-2 geometry: a stage-2 range crosses the IPA limit, 1 << (64 - S2_TXSZ); '
+          'the DRAM map does not fit this stage-2 width',
 }
 # Which vector an asynchronous exception arrived at, from probes/xnuboot.S.
 ASYNC_VECTORS = {0: 'IRQ', 1: 'FIQ', 2: 'SError'}

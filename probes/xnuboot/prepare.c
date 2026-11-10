@@ -2,6 +2,9 @@
 /* Boot preparation: PAuth domain, boot-relocation capture, xnuboot_prepare, the
  * ERET window proof and per-vCPU architectural state.
  * Part of probes/xnuboot.c's translation unit, included in order; not compiled on its own. */
+#if SNAP_PLATFORM_SP11
+#include "../../compat/nv2-gate.h"
+#endif
 
 /* Build everything and program EL1. Returns 0 when the guest may be entered,
  * negative with the step identified when it may not. */
@@ -88,6 +91,15 @@ int64_t xnuboot_prepare(void)
     if (physical_hz != p->clock_host_hz || !(mmfr0 >> 60) ||
         clock_rate_init(&vcpu_of(c)->clock_rate, physical_hz, p->clock_guest_hz)) return -15;
     if(c->thermal && (physical_hz!=19200000 || thermal_admit(c)))return -28;
+#if SNAP_PLATFORM_SP11
+    /* topology_place() (compat/topology.h) refuses vCPUs that span more than one cluster unless the build has the queued
+     * service lock; a build that needs one (compat/cpu.h) and has none stops here, before the devices, the shadow or
+     * stage 2 are built. The barrier keeps it a run-time decision: folded to a constant it would let the optimizer drop
+     * everything below in such a build, and with it the code the bare SP11 compile check exists to cover. */
+    uint64_t fair_lock_missing = GUEST_CPU_NEEDS_FAIR_LOCK;
+    __asm__ volatile("" : "+r"(fair_lock_missing));
+    if (fair_lock_missing) return GUEST_CPU_STATUS_FAIR_LOCK;
+#endif
     if (p->device_count > 4 || p->mem_high <= p->mem_low) return -14;
     uint64_t panic_page=p->scratch_pa-SPTM_PANIC_PAGE_SIZE;
     if((p->scratch_pa&0x3fff) || panic_page<p->mem_low || p->scratch_pa>p->mem_high ||
@@ -311,6 +323,56 @@ static void native_pacga_restore(struct context *c, struct vcpu *v);
 static void lean_fgt_prepare(struct context *c, struct vcpu *v);
 static void lean_fgt_restore(struct context *c, struct vcpu *v);
 #endif
+#if SNAP_PLATFORM_SP11
+/* EV_OTHER pc values of a refused launch; the A16 build has none of them.
+ *   SP11_EVENT_NV2   a = NV2 verdict | slot << 32, b = MIDR_EL1, c = REVIDR_EL1
+ *   SP11_EVENT_IDS   a = ID_AA64MMFR2_EL1, b = ID_AA64MMFR4_EL1, c = status returned
+ *   SP11_EVENT_PAUTH a = PAuth verdict | slot << 32, b = ID_AA64ISAR1_EL1, c = ID_AA64ISAR2_EL1
+ * Verdict numbers are the enums of compat/nv2-gate.h and compat/oryon-idregs.h. */
+#define SP11_EVENT_NV2    0x4e56
+#define SP11_EVENT_IDS    0x4e57
+#define SP11_EVENT_PAUTH  0x5041
+
+/* The last step before this CPU writes VNCR_EL2 and sets HCR_EL2.NV and NV2.
+ * FEAT_NV2 in the ID registers is necessary and not sufficient, and nothing
+ * has yet shown that an Oryon v1 redirects EL2 register accesses to VNCR: the
+ * launch needs a functional result recorded for this very core
+ * (compat/nv2-gate.h), and a PAuth shape that compat/oryon-idregs.h
+ * recognises. Every CPU decides from its own registers, so a core that differs
+ * from the record is refused rather than assumed to match.
+ *
+ * Both verdicts are logged on a refusal, so that one refused run reports every
+ * ID register the decision used. The refusal returns to the report, which puts
+ * the host back from six values the steps below this one normally capture;
+ * those steps have not run, so they are captured here, by reads only. */
+static int64_t sp11_launch_gate(struct context *c)
+{
+    struct vcpu *v = vcpu_of(c);
+    uint64_t slot = (uint64_t)v->slot << 32;
+    uint64_t midr = id_register(0, 0), revidr = id_register(0, 6);
+    uint64_t mmfr2 = id_register(7, 2), mmfr4 = id_register(7, 4);
+    uint64_t isar1 = id_register(6, 1), isar2 = id_register(6, 2);
+    enum snap_nv2_verdict nv2 =
+        snap_nv2_gate_decide_embedded(SNAP_NV2_PLATFORM_SOC, midr, revidr, mmfr2, mmfr4);
+    enum snap_oryon_verdict pauth = snap_oryon_normalize_pauth(midr, isar1, isar2, 0, 0);
+    int64_t status;
+
+    if (nv2 == SNAP_NV2_ALLOW &&
+        (pauth == SNAP_ORYON_NORMALIZED || pauth == SNAP_ORYON_PASSTHROUGH))
+        return 0;
+    status = nv2 != SNAP_NV2_ALLOW ? snap_nv2_verdict_status(nv2) : snap_oryon_verdict_status(pauth);
+    record(c, EV_OTHER, SP11_EVENT_NV2, (uint64_t)nv2 | slot, midr, revidr);
+    record(c, EV_OTHER, SP11_EVENT_IDS, mmfr2, mmfr4, (uint64_t)status);
+    record(c, EV_OTHER, SP11_EVENT_PAUTH, (uint64_t)pauth | slot, isar1, isar2);
+    __asm__ volatile("mrs %0, mdcr_el2" : "=r"(v->save_mdcr));
+    __asm__ volatile("mrs %0, mdscr_el1" : "=r"(v->save_mdscr));
+    __asm__ volatile("mrs %0, oslsr_el1" : "=r"(v->dbg_oslsr));
+    __asm__ volatile("mrs %0, ttbr0_el1" : "=r"(v->save_ttbr0));
+    __asm__ volatile("mrs %0, ttbr1_el1" : "=r"(v->save_ttbr1));
+    __asm__ volatile("mrs %0, mair_el1" : "=r"(v->save_mair));
+    return status;
+}
+#endif
 /* Shared model/table construction runs only once above. This portion installs
  * the current CPU's own hardware state. A secondary caller must already have
  * its physical EL2 stack, TPIDR, vectors, interrupt backend and service token. */
@@ -392,6 +454,15 @@ static int64_t vcpu_arch_prepare(struct context *c)
     vcpu_of(c)->clock_saved = 1;
     __asm__ volatile("msr cntkctl_el1, xzr; isb");
 
+#if SNAP_PLATFORM_SP11
+    /* xnuboot_prepare has refused a missing VNCR page (-17) and given every vCPU
+     * its own, so the guard below always holds: every launch is gated. The
+     * "measured" in the NV2 comment above is the A16's, not the Oryon's. */
+    {
+        int64_t gate = sp11_launch_gate(c);
+        if (gate) return gate;
+    }
+#endif
     if (vcpu_of(c)->vncr_va) {
         uint64_t hcr;
         /* VNCR_EL2 by encoding: the assembler only knows the name with an
