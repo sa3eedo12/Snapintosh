@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "board": {"id": "a16", "name": "ASUS Zenbook A16 (UX3607OA)", "status": "INFERRED"},
+  "soc": {
+    "name": "X2E-96-100",
+    "family": "glymur",
+    "midr": [{"value": "0x512f0021", "mask": "0xffffffff"}]
+  },
+  "clusters": {
+    "count": null,
+    "cores_per_cluster": null,
+    "mpidr": {"affinity_mask": "0xff00ffffff", "cluster_mask": "0xff00ff0000"},
+    "mpidrs": null
+  },
+  "gic": {
+    "version": 4,
+    "gicd": {"base": "0x17000000", "size": "0x10000"},
+    "gicr": {"base": "0x17080000", "stride": "0x40000", "size": "0x480000"},
+    "its": null
+  },
+  "smmu": null,
+  "timer": {
+    "frequency_hz": 19200000,
+    "ppi": {"secure_phys": null, "phys": null, "virt": null, "hyp": 26}
+  },
+  "pcie": {"ecam": null},
+  "ranges": [
+    {"name": "dram0", "kind": "dram", "base": null, "size": null, "device": null},
+    {"name": "adreno", "kind": "mmio", "base": "0x03d00000", "size": "0xf0000", "device": "gpu"},
+    {"name": "i2c-keyboard", "kind": "mmio", "base": "0x0088c000", "size": "0x1000", "device": "keyboard"},
+    {"name": "i2c-touchpad", "kind": "mmio", "base": "0x00b80000", "size": "0x1000", "device": "touchpad"},
+    {"name": "qcc2072-bar0", "kind": "mmio", "base": "0x78000000", "size": "0x100000", "device": "wifi"},
+    {"name": "qcc2072-bar2", "kind": "mmio", "base": "0x78200000", "size": "0x1000", "device": "wifi"}
+  ],
+  "devices": {
+    "gpu": {"state": "present", "mmio": true, "ranges": ["adreno"]},
+    "gpu-gmu": {"state": "unknown", "mmio": null, "ranges": []},
+    "display": {"state": "unknown", "mmio": null, "ranges": []},
+    "uart-debug": {"state": "unknown", "mmio": null, "ranges": []},
+    "usb-host": {"state": "unknown", "mmio": null, "ranges": []},
+    "keyboard": {"state": "present", "mmio": true, "ranges": ["i2c-keyboard"]},
+    "touchpad": {"state": "present", "mmio": true, "ranges": ["i2c-touchpad"]},
+    "touchscreen": {"state": "unknown", "mmio": null, "ranges": []},
+    "wifi": {"state": "present", "mmio": true, "ranges": ["qcc2072-bar0", "qcc2072-bar2"]},
+    "nvme": {"state": "unknown", "mmio": null, "ranges": []}
+  },
+  "limits": {"ipa_bits": 36},
+  "provenance": {
+    "board": {
+      "source": "AGENTS.md:20-21; README.md:5-6",
+      "evidence": "OBSERVED",
+      "note": "Identity as the repository records it for the only supported target. The descriptor as a whole is INFERRED: every value below is transcribed from existing code and docs, none was re-measured when this file was written."
+    },
+    "soc.name": {"source": "AGENTS.md:20-21; README.md:5-6", "evidence": "OBSERVED"},
+    "soc.family": {
+      "source": "tools/a16_thermal.py:16",
+      "evidence": "INFERRED",
+      "note": "The code comment calls the MMIO map Glymur-specific; the family name is the repository's own convention for this SoC."
+    },
+    "soc.midr": {
+      "source": "docs/FEASIBILITY.md:94",
+      "evidence": "OBSERVED",
+      "note": "MIDR_EL1 0x512f0021 read with probes/run.py idregs. Only this one stepping is recorded, so the mask is exact; other steppings stay unaccepted rather than guessed."
+    },
+    "clusters.count": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "Not stated in code. The GICR window holds 18 redistributors and qualify-a16-cpu-policy.py speaks of an 18-core A16, but the split into clusters is not recorded."},
+    "clusters.cores_per_cluster": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED"},
+    "clusters.mpidr": {
+      "source": "compat/boot-relocate.h:82-83",
+      "evidence": "INFERRED",
+      "note": "BOOT_RELOCATE_AFFINITY and BOOT_RELOCATE_CLUSTER, the masks the secondary-CPU relocation compares MPIDR_EL1 under."
+    },
+    "clusters.mpidrs": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED"},
+    "gic.version": {
+      "source": "tools/probe-a16-secondary.py:52-53,136-137",
+      "evidence": "OBSERVED",
+      "note": "The code refuses to run unless the inventory reports the measured GICv4 distributor at 0x17000000, and its comment calls this a GICv4 implementation."
+    },
+    "gic.gicd": {
+      "source": "probes/secondary.c:26; tools/a16_thermal.py:18-19",
+      "evidence": "INFERRED",
+      "note": "The base is the surveyed fingerprint value. The 0x10000 size is the architected 64 KiB distributor frame, not a value the code states."
+    },
+    "gic.gicr": {
+      "source": "compat/boot-relocate.h:84-86; probes/secondary.c:27-29; probes/xnuboot/cpu_boot.c:45",
+      "evidence": "OBSERVED",
+      "note": "First 0x17080000, end 0x17500000, stride 0x40000: 18 redistributors, as the secondary-CPU path validates them at run time."
+    },
+    "gic.its": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "No ITS frame is recorded in code."},
+    "timer.frequency_hz": {
+      "source": "tools/a16_thermal.py:18; probes/xnuboot.py:147; probes/xnuboot/prepare.c:93",
+      "evidence": "OBSERVED"
+    },
+    "timer.ppi": {
+      "source": "probes/secondary.c:30; compat/fast-timer-irq.h:2",
+      "evidence": "OBSERVED",
+      "note": "Only the EL2 hypervisor timer, INTID 26, is recorded; the other three stay null."
+    },
+    "pcie.ecam": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "compat/qcc2072-wifi.h:59 records one endpoint's configuration page, not the ECAM window or its bus range."},
+    "limits.ipa_bits": {
+      "source": "probes/xnuboot/stage2.c:20",
+      "evidence": "VERIFIED",
+      "note": "S2_TXSZ 28u is a 36-bit intermediate physical address space, a property of this monitor, read from its source."
+    },
+    "smmu": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "The GPU SMMU at 0x03da0000 (compat/adreno.h:69) lies inside the adreno window and has no separate size; the PCIe SMMU base is not recorded."},
+    "ranges.dram0": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "No A16 DRAM map is recorded in code."},
+    "ranges.adreno": {
+      "source": "compat/adreno.h:38,44",
+      "evidence": "INFERRED",
+      "note": "ADRENO_PA to ADRENO_END. The window includes the GPU SMMU frames."
+    },
+    "ranges.i2c-keyboard": {"source": "compat/i2c-input.h:32,34", "evidence": "INFERRED", "note": "One 4 KiB controller page; the header cites the A16 DSDT and glymur.dtsi."},
+    "ranges.i2c-touchpad": {"source": "compat/i2c-input.h:33-34", "evidence": "INFERRED", "note": "One 4 KiB controller page; the header cites the A16 DSDT and glymur.dtsi."},
+    "ranges.qcc2072-bar0": {"source": "compat/qcc2072-wifi.h:55-56", "evidence": "OBSERVED", "note": "The endpoint as UEFI leaves it, per the header's hardware note."},
+    "ranges.qcc2072-bar2": {"source": "compat/qcc2072-wifi.h:57-58", "evidence": "OBSERVED"},
+    "devices.gpu": {"source": "compat/adreno.h:38,44", "evidence": "OBSERVED", "note": "The monitor already mediates this window."},
+    "devices.gpu-gmu": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED"},
+    "devices.display": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "compat/dpu-intf.h:20 gives the MDSS base but no size, so no range is claimed."},
+    "devices.uart-debug": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED"},
+    "devices.usb-host": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED"},
+    "devices.keyboard": {"source": "compat/i2c-input.h:32", "evidence": "INFERRED"},
+    "devices.touchpad": {"source": "compat/i2c-input.h:33", "evidence": "INFERRED"},
+    "devices.touchscreen": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED"},
+    "devices.wifi": {"source": "compat/qcc2072-wifi.h:55-58", "evidence": "OBSERVED"},
+    "devices.nvme": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED"}
+  }
+}

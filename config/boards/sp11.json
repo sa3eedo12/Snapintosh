@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "board": {"id": "sp11", "name": "Microsoft Surface Pro 11th Edition (Snapdragon X Elite)", "status": "UNIMPLEMENTED"},
+  "soc": {
+    "name": "X1E80100",
+    "family": "hamoa",
+    "midr": null
+  },
+  "clusters": {
+    "count": 3,
+    "cores_per_cluster": 4,
+    "mpidr": {"affinity_mask": "0xff00ffffff", "cluster_mask": "0xff0000"},
+    "mpidrs": [
+      "0x0", "0x100", "0x200", "0x300",
+      "0x10000", "0x10100", "0x10200", "0x10300",
+      "0x20000", "0x20100", "0x20200", "0x20300"
+    ]
+  },
+  "gic": {
+    "version": null,
+    "gicd": {"base": "0x17000000", "size": "0x10000"},
+    "gicr": {"base": "0x17080000", "stride": "0x40000", "size": "0x300000"},
+    "its": {"present": true, "base": "0x17040000", "size": "0x40000"}
+  },
+  "smmu": [
+    {"name": "apps-smmu", "kind": "mmu-500", "base": "0x15000000", "size": "0x100000"},
+    {"name": "pcie-smmu", "kind": "smmu-v3", "base": "0x15400000", "size": "0x80000"},
+    {"name": "adreno-smmu", "kind": "mmu-500", "base": "0x03da0000", "size": "0x40000"}
+  ],
+  "timer": {
+    "frequency_hz": null,
+    "ppi": {"secure_phys": 29, "phys": 30, "virt": 27, "hyp": 26}
+  },
+  "pcie": {"ecam": null},
+  "ranges": [
+    {"name": "dram0", "kind": "dram", "base": null, "size": null, "device": null},
+    {"name": "gpu-regs", "kind": "mmio", "base": "0x03d00000", "size": "0x40000", "device": "gpu"},
+    {"name": "gpu-gmu", "kind": "mmio", "base": "0x03d6a000", "size": "0x35000", "device": "gpu-gmu"},
+    {"name": "mdss-top", "kind": "mmio", "base": "0x0ae00000", "size": "0x1000", "device": "display"},
+    {"name": "usb-1-ss0", "kind": "mmio", "base": "0x0a600000", "size": "0xfd000", "device": "usb-host"},
+    {"name": "usb-1-ss1", "kind": "mmio", "base": "0x0a800000", "size": "0xfd000", "device": "usb-host"}
+  ],
+  "devices": {
+    "gpu": {"state": "present", "mmio": true, "ranges": ["gpu-regs"]},
+    "gpu-gmu": {"state": "present", "mmio": true, "ranges": ["gpu-gmu"]},
+    "display": {"state": "present", "mmio": true, "ranges": ["mdss-top"]},
+    "uart-debug": {"state": "unknown", "mmio": null, "ranges": []},
+    "usb-host": {"state": "present", "mmio": true, "ranges": ["usb-1-ss0", "usb-1-ss1"]},
+    "keyboard": {"state": "unknown", "mmio": null, "ranges": []},
+    "touchpad": {"state": "unknown", "mmio": null, "ranges": []},
+    "touchscreen": {"state": "unknown", "mmio": null, "ranges": []},
+    "wifi": {"state": "present", "mmio": false, "ranges": []},
+    "nvme": {"state": "unknown", "mmio": null, "ranges": []}
+  },
+  "limits": {"ipa_bits": 36},
+  "provenance": {
+    "board": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/x1e80100-microsoft-denali-oled.dts:12-14",
+      "evidence": "INFERRED",
+      "note": "Model string and compatible of the Surface Pro 11th Edition device tree. This file is a template: board.status stays UNIMPLEMENTED until the X2 probe has measured the values marked UNKNOWN and an operator promotes it."
+    },
+    "soc.name": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/x1e80100-microsoft-denali-oled.dts:13-14 (compatible qcom,x1e80100)",
+      "evidence": "INFERRED"
+    },
+    "soc.family": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi (the shared X1E80100 SoC file; the name is the upstream codename)",
+      "evidence": "INFERRED"
+    },
+    "soc.midr": {
+      "source": "UNKNOWN",
+      "evidence": "UNIMPLEMENTED",
+      "note": "MIDR_EL1 and REVIDR_EL1 are for the X2 probe to measure; a value is not guessed. Lead only: the pinned Linux arch/arm64/include/asm/cputype.h:134 names an Oryon X1 part number, which the measurement should be compared with."
+    },
+    "clusters.count": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:221-275 (cpu-map: cluster0, cluster1, cluster2)",
+      "evidence": "INFERRED"
+    },
+    "clusters.cores_per_cluster": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:221-275 (cpu-map: core0 to core3 in each cluster)",
+      "evidence": "INFERRED"
+    },
+    "clusters.mpidr": {
+      "source": "Arm Architecture Reference Manual for A-profile (DDI 0487), MPIDR_EL1 affinity fields; Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:74-213 (cpu reg values differ only in Aff1 and Aff2)",
+      "evidence": "INFERRED",
+      "note": "The cluster mask is Aff2 because that is the field that separates the three clusters in the device tree."
+    },
+    "clusters.mpidrs": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:74,91,102,113,124,141,152,163,174,191,202,213 (cpu reg properties)",
+      "evidence": "INFERRED"
+    },
+    "gic.version": {
+      "source": "UNKNOWN",
+      "evidence": "UNIMPLEMENTED",
+      "note": "hamoa.dtsi:8559 says arm,gic-v3, which does not separate GICv3 from GICv4. The ACPI MADT GICD version field or GICD_PIDR2 measured at X2 decides; an unknown version makes the Hamoa ACPI cross-check refuse."
+    },
+    "gic.gicd": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:8558-8560",
+      "evidence": "INFERRED"
+    },
+    "gic.gicr": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:8561,8568-8569 (size 0x300000 is 12 redistributors of the 0x40000 stride, as the node's GICR * 12 comment says)",
+      "evidence": "INFERRED"
+    },
+    "gic.its": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:8575-8581 (msi-controller@17040000, arm,gic-v3-its)",
+      "evidence": "INFERRED"
+    },
+    "timer.frequency_hz": {
+      "source": "UNKNOWN",
+      "evidence": "UNIMPLEMENTED",
+      "note": "The device tree carries no timer frequency (hamoa.dtsi:9114-9121); CNTFRQ_EL0 is measured at X2."
+    },
+    "timer.ppi": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:9114-9121 (GIC_PPI 13, 14, 11, 10 as secure physical, physical, virtual, hypervisor; INTID is 16 plus the PPI number per the GIC architecture)",
+      "evidence": "INFERRED"
+    },
+    "pcie.ecam": {
+      "source": "UNKNOWN",
+      "evidence": "UNIMPLEMENTED",
+      "note": "hamoa.dtsi:3714-3728 describes the PCIe controller by parf/dbi/elbi/atu/config windows, which are not a MCFG allocation. The ACPI MCFG measured at X2 decides."
+    },
+    "limits.ipa_bits": {
+      "source": "probes/xnuboot/stage2.c:20",
+      "evidence": "VERIFIED",
+      "note": "S2_TXSZ 28u is a 36-bit intermediate physical address space, a property of this monitor rather than of the board. Whether the SP11 PARange covers it is measured at X2."
+    },
+    "smmu.apps-smmu": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:8436-8438 (arm,mmu-500)",
+      "evidence": "INFERRED"
+    },
+    "smmu.pcie-smmu": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:8544-8546 (arm,smmu-v3)",
+      "evidence": "INFERRED"
+    },
+    "smmu.adreno-smmu": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:4236-4239 (arm,mmu-500)",
+      "evidence": "INFERRED"
+    },
+    "ranges.dram0": {
+      "source": "UNKNOWN",
+      "evidence": "UNIMPLEMENTED",
+      "note": "The real DRAM map comes from the X2 UEFI memory map."
+    },
+    "ranges.gpu-regs": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:4014-4016 (first reg of the gpu node)",
+      "evidence": "INFERRED"
+    },
+    "ranges.gpu-gmu": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:4173-4175 (first reg of the gmu node)",
+      "evidence": "INFERRED"
+    },
+    "ranges.mdss-top": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:5553-5555 (the mdss reg, which is only the top-level block, not the whole display engine)",
+      "evidence": "INFERRED"
+    },
+    "ranges.usb-1-ss0": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:5254-5256 (usb_1_ss0 reg 0x0a600000 size 0xfc100, rounded up to a page multiple for schema v1)",
+      "evidence": "INFERRED",
+      "note": "Enabled by Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi:1364-1367 (dr_mode host). The glue block (offset 0xf8800) is inside the window. Not measured on a unit."
+    },
+    "ranges.usb-1-ss1": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:5345-5347 (usb_1_ss1 reg 0x0a800000 size 0xfc100, rounded up to a page multiple for schema v1)",
+      "evidence": "INFERRED",
+      "note": "Enabled by Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi:1394-1397 (dr_mode host). The glue block (offset 0xf8800) is inside the window. Not measured on a unit."
+    },
+    "devices.gpu": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi:769-771 (&gpu enabled); hamoa.dtsi:4014-4016",
+      "evidence": "INFERRED"
+    },
+    "devices.gpu-gmu": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:4173-4175 (the gmu node carries no disabled status); x1-microsoft-denali.dtsi:769-771 enables the GPU it serves",
+      "evidence": "INFERRED"
+    },
+    "devices.display": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi:923-925 (&mdss enabled); hamoa.dtsi:5553-5555",
+      "evidence": "INFERRED"
+    },
+    "devices.uart-debug": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "The Denali tree enables uart2 for the embedded controller and uart14 for Bluetooth; neither is shown to be a debug console."},
+    "devices.usb-host": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi:1364-1367,1394-1397 (usb_1_ss0 and usb_1_ss1 enabled, dr_mode host); Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/hamoa.dtsi:5256,5347",
+      "evidence": "INFERRED",
+      "note": "Two host controllers reach the two Left-side USB-C connectors through PMIC-GLINK (x1-microsoft-denali.dtsi:53-135). Whether either enumerates a Mac gadget is an X3 measurement."
+    },
+    "devices.keyboard": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "The pinned Denali tree describes no keyboard transport."},
+    "devices.touchpad": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "The pinned Denali tree describes no touchpad transport."},
+    "devices.touchscreen": {"source": "UNKNOWN", "evidence": "UNIMPLEMENTED", "note": "The pinned Denali tree describes no touch or pen transport."},
+    "devices.wifi": {
+      "source": "Linux 7475ea8b58616b33c04afb976cf0fbaad9dd63fb arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi:998-1001 (wifi@0 under pcie4_port0, compatible pci17cb,1107)",
+      "evidence": "INFERRED",
+      "note": "A PCIe endpoint named only by its PCI vendor and device id, so no fixed MMIO window is listed. Presence here does not imply that any existing driver applies."
+    },
+    "devices.nvme": {
+      "source": "UNKNOWN",
+      "evidence": "UNIMPLEMENTED",
+      "note": "x1-microsoft-denali.dtsi:264-276 and 1015-1022 enable pcie6a with a VREG_NVME_3P3 supply, but no storage endpoint is described."
+    }
+  }
+}
