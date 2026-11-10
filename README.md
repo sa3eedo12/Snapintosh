@@ -235,3 +235,6 @@ Snapintosh builds on the published work of others:
 | [docs/SP11-DISPLAY-STUDY.md](docs/SP11-DISPLAY-STUDY.md) | reusing the firmware display pipeline on the Surface Pro 11, and the X2 display read list |
 | [docs/SP11-GPU-A7XX-STUDY.md](docs/SP11-GPU-A7XX-STUDY.md) | the a8xx-to-a7xx GPU delta for the Surface Pro 11, with the ownership and cutover plan |
 | [docs/SP11-INPUT-STUDY.md](docs/SP11-INPUT-STUDY.md) | how the Surface Pro 11 keyboard, touchpad, touchscreen and pen reach the SoC, the UART2 spike plan and the native-versus-forwarded decision |
+| [docs/SP11-WIFI-STUDY.md](docs/SP11-WIFI-STUDY.md) | the Surface Pro 11 Wi-Fi stretch goal: a WCN7850-class module (not the A16's QCC2072), the hand-off survey, what carries over, firmware and board data, safety and gate X12 |
+| [docs/SP11-120HZ-STUDY.md](docs/SP11-120HZ-STUDY.md) | the Surface Pro 11 OLED's 120 Hz mode as a stretch goal: public record, EDID decoding, link budget, gate X13 |
+| [docs/SP11-UNIXNU-STUDY.md](docs/SP11-UNIXNU-STUDY.md) | the public UniXNU project as evidence for, and an alternative route to, the Surface Pro 11 plan (decision D4, kill criteria K1 and K2); its evidence table is [docs/SP11-UNIXNU-EVIDENCE.md](docs/SP11-UNIXNU-EVIDENCE.md) |

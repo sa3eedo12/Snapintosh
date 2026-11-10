@@ -277,6 +277,13 @@ python3 tools/test-display-pipeline-check.py    # display pipeline decision: sce
 python3 tools/test-display-pipeline-check-mutants.py  # its seeded bugs
 python3 tools/test-sp11-display-mode.py         # GOP/EDID mode validation and its seeded bugs
 python3 tools/test-sp11-display-study.py        # the display study's citations
+python3 tools/test-sp11-display-120hz.py        # 120 Hz tools: EDID extension decoding, link-budget model, subcommands, hand-built EDIDs
+python3 tools/test-sp11-display-120hz-mutants.py  # its seeded bugs (about 2 minutes)
+python3 tools/test-sp11-120hz-study.py          # the 120 Hz study's citations, tables and structure
+python3 tools/test-sp11-wifi-board.py           # the ath12k board-container reader: synthetic and deliberately malformed containers; no inputs
+python3 tools/test-sp11-wifi-study.py           # the Wi-Fi study's structure, labels, pins, numbers and this repository's citations
+python3 tools/test-sp11-wifi-unixnu.py          # the Wi-Fi study's UniXNU comparison (section 11): pins, ten-layer table, licence statements, Appendix B
+python3 tools/test-sp11-unixnu-study.py         # the UniXNU survey: labels, pins, citations, stance, size (pinned checks need SP11_UNIXNU_REF)
 python3 tools/test-sam-frames.py                # Surface Aggregator frame codec: vectors, negative tests, fuzz, seeded bugs
 python3 tools/test-monitor-hardening.py         # SP11 monitor: the SSD adoption refusal (-145), GUEST_CPU_COUNT rules, the vCPU launch refusal (-146); needs clang, llvm-nm and ../q1n1 for the object checks
 python3 tools/test-sp11-integration.py          # the units together: status bands, the 1<<36 boundary, cites, dump names, thermal, wiring
@@ -291,7 +298,33 @@ without it):
   commit. A partial set can make the descriptor test error rather than skip, so
   populate every file a test names, or none.
 - `SP11_LINUX_TREE=<checkout>` adds the Linux citation checks of
-  `tools/test-sp11-display-study.py`.
+  `tools/test-sp11-display-study.py`, `tools/test-sp11-120hz-study.py`,
+  `tools/test-sp11-wifi-study.py` and `tools/test-sp11-unixnu-study.py` (the
+  last one reads only the plan's pinned `x1-el2.dtso`), the video-code table
+  comparison of `tools/test-sp11-display-120hz.py`, and the PHY-table
+  comparison of `tools/test-sp11-wifi-unixnu.py`. The Wi-Fi test needs every
+  file its study's section 1 names at the pinned commit; once the variable is
+  set, a missing or different file fails instead of skipping.
+- `SP11_EDID_DECODE_TREE=<v4l-utils checkout>` adds the edid-decode pins of
+  `tools/test-sp11-120hz-study.py`.
+- `SP11_WIFI_BOARD_DIR=<dir>` holds `wcn7850-board-2.bin` and
+  `qcc2072-board-2.bin`, copies of `ath12k/WCN7850/hw2.0/board-2.bin` and
+  `ath12k/QCC2072/hw1.0/board-2.bin` from linux-firmware at the commit of
+  [SP11-WIFI-STUDY.md](SP11-WIFI-STUDY.md) section 1 (never committed; their
+  size and SHA-256 are compared first). It adds the container checks.
+- `SP11_SNAPQCC2072_TREE=<checkout>` is SnapQCC2072 at the commit of that
+  study's Appendix A. It adds the file census and its citations.
+- `SP11_UNIXNU_REF=<dir>` holds one checkout per pinned UniXNU repository
+  (`UniXNU`, `UniXNU-sheng`, `Ath12kWifi` and the others the studies name;
+  real clones at the pinned commits, because `tools/test-sp11-unixnu-study.py`
+  runs `git rev-parse` and `git ls-files` in them), `linux-v7.0.14` (the four
+  files of the Ath12kWifi lock listed in the Wi-Fi study's section 1) and
+  `wpa_supplicant-2.12` (`COPYING` and `README`). It adds the citation,
+  catalog-count, size, licence and copy checks of
+  `tools/test-sp11-unixnu-study.py` and the checks of
+  `tools/test-sp11-wifi-unixnu.py` that read the files (that test never runs
+  git, and fails instead of skipping when the directory is set but
+  incomplete).
 - `Q1N1_DIR`, `Q1N1_SP11_DIR` (a q1n1 checkout carrying the patch) and
   `build/refs/` make `tools/test-sp11-usb-ports.py` a full run.
 - `SNAPMAC_PLAN_BASELINE=<pristine tools/snapmac-partition-plan.py>` adds a live

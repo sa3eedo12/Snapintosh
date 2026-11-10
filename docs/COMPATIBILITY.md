@@ -246,3 +246,16 @@ the plan.
   the GPU, the display and the two USB host controller windows, and refuses to
   be called boot-ready while MIDR, GIC version, timer, ECAM, the DRAM map and the
   states of the keyboard, touchpad, touchscreen, NVMe and debug UART are unknown.
+- **Wi-Fi (stretch).** The A16's `compat/qcc2072-wifi.h` contract and the
+  SnapQCC2072 driver serve the QCC2072. The Surface Pro 11's module is
+  WCN7850-class (`pci17cb,1107`; VERIFIED in the public device tree, INFERRED
+  for the unit), and upstream Linux treats the two as siblings with different
+  HAL register tables, PCI window registers and firmware, so no A16 Wi-Fi code
+  is assumed to apply. A public project (UniXNU) runs Linux's ath12k on XNU for
+  this chip, on SM8550 tablets under iPadOS builds; the study compares it as a
+  reference and does not adopt it. Nothing in the A16 build changes
+  ([SP11-WIFI-STUDY.md](SP11-WIFI-STUDY.md)).
+- **120 Hz (stretch).** 120 Hz on the SP11 OLED is a stretch goal that reuses
+  the A16's guest-side 120 Hz item; only the panel timing facts and the EL2
+  mode switch are SP11-specific (UNIMPLEMENTED,
+  [SP11-120HZ-STUDY.md](SP11-120HZ-STUDY.md)).
