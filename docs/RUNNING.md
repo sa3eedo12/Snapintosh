@@ -156,7 +156,9 @@ the thermal admission of `tools/hamoa_thermal.py`, and the single-hardware-clien
 `no SP11 <flow> flow implemented`. DVFS, DDR, LLCC and bandwidth-probe options are refused for `sp11` in every mode.
 
 The authorizations of [SURFACE-PRO-11.md section 8](SURFACE-PRO-11.md#8-hardware-safety-and-authorization) are
-checked in two layers. The standing ones are booleans under `sp11.authorizations`. The two that touch NVMe,
+checked in two layers. The standing ones are booleans under `sp11.authorizations`; `disable_secure_boot` and
+`suspend_bitlocker` are permissions that the target-I/O and code-load modes require, not instructions (way A of
+[SURFACE-PRO-11.md section 8.1](SURFACE-PRO-11.md#81-secure-boot-and-bitlocker) never suspends BitLocker). The two that touch NVMe,
 `enable_nvme_window_writes` and `cycle_mode_may_write_nvme`, are per run: the three modes that run a guest with writable
 storage (`launch --boot`, `launch --boot-child` and `installed-fresh --boot`) need the standing booleans and also
 `sp11.run_authorization`, which holds the two per-run booleans again plus `recorded_utc`, `run_prefix` and the
@@ -441,6 +443,30 @@ has identified. Disabling Secure Boot, suspending BitLocker and using
 `tcblaunch.exe` need the authorizations of
 [SURFACE-PRO-11.md section 8](SURFACE-PRO-11.md#8-hardware-safety-and-authorization).
 
+**Before you start** (owner decisions of 2026-11-10, recorded as N7 in
+[SURFACE-PRO-11.md](SURFACE-PRO-11.md#11-items-from-the-unit)): store the
+BitLocker recovery key off the device. The full SSD backup is waived for X1 to
+X3, which boot from the stick and write nothing to the internal disk, and is
+required again before X6. Windows recovery media are not needed for X1 and X2;
+they are needed before X3 and before X6, and they reinstall or repair Windows
+rather than restore data.
+
+**What you need.** A USB stick of 1 GB or more (the staged tree is a few MB,
+and step 4 erases everything on the stick), with a USB-C plug or an adapter,
+formatted FAT32 with an MBR scheme (step 4 does it). Also a Type Cover or a USB
+keyboard: the stick has no `startup.nsh` (`tools/stage-sp11-boot-media.py
+verify` fails a tree that contains one), so you type every command at the
+firmware shell yourself. That the firmware passes either keyboard to the shell
+is INFERRED. The staged tree holds:
+
+| Path on the stick | What it is |
+| --- | --- |
+| `EFI/BOOT/BOOTAA64.EFI` | The pinned aarch64 UEFI Shell (1.1 MB), the path the firmware boots from removable media |
+| `SP11/SLBOUNCE.EFI`, `SP11/SLTEST.EFI` | slbounce and its self-test |
+| `SP11/PROBE.EFI` | The EL2 probe, present only if it was supplied when staging |
+| `SP11/TCBLAUNCH.EXE` and `TCBLAUNCH.EXE` at the volume root | Your own `tcblaunch.exe`, and the automatic copy that slbounce's driver needs at the root; keep both |
+| `SP11/MANIFEST.SHA256`, `SP11/README.TXT` | The checksum list of every file above and the commands to type |
+
 1. Build the inputs on a Mac host: `sh tools/build-slbounce.sh` in q1n1 (it
    builds the pinned slbounce commit with `SLBOUNCE_ALWAYS_SWITCH=1 DEBUG=1`), the
    pinned UEFI shell asset named in `tools/sp11-boot-media-pins.json`, and
@@ -466,14 +492,35 @@ has identified. Disabling Secure Boot, suspending BitLocker and using
 5. Copy the staged tree onto the mounted volume, then verify it from the
    volume's root: `cd /Volumes/SP11BOOT && shasum -a 256 -c SP11/MANIFEST.SHA256`.
    Every line must say OK; otherwise redo the copy.
-6. Eject with `diskutil eject /dev/diskN`. In the target machine's firmware
-   setup turn Secure Boot off (neither the shell nor slbounce is
-   Microsoft-signed) and boot from the stick. The operator may run X1 with the
-   internal SSD removed (INFERRED; see
-   [SURFACE-PRO-11.md section 1.5](SURFACE-PRO-11.md#15-how-the-units-disk-was-read)).
+6. Eject with `diskutil eject /dev/diskN`. Prepare Secure Boot and BitLocker as
+   chosen at X0 ([SURFACE-PRO-11.md section 8.1](SURFACE-PRO-11.md#81-secure-boot-and-bitlocker);
+   INFERRED from public documentation, none of it tried on this unit), with the
+   recovery key to hand. In the firmware setup turn Secure Boot off (neither the
+   shell nor slbounce is Microsoft-signed, and the slbounce README calls turning
+   it off mandatory; the menu path is read off the unit, not assumed), and boot
+   from the stick.
+   * Way A, the default for bring-up: leave BitLocker alone. Do not boot
+     Windows while Secure Boot is off, and turn it back on in the firmware
+     setup before the next Windows boot. A Windows boot made by accident in
+     between only asks for the recovery key.
+   * Way B, Secure Boot permanently off: from Windows, in an elevated prompt,
+     run `manage-bde -protectors -disable C:`, turn Secure Boot off, boot
+     Windows once so that it re-seals, then run
+     `manage-bde -protectors -enable C:`. A firmware update, or a boot order
+     that tries another entry first, can prompt again, and a managed-device
+     policy may require Secure Boot or BitLocker.
+   * Or keep the Windows SSD out of the run: the internal SSD physically
+     removed (INFERRED; see
+     [SURFACE-PRO-11.md section 1.5](SURFACE-PRO-11.md#15-how-the-units-disk-was-read))
+     or a spare 2230 SSD. The X2 tests T06 and T07 read less without an SSD.
 7. Follow `SP11\README.TXT` on the stick: run `SLTEST.EFI` first (a green line
    means the EL2 switch worked), and `SLBOUNCE.EFI` only after a confirmed-good
    self-test.
+
+After every run, power the machine off and remove the stick to return to the
+normal boot order. With way A, turn Secure Boot back on in the firmware setup
+before Windows boots; with the SSD removed, do that before the SSD goes back
+in.
 
 ## Running the EFI probe and the X2 tests
 
@@ -526,7 +573,9 @@ preparation; read [SP11-X2-TESTS.md](SP11-X2-TESTS.md) first, and never run the
 `model`, `model-fatal` or `model-fatal-pre` builds on the unit. It writes the NV2
 record next to the probe's dump; `python3 tools/nv2_record.py ingest` turns it
 into the record the SP11 monitor embeds. One hardware client at a time, and AC
-power. Photograph every page, and record these rows besides the verdicts:
+power. Say whether the internal SSD was installed: T06 and T07 are meant to read
+the NVMe and PCIe SMMU state with one present, and the NVMe half of T06 reads
+nothing without it. Photograph every page, and record these rows besides the verdicts:
 
 | Where | What to record | What it means |
 | --- | --- | --- |
