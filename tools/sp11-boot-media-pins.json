@@ -1,0 +1,38 @@
+{
+  "_comment": "SPDX-License-Identifier: MIT -- read by tools/stage-sp11-boot-media.py. Only 'shell' is enforced (hard refusal on mismatch): it is the one public, externally-pinned binary. The *_reference entries are informational only (advisory, never refused) because slbounce/sltest are local, toolchain-dependent builds from source; see REPORT.md for why. tcblaunch.exe is deliberately absent: which build works on SP11 is unknown until hardware bring-up, so no hash expectation is recorded for it.",
+  "shell": {
+    "role": "aarch64 UEFI Shell staged at EFI/BOOT/BOOTAA64.EFI",
+    "source": "https://github.com/pbatard/UEFI-Shell",
+    "tag": "26H2",
+    "asset": "shellaa64.efi",
+    "url": "https://github.com/pbatard/UEFI-Shell/releases/download/26H2/shellaa64.efi",
+    "size": 1105920,
+    "sha256": "ce22900f22bce4e31edc26adc7bdb7608ece852d24370a9cf4095e4a2be5aa9e",
+    "license": "BSD-2-Clause-Patent",
+    "license_source": "https://raw.githubusercontent.com/pbatard/UEFI-Shell/main/License.txt",
+    "signed_for_secure_boot": false,
+    "notes": "Not Microsoft-signed; operator must disable Secure Boot (plan docs/SURFACE-PRO-11.md section 8). Built from public edk2-stable202608 by the project's GitHub Actions workflow; OBSERVED booting in QEMU+EDK2 on this host (see REPORT.md Validation)."
+  },
+  "slbounce_reference": {
+    "role": "slbounce EFI runtime driver, local build staged at SP11/SLBOUNCE.EFI",
+    "source": "https://github.com/TravMurav/slbounce",
+    "commit": "c090a8cdafa25e4c99df90f8d6f73f3805d9b397",
+    "build_flags": "SLBOUNCE_ALWAYS_SWITCH=1 DEBUG=1 CROSS_COMPILE=aarch64-elf-",
+    "sha256": "c78b69fd876005cfa4b760c8a063990425deb490ecf2a323e89bfcf42e1f4803",
+    "size": 105760,
+    "license": "BSD-3-Clause",
+    "enforcement": "advisory only -- tools/stage-sp11-boot-media.py never refuses on mismatch here",
+    "notes": "Reproduced identically on this host across a clean rebuild and a build from a different absolute path; a toolchain change is expected to change this hash, which is why it is not a hard pin."
+  },
+  "sltest_reference": {
+    "role": "slbounce self-test EFI application, local build staged at SP11/SLTEST.EFI",
+    "source": "https://github.com/TravMurav/slbounce",
+    "commit": "c090a8cdafa25e4c99df90f8d6f73f3805d9b397",
+    "build_flags": "SLBOUNCE_ALWAYS_SWITCH=1 DEBUG=1 CROSS_COMPILE=aarch64-elf- (flag has no effect on this binary)",
+    "sha256": "54448d24e4fb15a58397389d4ad67c28fdc876f7132db40e5f935067e9b7b694",
+    "size": 66448,
+    "license": "BSD-3-Clause",
+    "enforcement": "advisory only -- tools/stage-sp11-boot-media.py never refuses on mismatch here",
+    "notes": "Byte-identical with or without SLBOUNCE_ALWAYS_SWITCH=1 (src/test_main.c does not read that macro); same commit as slbounce_reference."
+  }
+}
