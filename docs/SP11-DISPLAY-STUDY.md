@@ -170,9 +170,14 @@ fixtures only, and a test proves the tool's source names neither.
 
 **A note on 120 Hz (INFERRED).** A detailed timing descriptor holds a 16-bit pixel clock in 10 kHz units, at most
 655.35 MHz. A 2880x1920 mode at 120 Hz needs about 692 MHz at modest blanking (120 x 2960 x 1950), so a 120 Hz timing
-cannot sit in a base-block descriptor. If the panel's EDID carries one, it is in another block type that
-`sp11_display_mode.py` reports but does not decode (section 6). The preferred base-block timing and the GOP size are
-what the tool compares, and size is independent of refresh rate.
+cannot sit in a base-block descriptor. If the panel's EDID carries one, it is in another block type, a CTA-861 or
+DisplayID extension, which the `modes` subcommand of `sp11_display_mode.py` decodes and lists (section 6) but the `--gop`
+verdict does not use. The preferred base-block timing and the GOP size are what the `--gop` flow compares, and size is
+independent of refresh rate.
+
+The 120 Hz question has its own study, [SP11-120HZ-STUDY.md](SP11-120HZ-STUDY.md): even with zero blanking a 2880x1920
+120 Hz timing exceeds the 18-byte descriptor, and `tools/sp11_display_mode.py modes` decodes the extension blocks that
+can carry it.
 
 **Proposed text for the coordinator** is in the report (section "PROPOSED SHARED-DOC TEXT"); this study edits no
 shared document.
@@ -282,13 +287,17 @@ python3 tools/sp11_display_mode.py --gop gop.json --expect-size WxH        # an 
   extension count in byte 126 equal to the blocks given; a manufacturer id of three letters; the four base-block
   descriptors (a timing needs a non-zero pixel clock, a non-empty active area, sync and front porch inside blanking, a
   refresh rate between 20 and 500 Hz; a display descriptor must have its reserved byte clear); CTA-861 extensions with a
-  valid timing offset, tiling data blocks and valid timings. Other extension types are checksummed and reported, not
-  decoded. The preferred timing is the first descriptor if byte 24 bit 1 declares it.
+  valid timing offset, tiling data blocks and valid timings. Since the 120 Hz tools (`tools/sp11_edid_ext.py`,
+  [SP11-120HZ-STUDY.md](SP11-120HZ-STUDY.md) section 3) the CTA-861 video data blocks, the DisplayID 1.x Type I and
+  2.x Type VII timings and the 0xFD range-limits descriptor are decoded too. In the `--gop` flow they only add
+  information: a malformed one is listed under `edid.partial` and never changes the verdict; only the `modes`
+  subcommand refuses it. Other extension types are checksummed and reported as partial, not decoded. The preferred
+  timing is the first descriptor if byte 24 bit 1 declares it.
 - **Verdict**: ACCEPT only if everything is well formed and, when an EDID is given, it declares a preferred timing that
   is not interlaced and whose active size equals the GOP size. An EDID that cannot confirm the GOP is REJECT, not a
   shrug. With no EDID the verdict is ACCEPT with a warning that the panel has not confirmed the mode.
 - VERIFIED by test: two literal public timings (CTA-861 VIC 16 1080p60 and VIC 4 720p60) decode to their published
-  parameters; an independent encoder round-trips every bit field; 26 seeded bugs are caught.
+  parameters; an independent encoder round-trips every bit field; 31 seeded bugs are caught.
 
 ## 7. Backlight
 
@@ -429,7 +438,7 @@ any interrupt-status register stay off the list until section 9 says what makes 
 | DP controller link state (`MAINLINK_CTRL`, `STATE_CTRL`) and PHY lock | Needs extra clock gates first and PHY status semantics | Public status-register semantics plus the DPTX3 link CBCRs as gates |
 | `INTF_MUX`, SSPP source address, mixer state | Firmware's use unknown | A read-only X5 study |
 | The panel's DPCD brightness capability and EDID | AUX belongs to the firmware | The EDID protocol dump at S0; DPCD only at a later, authorized gate |
-| Which block holds a 120 Hz timing | A base-block descriptor cannot (section 4) | The dumped EDID |
+| Which block holds a 120 Hz timing | A base-block descriptor cannot (section 4) | The dumped EDID, read with `sp11_display_mode.py modes` ([SP11-120HZ-STUDY.md](SP11-120HZ-STUDY.md) section 3) |
 | Whether the firmware's mode is 2880x1920 | Product spec is public, the unit's GOP is not | S0 and `tools/sp11_display_mode.py` |
 | Burn-in on a static OLED page | The probe's pages dwell 12 s each | Nothing in this study changes it; `probes/fbconsole.py` has the anti-burn-in grid |
 
@@ -438,12 +447,15 @@ any interrupt-status register stay off the list until section 9 says what makes 
 ```sh
 python3 tools/test-display-pipeline-check.py          # about 3 s: scenarios, properties, writer, doc cross-check
 python3 tools/test-display-pipeline-check-mutants.py  # about 40 s: 41 seeded bugs, each must be caught
-python3 tools/test-sp11-display-mode.py               # about 20 s including its 26-bug mutation check
+python3 tools/test-sp11-display-mode.py               # about 20 s including its 31-bug mutation check
 python3 tools/test-sp11-display-study.py              # under 1 s: the A16 citations and the study's structure
 SP11_LINUX_TREE=<checkout> python3 tools/test-sp11-display-study.py   # also the Linux citations and SHA-256 pins
+python3 tools/test-sp11-display-120hz.py              # a few s: the 120 Hz tools (EDID extension decoding, link budget, subcommands)
+python3 tools/test-sp11-display-120hz-mutants.py      # about 2 min: its seeded bugs, each must be caught
+python3 tools/test-sp11-120hz-study.py                # under 1 s: the 120 Hz study's citations, tables and structure
 python3 tools/sp11_display_mode.py --gop FILE [--edid FILE]
 ```
 
 The tests need only Python 3 and, for the native harness, clang with AddressSanitizer. Without clang the native
-classes report SKIP, never PASS; without `SP11_LINUX_TREE` the Linux-citation tests are skipped. They write only under
-`build/` and open no device.
+classes report SKIP, never PASS; without `SP11_LINUX_TREE` the Linux-citation tests are skipped (the 120 Hz study test
+also skips its edid-decode pins without `SP11_EDID_DECODE_TREE`). They write only under `build/` and open no device.
