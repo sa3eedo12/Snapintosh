@@ -37,6 +37,7 @@ the two directories next to each other.
 | Path | Contents | How it is recreated |
 | --- | --- | --- |
 | `downloads/` | Apple's macOS restore image (`UniversalMac_27.0_26A428_Restore.ipsw`) and everything extracted from it: kernelcache, SPTM/TXM, device trees, BaseSystem. Roughly 25 GB. | `tools/fetch-ipsw.py` and `tools/extract-firmware.py` |
+| `downloads/sp11/` | For the Surface Pro 11 port only: Microsoft and Qualcomm files. `tcblaunch.exe` and the ACPI and SMBIOS dumps come from one unit; the ZAP, ADSP and CDSP firmware come from that unit's driver store or from Microsoft's public Surface Pro 11 package. The A16 workflow does not use it. | Copied from the unit, or unpacked from the public package, by the operator, as listed in [SURFACE-PRO-11.md](SURFACE-PRO-11.md#1-what-the-port-needs-from-the-surface) |
 | `build/` | Monitor binaries, per-run build directories with their pinned source hashes, AuxKC collections, installation images, run logs, stopped-state captures and panel images | Rebuilt by the build steps; run records are produced by each boot |
 | `gpu/air2ir3/third_party/` | The private Mesa checkout at the pinned revision | `gpu/air2ir3/tools/mesa-setup.sh` |
 | `gpu/air2ir3/build/`, `cache/`, `results/`, `scratch/` | Compiler build outputs, the precompiled shader cache and sweep results | The compiler's own scripts |
@@ -59,7 +60,10 @@ objects only after confirming nothing references them.
   shaders, kernelcache disassembly and reconstructed private class headers
   (generated locally at build time).
 - **Vendor material:** Qualcomm firmware and anything copied from the A16's
-  firmware partitions, including the Wi-Fi firmware.
+  firmware partitions, including the Wi-Fi firmware. For a Surface Pro 11
+  port, also the Microsoft and Qualcomm files taken from the Surface's
+  Windows install: `tcblaunch.exe`, driver-store firmware, and ACPI and
+  SMBIOS dumps.
 - **Machine state:** run logs, captures, panel images of local runs, and
   machine pins.
 

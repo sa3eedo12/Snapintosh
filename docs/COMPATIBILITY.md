@@ -95,7 +95,8 @@ monitors; firmware files are never modified.
 ## Safety and evidence contracts
 
 - Physical ranges must be nonempty, aligned, within the implemented 36-bit
-  stage-2 address space and nonoverlapping. This limit belongs to the current
+  stage-2 address space and nonoverlapping (a range may end exactly at
+  `1<<36`; its end is exclusive). This limit belongs to the current
   EL2 backend; a wider host must not silently truncate addresses.
 - The flat frame map covers RAM/reserve and the optional panel. Holes carry
   type zero; stage 2 enforces ownership and leaves the gaps absent. The
@@ -207,3 +208,41 @@ its adapter, and verify the CPU's required features before entry. The C and
 assembly entry path and q1n1 heap reservations still need an explicit,
 versioned transport ABI; the Python resource contract is the first boundary,
 not a finished HAL.
+
+### A second host in progress: the Surface Pro 11
+
+The Surface Pro 11 (Snapdragon X Elite X1E80100) is the first candidate for a
+second host. It is UNIMPLEMENTED and has never run: the groundwork below is
+host-tested only (EXPERIMENTAL), and [SURFACE-PRO-11.md](SURFACE-PRO-11.md) is
+the plan.
+
+- **Compile-time gate.** `compat/platform.h` implies the A16 and selects the
+  Surface Pro 11 only with `-DSNAP_PLATFORM_SP11=1`. Every SP11 path sits under
+  that gate, so the A16 monitor stays byte-identical
+  (`tools/monitor_baseline.py`; see
+  [BUILDING.md](BUILDING.md#reproducing-the-a16-monitor-baseline)).
+- **Resource discovery.** `HostRuntime.from_hamoa` in `probes/bootcontract.py`
+  builds the same immutable values from a board descriptor
+  (`config/boards/{a16,sp11}.json`, validated by `tools/board_descriptor.py`) and
+  the firmware's ACPI tables (MADT and MCFG), and refuses any disagreement;
+  `tools/check-hamoa-acpi.py` runs that cross-check on a dump. The A16 q1n1
+  adapter is unchanged.
+- **Versioned transport.** `compat/board-info.{h,c}` validates a versioned
+  board-info blob (ABI 1.0) that carries the descriptor, and refuses unknown
+  versions. The monitor has no caller yet.
+- **CPU features.** On an SP11 build the NV2 launch gate (`compat/nv2-gate.c`)
+  refuses to set NV and NV2 unless the core's ID registers advertise NV2 and a
+  recorded functional VNCR result exists for that SoC and MIDR, and
+  `compat/oryon-idregs.c` normalizes the PAuth ID registers for recorded Oryon
+  MIDRs only. An unknown SoC, MIDR or ID shape refuses the launch with a named
+  prepare status (see [RUNNING.md](RUNNING.md#exit-codes)).
+- **Launch refusals by design.** An SP11 monitor also refuses, with a named
+  prepare status, a vCPU count that needs the fair service lock in a build
+  without `-DSNAP_FAIR_TOKEN=1` (-146), and any SSD window until the SP11 NVMe
+  contract has its inputs (-145, instead of falling back to the A16 adoption).
+  Both are held by `tools/test-monitor-hardening.py`.
+- **Values.** Every SP11 value in the descriptor is INFERRED from one public
+  device tree until the X1 and X2 measurements replace it. The descriptor lists
+  the GPU, the display and the two USB host controller windows, and refuses to
+  be called boot-ready while MIDR, GIC version, timer, ECAM, the DRAM map and the
+  states of the keyboard, touchpad, touchscreen, NVMe and debug UART are unknown.

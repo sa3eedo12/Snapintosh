@@ -94,12 +94,69 @@ GPT survey into the exact planned entry and refuses if the free extent or the
 pinned neighbours differ from the record; `verify` checks after the change that
 every existing entry kept its GUID, type, LBAs, attributes and name and that
 exactly one new entry exists; `verify-undo` checks the reverse. Tests are in
-`tools/test-snapmac-partition-plan.py`.
+`tools/test-snapmac-partition-plan.py` (A16) and
+`tools/test-snapmac-partition-plan-sp11.py` (sp11).
 
 Four independent readers must agree after the change: Windows' own view, a raw
 capture of the first and last 1 MiB of the disk decoded on the Mac, the
 read-only GPT survey that q1n1 takes through the firmware before
 ExitBootServices, and a normal Windows boot afterwards.
+
+**Surface Pro 11.** The same tool plans the Surface Pro 11 Windows disk with
+`--profile sp11` (UNIMPLEMENTED on hardware; hardware status NOT RUN); the
+default, `a16`, is the plan above and is unchanged. The sp11 profile hard-codes
+no unit value: the disk size, the sector size (512e or 4Kn), the GPT disk GUID,
+the NVMe identifier, every partition entry and the free extent with its two
+neighbours are read from the BEFORE survey and pinned into the plan. The one new
+entry sits inside a free extent left by shrinking C: in Windows (the unit's disk
+has no free space today, so the Windows volume must be shrunk first). It starts
+and ends on a 16 KiB boundary (in bytes, whatever the sector size), keeps a
+1 MiB guard on each side and is at least `--min-bytes` long (default 128 GiB,
+INFERRED). If more than one free extent qualifies, the tool refuses and lists
+them; name one with `--extent-start` and `--extent-end` (LBA). `plan` prints the
+authorization, verified-backup and BitLocker-recovery-key statements and emits no
+command: the operator creates the entry with Windows' own partition manager at
+exactly the planned offset and size, and the tool never shrinks or writes
+anything.
+
+After the change, `verify` takes each reader as its own `--after FILE` (four
+distinct documents by default, at least one of them a full GPT survey) and passes
+only if all of them agree with the plan; `verify-undo` does the same against
+BEFORE. Readers that differ only in their `reader` label are one observation: at
+least 3 of the 4 documents must differ in content (a Windows record taken after a
+normal boot may repeat the first). The verdict lists `readers.independent`,
+`mbr_checked` and `mbr_unchecked`. `convert-reader --from sgdisk` turns captured
+`sgdisk -p` or `gdisk -l` text, and `--from gpt-show` captured `gpt show` text,
+into a reader file. Any other reader is supplied as normalized
+`snapmac-reader/1` JSON (schema in the script's docstring), which accepts an
+optional `"mbr": "protective" | "unchecked"` (absent means unchecked).
+
+```
+python3 tools/snapmac-partition-plan.py plan --profile sp11 --survey before.json --out plan.json
+python3 tools/snapmac-partition-plan.py convert-reader --from sgdisk --in gdisk.txt --label gdisk --out gdisk.json
+python3 tools/snapmac-partition-plan.py verify --profile sp11 --before before.json --plan plan.json \
+    --after q1n1.json --after windows.json --after mac-raw.json --after gdisk.json --out verdict.json
+python3 tools/snapmac-partition-plan.py verify-undo --profile sp11 --before before.json --plan plan.json \
+    --after q1n1-undo.json --after windows-undo.json --after mac-raw-undo.json --after gdisk-undo.json
+```
+
+**Known limitation of the four-reader gate (decided; EXPERIMENTAL).** The gate
+does not require a reader that can see a hybrid MBR. `four_reader_gate_met` can be
+true with `mbr_checked` empty, because a hybrid MBR is invisible to `sgdisk -p`,
+to Windows records, to survey JSON and to `gpt show` conversions (the `gpt show`
+format is INFERRED, so its conversion is never marked protective). Only the text
+of `gdisk -l`, captured with `2>&1` and containing its "Partition table scan:"
+block, is marked `"mbr": "protective"` by `convert-reader`. Recommendation: include
+a `gdisk -l` listing among the readers, as the example does, and read
+`mbr_checked` in the verdict. Making an MBR-aware reader a condition of the gate
+is a possible later change (a small gate change plus fixture edits); it was not
+made.
+
+The sp11 host tests, which use synthetic surveys only, are in
+`tools/test-snapmac-partition-plan-sp11.py` and, for the reader-independence and
+MBR rules, `tools/test-snapmac-partition-plan-hardening.py`. The NVMe window
+contract the monitor would enforce on the Surface Pro 11 is in
+[SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md).
 
 **Undo:** stop arming the window, remove the one partition by its recorded GUID
 and type in Windows, and run `verify-undo`. Undo removes the entry, not the
@@ -236,6 +293,20 @@ build and qualify the write path; `tools/capture-apfs-persistence.py` performs
 the after-run check. Request sizes up to 512 KiB reads have been verified on the
 hardware.
 
+**Surface Pro 11 (EXPERIMENTAL; hardware NOT RUN).** Under
+`SNAP_PLATFORM_SP11`, `compat/nvme-host.c` carries a stricter, descriptor-driven
+adoption contract (`nvmeh_sp11_check`, `nvmeh_sp11_prove_endpoint` and
+`nvmeh_sp11_adopt`): the monitor re-proves the endpoint from configuration
+space, accepts only 512-byte LBAs, never switches the LBA format, and refuses
+with a named reason when the descriptor lacks the PCIe segment, BDF or SMMU
+stream. The monitor does not call it yet: an SP11 build refuses to adopt the SSD
+at all (`ans_window_prepare` returns `NVMEH_SP11_STATUS_UNWIRED`, prepare status
+-145) rather than reaching the A16 adoption, until the call site is wired to real
+inputs. The audit of the A16 assumptions and the contract are in
+[SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md), and `tools/test-nvme-window-hamoa.py`
+holds them (`tools/test-monitor-hardening.py` holds the refusal). A16 behaviour
+is unchanged.
+
 ## Provisioning
 
 Provisioning writes the window header, the ISC image and the container's
@@ -295,6 +366,11 @@ before the first write:
 | Identify facts: LBA formats, volatile write cache, Dataset Management, whether deallocated blocks read as zeros, transfer size | Sets Flush semantics and the provisioning strategy. A 4 KiB LBA format is never switched to: that would be a Format. |
 | Does Windows boot normally after q1n1 has reset the controller and run its own queues? | The coexistence contract for every later boot. |
 | Which slot and attributes does Windows choose for a custom partition type? | `verify` tolerates only attributes 0 or bit 63 and treats the slot as a note. |
+
+On the Surface Pro 11 each of these must be answered again before any storage
+gate. [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md#7-appendix-d-answered-the-per-machine-questions)
+splits each question into what public evidence answers and the exact X2 or X6
+measurement with its expected value; nothing has been measured.
 
 ## Known limits
 

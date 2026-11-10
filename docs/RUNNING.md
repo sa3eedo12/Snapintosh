@@ -139,6 +139,49 @@ python3 tools/inspect-logs.py --prefix <run-prefix>                # decode the 
 - `retire` chainloads the next generation, ready for the next run.
 - To start a new run from scratch, cold boot instead.
 
+## Selecting the target
+
+`tools/cycle.py` accepts a global `--target {a16,sp11}` **before** the subcommand
+(`python3 tools/cycle.py --target sp11 status --check`). The default is `a16`, which leaves every existing command
+line, output and refusal unchanged, so a script that omits `--target` always runs the A16 flow. Spell `--target` in
+full: the parser does not accept abbreviations (`--tar` is an argparse error), because the single-hardware-client scan
+only recognises the full spelling.
+
+`--target sp11` is UNIMPLEMENTED and fails closed. Only `next` and the offline `--check` and `--check-inputs` modes
+run, and they still read the A16 tool inputs, so a pass says nothing about the Surface Pro 11. Every other mode is
+refused. It must first satisfy, in this order: a complete `sp11` section in the local `tools/cycle_lib/pins.json`
+(copied from `pins.example.json`; the example itself is never used), the standing authorizations for the mode's
+hardware effects, `--thermal-guard`, a current operator power attestation, the per-run authorization described below,
+the thermal admission of `tools/hamoa_thermal.py`, and the single-hardware-client check. It then ends with
+`no SP11 <flow> flow implemented`. DVFS, DDR, LLCC and bandwidth-probe options are refused for `sp11` in every mode.
+
+The authorizations of [SURFACE-PRO-11.md section 8](SURFACE-PRO-11.md#8-hardware-safety-and-authorization) are
+checked in two layers. The standing ones are booleans under `sp11.authorizations`. The two that touch NVMe,
+`enable_nvme_window_writes` and `cycle_mode_may_write_nvme`, are per run: the three modes that run a guest with writable
+storage (`launch --boot`, `launch --boot-child` and `installed-fresh --boot`) need the standing booleans and also
+`sp11.run_authorization`, which holds the two per-run booleans again plus `recorded_utc`, `run_prefix` and the
+`source_sha256` that the refusal prints. It expires after 30 minutes like the power attestation and is bound to this run
+prefix and to a digest of the tool sources plus `tools/hamoa_thermal.py`, so a standing boolean alone never enables a
+write. The refusals are `no-run-authorization`, `run-authorization-invalid`, `run-authorization-expired`,
+`run-authorization-prefix`, `run-authorization-source` and `missing-authorization`. `pins.example.json` carries an
+all-null `sp11.run_authorization` template next to `sp11.power_attestation`. A thermal module that lacks the
+`power_attestation_ok` cross-check is refused (`thermal-missing`), and so is an admission that returns anything other
+than None or True.
+
+The CP_MEMCPY bound is not a `cycle.py` option: no cycle flow chooses a copy size. A single `CP_MEMCPY` over 1 MiB is
+refused in the monitor (`ADRENO_COHERENT_COPY_MAX` in `compat/adreno-coherent.h`) and in the kext and plug-in, which
+enforce and test the same bound. `check_cp_memcpy` in `tools/cycle_lib/targets.py` is the predicate that any future flow
+that picks a size must call first, and `tools/test-cycle-targets-hardening.py` ties its cap to that constant.
+
+The power attestation is an operator record in `pins.json` (`sp11.power_attestation`: AC state, battery percentage,
+UTC time, run prefix and the tool-source digest). It is never accepted from the command line, and any change to the
+tool sources or to `tools/hamoa_thermal.py` invalidates it. It expires after 30 minutes and may not be dated in the future: `tools/hamoa_thermal.py`
+cross-checks it and allows no future skew, which is stricter than the 60 s that `tools/cycle_lib/targets.py` alone
+tolerates, so the stricter bound applies. It must state AC power or a battery level of at least 50%. The thermal
+ceiling is a value the user chooses; there is no default, and `compat/hamoa-thermal.h` only proposes 80 C as a
+placeholder. Until X2 measures the platform fingerprint, `tools/hamoa_thermal.py` refuses every target
+(`thermal-refused`), which is the expected end state today. The policy lives in `tools/cycle_lib/targets.py`.
+
 ## Run flags
 
 Every monitor, kext and q1n1 feature is opt-in, with one flag each. To list
@@ -352,6 +395,32 @@ A desktop session normally ends with 12. A host-side failure that leaves no
 stop report is not a guest exit code. Wait out the watchdog, then recover the
 real stop state with `cycle.py capture`.
 
+On an SP11 build (UNIMPLEMENTED), exit code 3 with a prepare status from -90 to
+-95 means the launch gate refused the CPU before `VNCR_EL2` or HCR_EL2.NV were
+written: -90 no valid functional record is embedded; -91 the record is for another
+SoC or core; -92 the ID registers do not advertise NV2; -93 the record has no
+passing VNCR redirect and negative control, or its evidence label is not VERIFIED
+or OBSERVED; -94 MIDR_EL1 is not a recorded Oryon or A16 core; -95 the PAuth ID
+fields are not a recognised shape. The kernel did not run. Measure the core, run
+`tools/nv2_record.py ingest`, and rebuild; do not edit the gate to get past it.
+`tools/nv2_record.py show <measurement.log> --check` asks the same gate offline
+and reports through its own exit status (see
+[BUILDING.md](BUILDING.md#the-sp11-monitor-variant-experimental)). A prepare status
+of -146 means the build has more guest vCPUs than one cluster holds and no fair
+service lock (`-DSNAP_FAIR_TOKEN=1`); nothing was prepared. It is checked before
+the NV2 gate, so a default SP11 build reports -146 and not -90. A status from -96
+to -145 concerns the SSD window: -145 means the monitor does not yet receive the
+SP11 target, record and per-run pins and refuses to adopt the SSD at all (the
+physical NVMe state's `prepare` word holds the same number); -96 to -144 are the
+refusals of `nvmeh_sp11_adopt`, named in `PREPARE_FAILURES`. On an A16 window-mode
+launch, -80 to -83 are the adoption's own refusals (parameters, guest overlap,
+controller state, admin queue); -80 to -82 share their numbers with the boot
+relocation, so read that `prepare` word. A status from -257 to -274 is a stage-2
+geometry refusal (`-(256 + reason)`, for
+example -272: a stage-2 range crosses the IPA limit, so the DRAM map does not fit
+the 36-bit stage 2); the names are in `PREPARE_FAILURES` in `probes/run.py`, which
+also holds the table of status bands.
+
 ## Other modes
 
 - `cycle.py speed-test` compares the `control` and `fast` monitors on the
@@ -360,3 +429,113 @@ real stop state with `cycle.py capture`.
   integration check.
 - `cycle.py storage` reads persistence from, or snapshots, the SSD at an idle
   generation.
+
+## Preparing the X0/X1 boot stick
+
+This is the operator procedure for gates X0 and X1 of the Surface Pro 11 plan
+([SURFACE-PRO-11.md](SURFACE-PRO-11.md)). Everything about the Surface Pro 11 is
+UNIMPLEMENTED or EXPERIMENTAL and has not run on hardware. It is not a
+`cycle.py` flow, and **no script in this repository erases or writes a disk**:
+steps 3 to 6 are done by the operator at the keyboard, on a stick the operator
+has identified. Disabling Secure Boot, suspending BitLocker and using
+`tcblaunch.exe` need the authorizations of
+[SURFACE-PRO-11.md section 8](SURFACE-PRO-11.md#8-hardware-safety-and-authorization).
+
+1. Build the inputs on a Mac host: `sh tools/build-slbounce.sh` in q1n1 (it
+   builds the pinned slbounce commit with `SLBOUNCE_ALWAYS_SWITCH=1 DEBUG=1`), the
+   pinned UEFI shell asset named in `tools/sp11-boot-media-pins.json`, and
+   `python3 tools/build-uefi-probe.py`
+   ([BUILDING.md](BUILDING.md#boot-media-for-the-surface-pro-11-x0-and-x1)).
+2. Stage them into a scratch directory with `tools/stage-sp11-boot-media.py
+   stage ...`. It reports `STAGED_INCOMPLETE` with `missing=["tcblaunch"]` until
+   you add `--tcblaunch <your-own-copy>`; that is expected. Then run `verify --dest
+   <that directory>` and require `shell_pin: match`: the shell must equal the
+   pinned release, and `--no-pins` (which reports `shell_pin: unchecked`) is not
+   for media that will boot the unit. Obtain
+   `tcblaunch.exe` only from Microsoft-origin media you have the right to use,
+   never from a third-party redistribution (a Microsoft Q&A thread reports
+   Windows Defender flagging such a copy as a trojan). The five builds taken
+   from the unit's own component store are Microsoft-origin media of the kind
+   you may use; X1 tries them one after another.
+3. Identify the stick with the read-only `diskutil list` and confirm the exact
+   disk identifier by size and volume name. An identifier that is not the stick
+   erases another disk: check twice, and never use the internal disk.
+4. Erase the stick as FAT32 yourself (destructive; no script here does it),
+   replacing `N` with the identifier you confirmed:
+   `diskutil eraseDisk FAT32 SP11BOOT MBR /dev/diskN`.
+5. Copy the staged tree onto the mounted volume, then verify it from the
+   volume's root: `cd /Volumes/SP11BOOT && shasum -a 256 -c SP11/MANIFEST.SHA256`.
+   Every line must say OK; otherwise redo the copy.
+6. Eject with `diskutil eject /dev/diskN`. In the target machine's firmware
+   setup turn Secure Boot off (neither the shell nor slbounce is
+   Microsoft-signed) and boot from the stick. The operator may run X1 with the
+   internal SSD removed (INFERRED; see
+   [SURFACE-PRO-11.md section 1.5](SURFACE-PRO-11.md#15-how-the-units-disk-was-read)).
+7. Follow `SP11\README.TXT` on the stick: run `SLTEST.EFI` first (a green line
+   means the EL2 switch worked), and `SLBOUNCE.EFI` only after a confirmed-good
+   self-test.
+
+## Running the EFI probe and the X2 tests
+
+Operator only, after step 7 above; hardware status NOT RUN. Everything these
+images show on the unit is INFERRED until the first run. The order is: the
+passive probe, then your choice of the X2 window policy, then the X2 image.
+
+**1. The passive probe.** The probe image (`sp11-el2-probe.efi`, passive) runs
+from the stick after slbounce has switched the machine to EL2. It dumps the
+firmware tables to `\SP11DUMP\RUNnn\` on that stick, calls ExitBootServices
+itself and then shows the EL2 state as photographable pages; photograph every
+page, header and footer included, type the rows into a file and check them with
+`python3 probes/uefi/verify-lines.py`. The operator procedure is in
+[probes/uefi/README.md](../probes/uefi/README.md). The probe installs no vector,
+so it reads only ID registers that every Armv8.0 EL2 may read (a few more only
+when a feature field says they exist):
+`ID_AA64MMFR3_EL1`, `ID_AA64MMFR4_EL1`, `ID_AA64ISAR2_EL1` and `ID_AA64DFR1_EL1`
+are not read, and its ID page says `NOT READ HERE: MMFR3 MMFR4 ISAR2 DFR1` (the
+guarded X2 image reads the first three; the fourth is read nowhere). The opt-in
+PSCI image needs the owner's authorization and is run only after the passive
+image has been read; it issues SMC only, so a FADT that declares an HVC conduit
+gives `PSCI RUN=HVC REFUSED` and no call at all.
+The dump holds SMBIOS data that can carry serial numbers and UUIDs: keep it out
+of version control and out of reports (`.gitignore` covers `SP11DUMP/`).
+
+Record, besides the pages:
+
+| Where | What to record | What it means |
+| --- | --- | --- |
+| The console line `GOP`, if the console is visible | `STATE=NONE WHY=<reason>`, then `EBS STATE=SKIPPED` | The probe refused the framebuffer (`NO GOP`, `NOT CONSOLE GOP`, `BAD MODE` or `NOT IN MEMORY MAP`) and ended the run without calling ExitBootServices; the dump is kept and `summary.txt` says `gop=none`. The screen part of the run is lost, so record the reason |
+| The page rows `DUMP STATE=` and `DUMP RUN=nn FILES= BYTES=` | Anything but `OK` | `OK` only if every file, then the run directory, `SP11DUMP` and the volume root, were flushed and closed; a failure shows `PARTIAL` or `ERROR`, never `OK` |
+| The PSCI page, `PSCI RUN=` | `HVC REFUSED` | The FADT declares an HVC conduit and the image made no call. `psci_conduit` in `summary.txt` names the conduit in every case |
+| `memmap.txt` and `summary.txt` in the dump | The whole files | Which windows the UEFI memory map lists as MMIO, the framebuffer's descriptor and the conduit; `memmap.txt` is the input of the window-policy choice below |
+
+**2. Choose the device-window policy of the X2 image (an operator decision).**
+The X2 image refuses a device window whose base is zero, misaligned or wrapping,
+and any window the UEFI memory map calls RAM, firmware, ACPI or anything but
+MMIO; a window the map does not mention at all is read by default. Decision: keep
+that lenient default (the map of the QEMU machine lists none of its windows, so a
+strict default would leave the model run unable to check the device tests). The
+operator reads `memmap.txt` from the passive probe and then chooses. If the map
+lists the GIC, ECAM and SMMU windows as MMIO, you may build the strict image with
+`python3 tools/build-uefi-tests.py --soc x1e80100 --require-mmio-map`; if it does
+not, strict makes T05 to T07 read nothing, so run the default build. Say which
+one you ran: the pages show `MAP MMIO=n UNLISTED=n REFUSED=n` (default) or
+`MAP STRICT MMIO=n REFUSED=n`, and the build id differs.
+
+**3. The X2 test image.** `sp11-el2-tests.efi` is run once, with the same stick
+preparation; read [SP11-X2-TESTS.md](SP11-X2-TESTS.md) first, and never run the
+`model`, `model-fatal` or `model-fatal-pre` builds on the unit. It writes the NV2
+record next to the probe's dump; `python3 tools/nv2_record.py ingest` turns it
+into the record the SP11 monitor embeds. One hardware client at a time, and AC
+power. Photograph every page, and record these rows besides the verdicts:
+
+| Where | What to record | What it means |
+| --- | --- | --- |
+| T05, T06 and T07, `MAP MMIO=n UNLISTED=n REFUSED=n` | The three numbers | How many windows were read, how many of those the map did not list, and how many were refused. A refused window is UNKNOWN (`<what> REFUSED: <reason>`), never PASS or FAIL |
+| T05, T06 and T07, `FAULTS=n` | Any non-zero value | Guarded reads that faulted. An asynchronous SError would show up here; none has ever been seen |
+| T02, `MECHANICS FAULT` | The whole T02 section | A write to `HCR_EL2`, `VNCR_EL2` or an EL1 register did not stick. The run is INCONCLUSIVE, never a K1 verdict |
+| A framebuffer page `FATAL: CLEANUP FAILED` | The whole page (its second row names the step, its fourth says whether one more attempt restored the firmware state) | A register could not be put back. The image halted (decision: halt, not reset) with nothing written to the stick and no ExitBootServices; power cycle and discard the run |
+| A framebuffer page `FATAL: <reason>` with a vector, `ESR`, `FAR` and `ELR` | The whole page | An exception that nothing expected; handle it the same way |
+
+Fatal pages are framebuffer-only, before ExitBootServices as well as after: the
+serial `SP11X2 FATAL` line exists only when no page can be drawn, so a serial log
+of a run that drew its page can say nothing about the stop.

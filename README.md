@@ -42,6 +42,7 @@ This is experimental software, written for one laptop model.
 | Wi-Fi (QCC2072) | Scanning, a WPA2 connection, DHCP and ping work through a host-proxy harness driven from the Mac. Joining from the macOS Wi-Fi menu does not work yet. |
 | Storage | macOS is installed on, and boots from, the internal NVMe. |
 | Other hardware | Audio, cameras, Bluetooth, sleep and external displays are not supported. |
+| Surface Pro 11 | A port is planned and is UNIMPLEMENTED. Only host-side groundwork exists (EXPERIMENTAL), and nothing has run on a Surface Pro. The plan is [docs/SURFACE-PRO-11.md](docs/SURFACE-PRO-11.md). |
 
 [docs/STATUS.md](docs/STATUS.md) has the details, the known issues and the
 roadmap.
@@ -81,13 +82,13 @@ A16 UEFI -> q1n1 (EL2 proxy) -> Snapintosh monitor (EL2) -> XNU + AuxKC (EL1) ->
 | --- | --- |
 | `compat/` | the EL2 monitor: SPTM/TXM contracts, CPU, interrupt, timer and device emulation, the GPU ring and SMMU mediation, the NVMe backend |
 | `shadow/` | the page-table walker and the 16 KiB guest to 4 KiB hardware shadow tables |
-| `probes/` | the code that runs on the target (loader, monitor entry) and the host-side image builder and runner |
+| `probes/` | the code that runs on the target (loader, monitor entry) and the host-side image builder and runner; `probes/uefi/` is the EFI state probe and X2 test image for the Surface Pro 11 plan |
 | `tools/` | firmware acquisition, kernelcache analysis, the boot-cycle tool (`cycle.py`), build helpers and the native test suites |
 | `gpu/adreno-kext/` | the AdrenoX2 kext (`kext/`, submodule [SnapAdreno](https://github.com/Snapintosh/SnapAdreno)), the AdrenoMetal plug-in (`plugin/`, submodule [SnapMetal](https://github.com/Snapintosh/SnapMetal)) and the shared register and contract headers (`include/`) |
 | `gpu/air2ir3/` | the AIR to ir3 shader compiler (submodule [air2ir3](https://github.com/Snapintosh/air2ir3)) |
 | `gpu/agx*` | an earlier virtual-AGX model, kept for reference |
 | `drivers/` | SnapI2CHID (`snap-i2c-hid/`, submodule [SnapI2CHID](https://github.com/Snapintosh/SnapI2CHID)), the QCC2072 Wi-Fi controller (`snap-qcc2072/`, submodule [SnapQCC2072](https://github.com/Snapintosh/SnapQCC2072)), the boot framebuffer, a loader test |
-| `config/` | monitor feature flags and guest launchd jobs |
+| `config/` | monitor feature flags, board descriptors (`config/boards/`, for the Surface Pro 11 plan) and guest launchd jobs |
 | `build/` | generated output (gitignored, apart from the AuxKC link helpers) |
 | `docs/` | design and reference documentation |
 
@@ -168,10 +169,11 @@ Use it at your own risk.
 ## Legal
 
 Snapintosh is an independent project. It is not affiliated with, endorsed by
-or sponsored by Apple, Qualcomm, ASUS or Asahi Linux. macOS, Metal and Apple
+or sponsored by Apple, Qualcomm, ASUS, Microsoft or Asahi Linux. macOS, Metal and Apple
 are trademarks of Apple Inc. Snapdragon and Adreno are trademarks of Qualcomm
-Incorporated. Zenbook is a trademark of ASUSTeK Computer Inc. All other
-trademarks belong to their owners.
+Incorporated. Zenbook is a trademark of ASUSTeK Computer Inc. Surface is a
+trademark of Microsoft Corporation. All other trademarks belong to their
+owners.
 
 Running macOS on non-Apple hardware may conflict with Apple's macOS software
 licence agreement. You are responsible for making sure that your use complies
@@ -202,6 +204,10 @@ Snapintosh builds on the published work of others:
   SPTM/TXM as ground truth.
 - **XNU** sources from Apple Open Source, for reading the kernel's side of each
   contract.
+- **slbounce** (Nikita Travkin) and the **linux-surface** project, whose public
+  EL2 hand-off and Surface Aggregator work, together with the upstream Linux
+  Snapdragon X Elite device trees, were read as references for the Surface Pro 11
+  plan.
 
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) has the complete list.
 
@@ -220,3 +226,12 @@ Snapintosh builds on the published work of others:
 | [gpu/air2ir3/README.md](gpu/air2ir3/README.md) | the shader compiler |
 | [docs/WORKSPACE-LAYOUT.md](docs/WORKSPACE-LAYOUT.md) | local inputs, generated output and what is never committed |
 | [docs/GUI-BOOT-ROADMAP.md](docs/GUI-BOOT-ROADMAP.md) | the path from the first kernel instruction to the desktop |
+| [docs/SURFACE-PRO-11.md](docs/SURFACE-PRO-11.md) | the plan and requirements for a Surface Pro 11 (X1E80100) port: UNIMPLEMENTED, with host-side groundwork only |
+| [docs/SP11-EL2-ENTRY.md](docs/SP11-EL2-ENTRY.md) | the EL2 entry decision (VHE host or de-VHE), timer-offset policy and `DC ZVA` study for the Surface Pro 11 |
+| [docs/SP11-X2-TESTS.md](docs/SP11-X2-TESTS.md) | the operator guide for the Surface Pro 11 X2 functional tests (EFI image, never run on hardware) |
+| [probes/uefi/README.md](probes/uefi/README.md) | the Surface Pro 11 EFI state probe: build, images, screen and dump formats |
+| [docs/SP11-HOST-LINK-STUDY.md](docs/SP11-HOST-LINK-STUDY.md) | the Surface Pro 11 USB host link: the A16 inventory, Hamoa USB facts, the fallback ladder and a persistent-log design |
+| [docs/SP11-NVME-WINDOW.md](docs/SP11-NVME-WINDOW.md) | the Surface Pro 11 NVMe window: the audit of A16 assumptions, the safety contract and the per-machine questions |
+| [docs/SP11-DISPLAY-STUDY.md](docs/SP11-DISPLAY-STUDY.md) | reusing the firmware display pipeline on the Surface Pro 11, and the X2 display read list |
+| [docs/SP11-GPU-A7XX-STUDY.md](docs/SP11-GPU-A7XX-STUDY.md) | the a8xx-to-a7xx GPU delta for the Surface Pro 11, with the ownership and cutover plan |
+| [docs/SP11-INPUT-STUDY.md](docs/SP11-INPUT-STUDY.md) | how the Surface Pro 11 keyboard, touchpad, touchscreen and pen reach the SoC, the UART2 spike plan and the native-versus-forwarded decision |

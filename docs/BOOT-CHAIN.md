@@ -79,6 +79,15 @@ registers become loads and stores to that page. XNU runs unmodified and its
 view of "EL2 state" lands in memory the monitor can read. `VNCR_EL2` takes an
 address in EL2's own translation regime, not the guest's.
 
+On the Surface Pro 11 (UNIMPLEMENTED) neither half of this is given. Firmware
+does not enter at EL2 (VERIFIED from slbounce's source, OBSERVED on one
+community unit and not yet on this one: gate X1): slbounce returns at EL2 with
+`HCR_EL2` = TGE and E2H (a VHE regime) and the MMU on, so the entry must either
+run the monitor as a VHE host or convert to the non-VHE regime this chapter
+describes first. And whether the Oryon v1 cores implement FEAT_NV2 usably is
+UNKNOWN until gate X2. The decision record and the host models are in
+[SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) (EXPERIMENTAL; hardware NOT RUN).
+
 Other identity choices:
 
 - The ID register group is passed through from the hardware with features the
@@ -308,6 +317,23 @@ vCPU (`compat/cpu.c`) rather than touching real power controllers. Reducing
 the topology with `cpus=1` is not an option for this kernel: it trips a PMGR
 CPU-complex assertion earlier in boot.
 
+On the A16, `GUEST_CPU_COUNT` is the literal six (`compat/cpu.h`; a
+`-DGUEST_CPU_COUNT=N` there is a macro redefinition, an error under the
+monitor's `-Werror`). On the Surface Pro 11 only it is a build parameter, default
+6 and EXPERIMENTAL. The guest keeps the J700 six-node device tree regardless: a
+different count also needs the device-tree cpu nodes, `SCRATCH_COUNT` and
+`monitor_stack_count`, and the other sites that hard-code six (the comment above
+`GUEST_CPU_COUNT` in `compat/cpu.h` lists them, and says which of them a static
+assertion holds). Whether the J700 guest tolerates a reduced or enlarged cpu set
+is UNKNOWN until X4 of the Surface Pro 11 plan. For the Surface Pro 11's 12 cores
+in three clusters, `compat/topology.{h,c}` is a host model of vCPU placement and
+redistributor discovery (EXPERIMENTAL; the monitor does not call it). The
+monitor does carry the model's one rule that a count can break: more vCPUs than
+one cluster's four cores need the fair service lock (`-DSNAP_FAIR_TOKEN=1`), and
+a build without it refuses the launch with prepare status -146
+(`GUEST_CPU_NEEDS_FAIR_LOCK` in `compat/cpu.h`, held equal to the model for every
+count by `tools/test-monitor-hardening.py`).
+
 Guest CPU identities describe the compatibility interface. They do not make an
 Oryon core an Apple core, and the pairing of Apple core classes to Snapdragon
 core tiers is a placement choice, not a measured equivalence.
@@ -362,6 +388,11 @@ nanosecond ratio.
 - With the root `clock-frequency` left at zero, XNU computes an event-stream
   bit index of -2 and panics in `_enable_timebase_event_stream`; this was the
   first device-tree dependency found.
+
+On the Surface Pro 11 (UNIMPLEMENTED), Linux carries an erratum for the Oryon X1
+`CNTVOFF_EL2` that this scheme would have to take into account if it applies to
+the unit. The policy and a host model of the offset handling are in
+[SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 3 (EXPERIMENTAL; hardware NOT RUN).
 
 ## 10. Lessons from bring-up
 
