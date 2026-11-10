@@ -11,6 +11,11 @@ Every subcommand has --check (for launch: --check-inputs), which performs every
 validation except hardware access and writes nothing. Only one hardware client may
 run at a time; the hardware modes refuse while another one is running. Never
 interrupt an in-flight P_CALL. See docs/CYCLE-TOOL-20260928.md.
+
+--target {a16,sp11} goes before the subcommand and defaults to a16, whose behaviour
+is unchanged. sp11 is UNIMPLEMENTED and fails closed: only `next` and the --check /
+--check-inputs modes run; every other mode refuses with a specific reason
+(tools/cycle_lib/targets.py).
 """
 import sys
 
@@ -22,6 +27,7 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cycle_lib import targets  # noqa: E402
 from cycle_lib.common import Refused, Workspace  # noqa: E402
 
 
@@ -31,7 +37,14 @@ def emit(result):
 
 
 def parse(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    # allow_abbrev=False: `--tar a16` must not parse as --target, because the client scan
+    # (cycle_lib/common.py CLIENT_PATTERNS) can only recognise spellings it is told about.
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+                                 allow_abbrev=False)
+    ap.add_argument('--target', choices=sorted(targets.TARGETS), default=targets.DEFAULT_TARGET,
+                    help='the machine this run is for (default %(default)s, behaviour unchanged); sp11 is '
+                         'UNIMPLEMENTED: only the passive --check modes run and every other mode refuses. '
+                         'Give it before the subcommand.')
     sub = ap.add_subparsers(dest='command', required=True)
 
     p = sub.add_parser('status', help='one read-only proxy query: generation, EL, image base, SError, battery')
@@ -714,6 +727,9 @@ def main(argv=None):
     args = parse(argv)
     ws = Workspace(Path(__file__).resolve().parents[1])
     try:
+        decision = targets.enforce(args, ws)   # before any mode runs; a16 returns at once, unchanged
+        if decision:
+            print(decision['notice'], file=sys.stderr, flush=True)
         if args.command == 'preserve':
             from cycle_lib import preserve
             emit(preserve.preserve(ws, args.prefix, args.check, args.capture_set, args.document,

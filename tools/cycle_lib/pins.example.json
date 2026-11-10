@@ -68,5 +68,50 @@
       "path": "Snapintosh/build/snapshot-installed-metal-20260926.py",
       "sha256": "6eb0d9e06a2e7def32f5b7afb5668eb0912b21501d3b15bd4abe7cbb5fa0844f"
     }
+  },
+  "sp11": {
+    "schema": "snapintosh-cycle-pins-sp11-v1",
+    "about": "Surface Pro 11 section, read only by cycle.py --target sp11 (UNIMPLEMENTED: only the passive --check modes run). Placeholders only: record this unit's own values in the git-ignored pins.json; every other mode refuses until each value below is real, and even then no SP11 flow exists. power_attestation is the operator's record of AC and battery state: it expires after 30 minutes and is bound to one run prefix and to the source digest that the refusal prints. authorizations are the docs/SURFACE-PRO-11.md section 8 operations the operator has authorized; leave them false until they are. run_authorization repeats the two per-run ones (enable_nvme_window_writes, cycle_mode_may_write_nvme) for one run: a mode that can write NVMe needs both it and the matching authorizations entries, and it expires and is bound to a run prefix and the source digest exactly like power_attestation.",
+    "platform_facts": {
+      "uefi_version": null,
+      "windows_build": null,
+      "secure_boot_state": null,
+      "bitlocker_state": null,
+      "soc_sku": null,
+      "ram_gib": null,
+      "ssd_size_gb": null,
+      "firmware_versions": null
+    },
+    "tcblaunch_sha256": "<placeholder>",
+    "boot_media_manifest_sha256": "<placeholder>",
+    "bootinfo": null,
+    "host_link": {
+      "selected": null,
+      "candidates": ["usb_c_ncm_gadget", "usb_ethernet_adapter", "uefi_snp", "framebuffer_log"]
+    },
+    "power_attestation": {
+      "ac_connected": null,
+      "battery_percent": null,
+      "recorded_utc": null,
+      "run_prefix": null,
+      "source_sha256": null
+    },
+    "run_authorization": {
+      "enable_nvme_window_writes": null,
+      "cycle_mode_may_write_nvme": null,
+      "recorded_utc": null,
+      "run_prefix": null,
+      "source_sha256": null
+    },
+    "authorizations": {
+      "disable_secure_boot": false,
+      "suspend_bitlocker": false,
+      "use_tcblaunch": false,
+      "add_uefi_boot_entry_or_write_esp": false,
+      "create_snapintosh_gpt_entry": false,
+      "enable_nvme_window_writes": false,
+      "cycle_mode_may_write_nvme": false,
+      "raise_gpu_cpu_clock_voltage": false
+    }
   }
 }

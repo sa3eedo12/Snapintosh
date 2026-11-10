@@ -111,7 +111,11 @@ CLIENT_PATTERNS = [re.compile(p) for p in (
     r'nvme_(m3|window|hash)\.py', r'run-stopped-cdc-read', r'capture-panel\.py', r'probes/run\.py',
     r'(tools|build)/run-[\w.-]+\.py(?!.*--(check|syntax-only|inputs-only))',
     r'(tools|build)/(retire|storage|preserve|collect|capture|request-stop)[\w.-]*\.py(?!.*--(check|syntax-only))',
-    r'tools/cycle\.py\s+(status|capture|retire|launch|observe|storage)(?!.*--check)')]
+    # The global --target (tools/cycle_lib/targets.py) sits between cycle.py and the subcommand; without the
+    # optional group a `cycle.py --target a16 launch ...` would not count as a hardware client. The group takes
+    # every prefix of --target (`--t` ... `--target`), not only the full spelling: cycle.py itself refuses the
+    # abbreviations, but a copy of it that predates allow_abbrev=False may still be running and must count.
+    r'tools/cycle\.py\s+(?:--t\w*[= ]\S+\s+)*(status|capture|retire|launch|observe|storage)(?!.*--check)')]
 
 
 class Workspace:
