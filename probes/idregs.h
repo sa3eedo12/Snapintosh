@@ -18,6 +18,10 @@
 #ifndef IDREGS_H
 #define IDREGS_H
 
+#if SNAP_PLATFORM_SP11
+#include "../compat/oryon-idregs.h"
+#endif
+
 static uint64_t id_register(uint32_t crm, uint32_t op2)
 {
     uint64_t v = 0;
@@ -83,12 +87,28 @@ static uint64_t id_register(uint32_t crm, uint32_t op2)
 #define ID_AA64PFR0_EL1_SVE  (0xfUL << 32)
 #define ID_AA64PFR1_EL1_SME  (0xfUL << 24)
 
+#if SNAP_PLATFORM_SP11
+/* The Oryon v1 reports its pointer authentication in ID_AA64ISAR1_EL1 (the
+ * QARMA5 fields) where the J700 profile has it in ID_AA64ISAR2_EL1 (QARMA3).
+ * compat/oryon-idregs.h maps the first shape to the second, and only for what
+ * the guest reads. The decision uses the hardware's MIDR and ISAR1/ISAR2, read
+ * again here for the CPU that took the trap, not the value being forged. */
+static uint64_t id_forge_sp11(uint32_t crm, uint32_t op2, uint64_t value)
+{
+    return snap_oryon_id_view(crm, op2, value, id_register(0, 0),
+                              id_register(6, 1), id_register(6, 2));
+}
+#endif
+
 static uint64_t id_forge(uint32_t crm, uint32_t op2, uint64_t value)
 {
     if (crm == 4 && op2 == 0) value &= ~ID_AA64PFR0_EL1_SVE;   /* ID_AA64PFR0 */
     if (crm == 4 && op2 == 1) value &= ~ID_AA64PFR1_EL1_SME;   /* ID_AA64PFR1 */
     if (crm == 4 && op2 == 4) value = 0;                       /* ID_AA64ZFR0 */
     if (crm == 4 && op2 == 5) value = 0;                       /* ID_AA64SMFR0 */
+#if SNAP_PLATFORM_SP11
+    value = id_forge_sp11(crm, op2, value);
+#endif
     return value;
 }
 
