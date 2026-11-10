@@ -1,0 +1,22 @@
+{
+  "schema": "snapintosh-gpt-layout",
+  "schema_version": 1,
+  "note": "Synthetic stand-in for a typical 1 TB Surface Windows disk in the order the brief lists it: EFI system partition, reserved partition, Windows volume, recovery partition, then free space to the end of the usable area. Every GUID and name is made up. Replace with a sanitized real layout of the same schema (docs/SP11-NVME-WINDOW.md).",
+  "block_size": 512,
+  "last_block": 1953525167,
+  "first_usable": 34,
+  "last_usable": 1953525134,
+  "disk_guid": "a1a1a1a1-0000-4000-8000-00000000d15d",
+  "primary": {"my_lba": 1, "alternate_lba": 1953525167, "entries_lba": 2, "count": 128, "entry_size": 128},
+  "backup": {"my_lba": 1953525167, "alternate_lba": 1, "entries_lba": 1953525135, "count": 128, "entry_size": 128},
+  "partitions": [
+    {"index": 0, "type": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "guid": "a1a1a1a1-0000-4000-8000-000000000011",
+     "first_lba": 2048, "last_lba": 534527, "attributes": 9223372036854775808, "name": "EFI system partition"},
+    {"index": 1, "type": "e3c9e316-0b5c-4db8-817d-f92df00215ae", "guid": "a1a1a1a1-0000-4000-8000-000000000012",
+     "first_lba": 534528, "last_lba": 567295, "attributes": 9223372036854775808, "name": "Microsoft reserved partition"},
+    {"index": 2, "type": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7", "guid": "a1a1a1a1-0000-4000-8000-000000000013",
+     "first_lba": 567296, "last_lba": 1342744575, "attributes": 0, "name": "Windows"},
+    {"index": 3, "type": "de94bba4-06d1-4d40-a16a-bfd50179d6ac", "guid": "a1a1a1a1-0000-4000-8000-000000000014",
+     "first_lba": 1342744576, "last_lba": 1345202175, "attributes": 9223372036854775809, "name": "Windows recovery environment"}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schema": "snapintosh-gpt-layout",
+  "schema_version": 1,
+  "note": "Synthetic 4096-byte-LBA twin of gpt-512-shrunk.json (the same partitions and byte offsets), for the 512 versus 4096 cases: the GPT header sits at the same LBA but the entry array is 4 blocks, not 32. Every GUID and name is made up.",
+  "block_size": 4096,
+  "last_block": 244190645,
+  "first_usable": 6,
+  "last_usable": 244190640,
+  "disk_guid": "a1a1a1a1-0000-4000-8000-00000000d15e",
+  "primary": {"my_lba": 1, "alternate_lba": 244190645, "entries_lba": 2, "count": 128, "entry_size": 128},
+  "backup": {"my_lba": 244190645, "alternate_lba": 1, "entries_lba": 244190641, "count": 128, "entry_size": 128},
+  "partitions": [
+    {"index": 0, "type": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "guid": "a1a1a1a1-0000-4000-8000-000000000021",
+     "first_lba": 256, "last_lba": 66815, "attributes": 9223372036854775808, "name": "EFI system partition"},
+    {"index": 1, "type": "e3c9e316-0b5c-4db8-817d-f92df00215ae", "guid": "a1a1a1a1-0000-4000-8000-000000000022",
+     "first_lba": 66816, "last_lba": 70911, "attributes": 9223372036854775808, "name": "Microsoft reserved partition"},
+    {"index": 2, "type": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7", "guid": "a1a1a1a1-0000-4000-8000-000000000023",
+     "first_lba": 70912, "last_lba": 167843071, "attributes": 0, "name": "Windows"},
+    {"index": 3, "type": "de94bba4-06d1-4d40-a16a-bfd50179d6ac", "guid": "a1a1a1a1-0000-4000-8000-000000000024",
+     "first_lba": 243883264, "last_lba": 244190463, "attributes": 9223372036854775809, "name": "Windows recovery environment"}
+  ]
+}
