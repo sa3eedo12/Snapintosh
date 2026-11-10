@@ -155,6 +155,10 @@ int dump_font(void);
  * PPM to stdout; the layout it chose goes to stderr. */
 int dump_screen(int argc, char **argv);
 
+/* test_gopsel.c: the framebuffer choice, its console rule and its
+ * same-framebuffer rule, over hand-built GOP lists and memory maps. */
+void test_gop_select(void);
+
 /* test_logic.c: device path, memory map, decision tables, system registers. */
 void test_device_path(void);
 void test_memmap(void);

@@ -14,12 +14,15 @@ how the machine behaves. What it does say, per suite (probes/uefi/tests/test/sui
                    round trip through tools/nv2_record.py
     XBuildTests    --soc refusal, variants and flags, reproducible builds
     XAuditTests    the image's privileged instructions, its vector tables and its sources
-    XQemuTests     the model image under QEMU with EDK2
+    XQemuTests     the model image under QEMU with EDK2, booted directly and, when the
+                   pinned UEFI Shell is available, started from it as the stick does
 
 It reuses the probe's test kit (probes/uefi/test/uefi_testkit.py) with its own
 work directory, build/uefi/tests-work.
 
 Environment (the probe's switches apply):
+    SP11_UEFI_SHELL=<file>       the pinned UEFI Shell (checked against tools/sp11-boot-media-pins.json
+                                 before it is booted); unset or no file: the Shell run SKIPs
     UEFI_PROBE_SKIP_QEMU=1       skip the QEMU scenarios
     UEFI_PROBE_KEEP=1            keep build/uefi/tests-work for inspection
     UEFI_PROBE_QEMU, UEFI_PROBE_EDK2_CODE, UEFI_PROBE_EDK2_VARS

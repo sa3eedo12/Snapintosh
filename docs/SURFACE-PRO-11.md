@@ -568,11 +568,16 @@ state. No macOS code and no host link.*
    [Appendix A](#appendix-a-hamoa-and-surface-pro-11-constants).
 
 **How the probe fails closed (hardened after an independent review;
-EXPERIMENTAL, host and QEMU tests only).** It draws only into the GOP of the
-console output handle, and only if the memory map describes the whole
-framebuffer as reserved, boot-services data, runtime data or MMIO with no
-overlapping descriptor of another type. Otherwise the `GOP` console line says
-`STATE=NONE WHY=<NO GOP, NOT CONSOLE GOP, BAD MODE or NOT IN MEMORY MAP>`, the
+EXPERIMENTAL, host and QEMU tests only).** It draws only into the framebuffer
+the firmware console already draws into: the GOP of the console output handle,
+or, when no GOP sits on that handle (the UEFI Shell replaces it for the programs
+it starts), the one framebuffer that every usable GOP describes. It draws only if
+the memory map describes the whole framebuffer as reserved, boot-services data,
+runtime data or MMIO with no overlapping descriptor of another type. Otherwise
+the `GOP` console line says
+`STATE=NONE WHY=<NO GOP, BAD MODE, NOT IN MEMORY MAP or AMBIGUOUS GOP>` (the last
+when usable GOPs describe different framebuffers, which the probe will not
+guess between), the
 image prints `EBS STATE=SKIPPED`, keeps the dump and ends the run without
 calling ExitBootServices, because after that call the screen would be the only
 output. Overlapping memory-map descriptors of different types make a range
@@ -585,10 +590,14 @@ instruction audit of the built probe images forbids `msr`, `svc`, `eret` and
 * Which windows the firmware's memory map lists as MMIO (`memmap.txt` on the
   stick). It decides the device-window policy of the X2 test image
   ([section 6.3](#63-x2-silicon-qualification)).
-* The `GOP` line and the framebuffer: whether the console GOP passes the policy
-  (a GOP it refuses ends the run before ExitBootServices, which costs the run;
+* The `GOP` line and the framebuffer: whether the framebuffer passes the policy
+  and which rule chose it (`SEL=CONSOLE` or `SEL=SAME` on the `GOP` line and as
+  `gop_select=` in `summary.txt`; started from the Shell it is expected to be
+  `SAME`, OBSERVED in QEMU only), and whether the unit publishes GOPs that
+  describe different framebuffers (`AMBIGUOUS GOP`). A GOP set it refuses ends
+  the run before ExitBootServices, which costs the run;
   the console may show nothing on this machine, and `summary.txt` then says
-  `gop=none`), what memory type the framebuffer's descriptor has, and whether
+  `gop=none`. Also what memory type the framebuffer's descriptor has, and whether
   the framebuffer is cacheable (the probe cleans and invalidates the lines it
   draws with `DC CIVAC`; a descriptor's attributes are capabilities, not the
   mapping in use, so this is a hardware item).

@@ -19,12 +19,19 @@ on that machine. The suites are modules in probes/uefi/test/:
                      host code that shares nothing with the probe
     suite_rotation   three more QEMU scenarios that start from a stick already
                      holding earlier dump runs (first free RUNnn, last slot, full)
+    suite_shell      one more QEMU scenario, via-shell: the probe started from the
+                     pinned UEFI Shell, by a test-only STARTUP.NSH that types the
+                     operator's command (the real stick has no startup.nsh)
+                     (skipped, never passed, without SP11_UEFI_SHELL)
 
 QEMU is only a model of the device. A PASS there says the probe's logic, its
 dump format and its drawing work against a standard firmware; it says nothing
 about the Surface Pro 11's firmware, GOP, PSCI conduit or EL2 state.
 
 Environment:
+    SP11_UEFI_SHELL=<file>       the pinned UEFI Shell (checked against the size and
+                                 sha256 in tools/sp11-boot-media-pins.json before it
+                                 is booted); unset or no file: the via-shell cases SKIP
     UEFI_PROBE_SKIP_QEMU=1       skip the QEMU scenarios
     UEFI_PROBE_QEMU_WORKERS=N    guests booted in parallel (default 3)
     UEFI_PROBE_KEEP=1            keep build/uefi/test-work for inspection
@@ -51,7 +58,7 @@ sys.path.insert(0, str(ROOT / "probes" / "uefi" / "test"))
 import uefi_testkit as kit  # noqa: E402
 
 SUITES = ("suite_native", "suite_build", "suite_image", "suite_hosttools", "suite_dump",
-          "suite_qemu", "suite_rotation")
+          "suite_qemu", "suite_rotation", "suite_shell")
 
 
 def iter_tests(suite):

@@ -279,19 +279,22 @@ static void gather_config_tables(const efi_system_table *st, probe_facts *f, cfg
     }
 }
 
-/* The only framebuffer this image draws into is the one the firmware console is
- * already drawing into: the GOP installed on ConsoleOutHandle. A second GOP, a
- * Blt-only or bitmask device and a handle that cannot be identified are counted
- * and reported but never chosen, and the chosen framebuffer's full byte range
- * must be described in the UEFI memory map by an allowed type (see
- * probe_gop_check). *status receives the reason when none qualifies. */
+/* The framebuffer this image draws into is the one the firmware console is already
+ * drawing into, chosen by probe_gop_select: the GOP installed on ConsoleOutHandle
+ * when the system table identifies it, otherwise, when the UEFI Shell has replaced
+ * that handle, the one framebuffer that every usable GOP agrees on. A Blt-only or
+ * bitmask device, a range outside the UEFI memory map and a disagreement between
+ * usable GOPs are never chosen. Returns the number of candidates examined (rule 1
+ * stops at the one it chooses); *status receives the reason when none qualifies. */
 static unsigned gather_gop(efi_system_table *st, probe_facts *f, probe_fb *fb, int *status)
 {
     static const efi_guid gop_guid = EFI_GUID_GOP;
     efi_boot_services *bs = st->boot_services;
     efi_handle handles[PROBE_MAX_GOP_HANDLES];
+    probe_gop_candidate cand[PROBE_MAX_GOP_HANDLES];
+    probe_gop_choice choice;
     efi_uintn size = sizeof handles;
-    unsigned candidates = 0;
+    size_t count = 0;
 
     *status = PROBE_GOP_ABSENT;
     if (EFI_IS_ERROR(bs->locate_handle(EFI_LOCATE_BY_PROTOCOL, &gop_guid, NULL, &size, handles)))
@@ -300,34 +303,37 @@ static unsigned gather_gop(efi_system_table *st, probe_facts *f, probe_fb *fb, i
         efi_gop *gop = NULL;
         const efi_gop_mode *m;
         const efi_gop_mode_info *info;
-        int s;
 
         if (EFI_IS_ERROR(bs->handle_protocol(handles[i], &gop_guid, (void **)&gop)) || gop == NULL ||
             gop->mode == NULL || gop->mode->info == NULL)
             continue;
-        candidates++;
         m = gop->mode;
         info = m->info;
-        s = probe_gop_check(&g_memmap, handles[i] == st->console_out_handle, m->frame_buffer_base,
-                            m->frame_buffer_size, info->horizontal_resolution,
-                            info->vertical_resolution, info->pixels_per_scan_line,
-                            info->pixel_format, fb);
-        if (s != PROBE_GOP_OK) {
-            if (s > *status)
-                *status = s;
-            continue;
-        }
-        *status = PROBE_GOP_OK;
-        f->have_gop = 1;
-        f->gop_width = info->horizontal_resolution;
-        f->gop_height = info->vertical_resolution;
-        f->gop_stride_pixels = info->pixels_per_scan_line;
-        f->gop_format = info->pixel_format;
-        f->gop_base = m->frame_buffer_base;
-        f->gop_size = m->frame_buffer_size;
-        break;
+        cand[count].is_console = handles[i] == st->console_out_handle;
+        cand[count].base = m->frame_buffer_base;
+        cand[count].size_bytes = m->frame_buffer_size;
+        cand[count].width = info->horizontal_resolution;
+        cand[count].height = info->vertical_resolution;
+        cand[count].pixels_per_scanline = info->pixels_per_scan_line;
+        cand[count].format = info->pixel_format;
+        count++;
     }
-    return candidates;
+    probe_gop_select(&g_memmap, cand, count, &choice);
+    *status = choice.status;
+    if (choice.status == PROBE_GOP_OK) {
+        const probe_gop_candidate *c = &cand[choice.index];
+
+        *fb = choice.fb;
+        f->have_gop = 1;
+        f->gop_width = c->width;
+        f->gop_height = c->height;
+        f->gop_stride_pixels = c->pixels_per_scanline;
+        f->gop_format = c->format;
+        f->gop_base = c->base;
+        f->gop_size = c->size_bytes;
+        f->gop_rule = choice.rule;
+    }
+    return (unsigned)choice.examined;
 }
 
 /* Takes the memory map that backs every table read and the dump. A map that
@@ -503,6 +509,7 @@ static void print_pre_ebs_summary(const probe_facts *f, unsigned gop_candidates,
         line_str(&l, "FMT", pixel_format_name(f->gop_format));
         line_hex(&l, "BASE", f->gop_base, 16);
         line_hex(&l, "SIZE", f->gop_size, 8);
+        line_str(&l, "SEL", probe_gop_rule_name(f->gop_rule));
     } else {
         line_str(&l, "STATE", "NONE");
         line_str(&l, "WHY", probe_gop_status_name(gop_status));

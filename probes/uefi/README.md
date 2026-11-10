@@ -66,12 +66,13 @@ Before ExitBootServices (boot services available, progress lines on the text
 console, which the emulator tests read from the serial port):
 
 1. Records firmware facts (UEFI revision, vendor), the configuration-table GUIDs,
-   a validated copy of the memory map, and the GOP mode. Only the GOP installed
-   on the console output handle is ever drawn into, and only when probe_fb_init
-   accepts the mode and the memory map describes the whole framebuffer range
-   (reserved, boot-services data, runtime data or MMIO, with no overlapping
-   descriptor of another type). Anything else is refused, the `GOP` console line
-   says `STATE=NONE WHY=<reason>`, and ExitBootServices is skipped.
+   a validated copy of the memory map, and the GOP mode. Only the framebuffer the
+   firmware console already draws into is ever drawn into (see "Framebuffer
+   selection" below), and only when probe_fb_init accepts the mode and the memory
+   map describes the whole framebuffer range (reserved, boot-services data,
+   runtime data or MMIO, with no overlapping descriptor of another type).
+   Anything else is refused, the `GOP` console line says
+   `STATE=NONE WHY=<reason>`, and ExitBootServices is skipped.
 2. Reads ACPI (RSDP, XSDT or RSDT, every table) and SMBIOS only through the memory
    map: a physical range is read only if it lies entirely inside loader, boot,
    runtime, ACPI-reclaim or ACPI-NVS descriptors and no descriptor of any other
@@ -162,6 +163,54 @@ read `CNTFRQ_EL0` and the physical counter `CNTPCT_EL0` after the tiers have
 finished; a zero frequency falls back to the uncalibrated spin loop. Neither is
 reached unless `CurrentEL` is EL2.
 
+### Framebuffer selection
+
+The probe draws into one GOP framebuffer, chosen before ExitBootServices from
+every handle that carries a GOP. A candidate is *usable* only if probe_fb_init
+accepts its mode (RGBX or BGRX pixel format; a Blt-only or bitmask mode is never
+usable), its base is non-zero and 4-byte aligned and its geometry is sane, and
+the memory map describes the whole range it would draw into (see above). Two
+rules choose among the candidates (`probe_gop_select` in `fbtext.c`; the pure
+logic is unit-tested in `test/test_gopsel.c`):
+
+| Rule | Applies when | Chooses | Printed |
+| --- | --- | --- | --- |
+| 1 | a candidate sits on the system table's console output handle | that candidate, if usable. If it is not usable the probe refuses with that reason and rule 2 is not consulted | `SEL=CONSOLE` |
+| 2 | no candidate sits on the console output handle | the framebuffer that every usable candidate agrees on: same base, size, width, height, stride and pixel format. At least one candidate must be usable | `SEL=SAME` |
+
+* Rule 1 is what the first release did and decides every direct launch (the
+  image booted as `BOOTAA64.EFI`): its outcome, including every refusal, is
+  unchanged. With EDK2 under QEMU the console output handle is the console
+  splitter's virtual handle, which carries a GOP of its own (OBSERVED).
+* The UEFI Shell replaces the console output handle for the programs it starts
+  with a handle of its own that has no GOP, so rule 1 cannot match when the probe
+  is started from the Shell, which is the X1 flow (`load` slbounce, then start
+  the probe from the stick). The first release refused every GOP there with
+  `NOT CONSOLE GOP` and so never called ExitBootServices (OBSERVED in a QEMU
+  rehearsal of the stick layout with the pinned Shell).
+* Rule 2 relies on one fact: the firmware console's own GOPs (the splitter's
+  virtual one and the physical device's) mirror one framebuffer, so when every
+  usable GOP describes the same framebuffer it is the one the firmware console
+  draws into (OBSERVED under QEMU with EDK2: both handles report the same base
+  and size). Whether the SP11's firmware, whose console stack is UNKNOWN until
+  X1, has this shape is not known. If two or more *different* framebuffers are
+  usable the probe does not guess: the `GOP` line says
+  `STATE=NONE WHY=AMBIGUOUS GOP`, ExitBootServices is skipped and the dump is
+  kept. Candidates that are not usable (Blt-only, bitmask mode, a range outside
+  the memory map) are never chosen and never count towards ambiguity.
+* `CANDIDATES=<n>` on the `GOP` line is the number of candidates examined; rule 1
+  stops at the one it chooses, so under rule 1 it can be smaller than the number
+  of GOP handles present.
+* The rule that fired is on the screen and in the dump, so it does not need the
+  serial port: the `GOP <w>X<h> SEL=CONSOLE` or `GOP <w>X<h> SEL=SAME` row in the
+  `== PRE-EBS FACTS ==` section of the pages, and `gop_select=CONSOLE` or `SAME` in
+  `summary.txt`. The `GOP` console line carries the same `SEL=...`, just before
+  `CANDIDATES=`.
+* Not implemented: choosing the handle that carries the console-out marker
+  protocols (the physical device's GOP handle has them under QEMU, OBSERVED). It
+  assumes a console stack the SP11 is not known to have; it can corroborate rule
+  2 once X1 has shown what the SP11 firmware publishes.
+
 ### PSCI variant (EXPERIMENTAL)
 
 `sp11-el2-probe-psci.efi` additionally picks a secondary CPU from the MADT,
@@ -186,7 +235,10 @@ UNKNOWN; under QEMU only the `HVC`-at-EL1 path was exercised, and
    stick*: started from anywhere else, the dump is refused (and the screen part
    still works).
 2. Start it. The screen shows the pages in turn. Photograph every page,
-   including the header (build id, `CURRENTEL=`, `PAGE k/N`) and the footer.
+   including the header (build id, `CURRENTEL=`, `PAGE k/N`) and the footer. The
+   `GOP <w>X<h> SEL=...` row in the `== PRE-EBS FACTS ==` section says which
+   framebuffer rule fired (see "Framebuffer selection"). Started from the UEFI
+   Shell, as in the X1 procedure, `SEL=SAME` is the expected value.
 3. Type each row into a text file as shown, including the trailing `|XX`, and run
    `python3 probes/uefi/verify-lines.py transcription.txt`. A `BAD` row is a
    misread character or a wrong CRC: re-read it from the photograph. Only `OK`
@@ -249,7 +301,7 @@ back the files).
 | `memmap.raw` | the UEFI memory map exactly as the firmware returned it |
 | `memmap.txt` | one fixed-width row per descriptor, `# SP11PROBE memmap v1` |
 | `tables.txt` | one row per ACPI table found with its status, `# SP11PROBE tables v1` |
-| `summary.txt` | `key=value` facts: build, variant, firmware, GOP, layout, FADT and PSCI conduit, SMBIOS version, RAM bounds, dump totals |
+| `summary.txt` | `key=value` facts: build, variant, firmware, GOP (including `gop_select=CONSOLE` or `SAME`, the framebuffer rule that fired), layout, FADT and PSCI conduit, SMBIOS version, RAM bounds, dump totals |
 
 * A table that failed validation or had a bad checksum is listed in
   `tables.txt` but its bytes are not copied. Whether such tables should be kept
@@ -293,6 +345,7 @@ nowhere visible, which is why the screen and the stick carry the same facts.
 | Does ExitBootServices return normally under slbounce? | the screen part depends on it | INFERRED yes; the app prints `EBS STATE=FAILED` and returns otherwise |
 | What does the firmware leave in `CPTR_EL2`, `MDCR_EL2`, `CNTHCTL_EL2`? | FP/SIMD, debug and timer traps | the probe avoids FP/SIMD and never writes; the values are what it reports |
 | Does the framebuffer stay visible after the EL2 switch and after ExitBootServices? | the register tiers are shown only there | INFERRED yes; the dump on the stick does not depend on it |
+| Which GOPs does the SP11 firmware publish, and do they describe one framebuffer? | rule 2 of the framebuffer selection needs every usable GOP to agree; two different framebuffers refuse with `AMBIGUOUS GOP`, no GOP at all with `NO GOP` | UNKNOWN until X1; under QEMU with EDK2 both GOP handles report one framebuffer (OBSERVED) |
 | Real panel resolution | page count | INFERRED 2880x1920; read back from `summary.txt` |
 | Real PSCI conduit | the PSCI image | UNKNOWN; the FADT value is in `summary.txt` |
 | ResetSystem after slbounce (R18) | the shipped images end with it | UNKNOWN; if it does not return, the footer says `RESETSYSTEM DID NOT RESET` |
@@ -315,6 +368,7 @@ or `... HygieneTests.test_no_machine_specific_text`.
 | `suite_dump` | the independent dump verifier against synthetic ACPI, SMBIOS and memory-map data, including a brute-force bit-flip sweep |
 | `suite_qemu` | the real images under QEMU with EDK2: positive, no-USB, EL1, PSCI, no-GOP, no-reset and shipped-timing scenarios, each with its own timeout |
 | `suite_rotation` | three more QEMU scenarios that start from a stick that already holds dump runs: the first free `RUNnn` is used, `RUN99` is used, and a full stick gets no dump while every earlier file stays byte-identical |
+| `suite_shell` | one more QEMU scenario, `via-shell`: the pinned UEFI Shell is booted as `BOOTAA64.EFI` and starts `SP11\PROBE.EFI`, as the operator does by typing the path at the Shell prompt (the emulator cannot type, so the test stick alone carries a `STARTUP.NSH` that runs the command; the real stick has none). It asserts the framebuffer rule that fired (`SEL=SAME`), ExitBootServices, the decoded screens and the dump on the stick, and that the framebuffer is the one a direct boot selects. It SKIPs when the Shell is not available (`SP11_UEFI_SHELL`) |
 
 Environment variables:
 
@@ -324,6 +378,7 @@ Environment variables:
 | `UEFI_PROBE_QEMU_WORKERS=N` | guests booted in parallel, default 3 |
 | `UEFI_PROBE_KEEP=1` | keep `build/uefi/test-work` for inspection |
 | `UEFI_PROBE_QEMU`, `UEFI_PROBE_EDK2_CODE`, `UEFI_PROBE_EDK2_VARS` | emulator binary and firmware files |
+| `SP11_UEFI_SHELL=<file>` | the pinned UEFI Shell binary (the file the boot-media tool pins in `tools/sp11-boot-media-pins.json`) for the Shell-launch scenario. It is checked against the pinned size and sha256 before it is booted: unset or no such file gives SKIP lines, a file that is not the pinned one FAILs. The Shell is a downloaded third-party binary and is never in the repository |
 
 QEMU scenarios and what they can and cannot show (OBSERVED unless stated):
 
@@ -337,6 +392,11 @@ QEMU scenarios and what they can and cannot show (OBSERVED unless stated):
   host tests on synthetic data.
 * Only the default shipped image runs with its real timers (scenario `shipped`);
   the `psci` image is covered through its `fast-psci` twin.
+* Every scenario that has a display and boots the probe directly asserts
+  `SEL=CONSOLE` on the `GOP` line; `via-shell` asserts `SEL=SAME`. The emulator's
+  console stack (EDK2's console splitter plus the RamFb device, both handles on
+  one framebuffer) is what this evidence is about; the SP11 firmware's console
+  stack is UNKNOWN until X1.
 
 ## Extending the harness
 
@@ -364,9 +424,12 @@ holds the suites. A new suite is a module `suite_<area>.py` there.
 * `suite_qemu.scenario(name)` returns the recorded result of one emulator
   scenario (booted once, shared by every test that needs it); `SCENARIOS` lists
   the names. Add a scenario there rather than booting a guest in a test. A
-  scenario can start from files already on the stick (`Scenario.seed`);
-  `suite_rotation` registers its scenarios in `SCENARIOS` and `ORDER` when it is
-  imported.
+  scenario can start from files already on the stick (`Scenario.seed`) and can
+  boot the pinned UEFI Shell instead of the image (`Scenario.shell`; the image
+  goes onto the stick and a test-only `STARTUP.NSH` starts it, see
+  `uefi_testkit.shell_launch_files`);
+  `suite_rotation` and `suite_shell` register their scenarios in `SCENARIOS` and
+  `ORDER` when they are imported.
 * Keep every authored file under 1,500 lines and 50 KiB: `HygieneTests` (in
   `suite_hosttools`) enforces it.
 

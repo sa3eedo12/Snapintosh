@@ -82,22 +82,78 @@ enum probe_gop_status {
     PROBE_GOP_NOT_CONSOLE = 2, /* not the GOP of the console handle: never drawn into */
     PROBE_GOP_BAD_FB = 3,      /* probe_fb_init refused the mode */
     PROBE_GOP_NOT_IN_MAP = 4,  /* the range is not wholly described by an allowed type */
+    PROBE_GOP_AMBIGUOUS = 5,   /* no console GOP, and different framebuffers qualify */
 };
 
 /* The refusals are ordered by how much they say about the machine: a caller that
  * saw several candidates reports the numerically greatest. */
 const char *probe_gop_status_name(int status);
 
-/* The whole policy for choosing a framebuffer, in one place so that a host test
- * can drive it with hostile input. A mode is usable only if it is the console
- * handle's GOP (an unidentified display is never drawn into), probe_fb_init
- * accepts it, and its full byte range [base, base + extent) lies inside the
- * UEFI memory map in descriptors of PROBE_FB_TYPES_MASK and nothing else. With
- * no valid memory map nothing is usable. On PROBE_GOP_OK *out is initialised,
- * otherwise it is not touched. */
+/* The policy for one GOP, in one place so that a host test can drive it with
+ * hostile input. A mode is usable only if the caller vouches for it as the
+ * console's display (is_console: rule 1 says whether its handle is the console-out
+ * handle, rule 2 vouches for every candidate and judges them by comparing
+ * framebuffers instead), probe_fb_init accepts it, and its
+ * full byte range [base, base + extent) lies inside the UEFI memory map in
+ * descriptors of PROBE_FB_TYPES_MASK and nothing else. With no valid memory map
+ * nothing is usable. On PROBE_GOP_OK *out is initialised, otherwise it is not
+ * touched. probe_gop_select applies it to every GOP the firmware offers. */
 int probe_gop_check(const probe_memmap *map, int is_console, uint64_t base, uint64_t size_bytes,
                     uint32_t width, uint32_t height, uint32_t pixels_per_scanline,
                     uint32_t gop_format, probe_fb *out);
+
+/* One GOP instance exactly as the firmware reported it. is_console says that
+ * its handle is the console-out handle the system table carries. */
+typedef struct {
+    int is_console;
+    uint64_t base;
+    uint64_t size_bytes;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pixels_per_scanline;
+    uint32_t format;
+} probe_gop_candidate;
+
+/* Which rule chose the framebuffer. It is printed on the GOP console line, on
+ * the page and in summary.txt so that a photograph says which rule fired. */
+enum probe_gop_rule {
+    PROBE_GOP_RULE_NONE = 0,
+    PROBE_GOP_RULE_CONSOLE = 1, /* the GOP of the system table's console-out handle */
+    PROBE_GOP_RULE_SAME = 2,    /* no GOP is on that handle; every usable GOP is one framebuffer */
+};
+
+const char *probe_gop_rule_name(int rule);
+
+typedef struct {
+    int status;      /* enum probe_gop_status; PROBE_GOP_OK when a framebuffer was chosen */
+    int rule;        /* enum probe_gop_rule; PROBE_GOP_RULE_NONE unless status is PROBE_GOP_OK */
+    size_t index;    /* the chosen candidate, the lowest index among identical ones; OK only */
+    size_t examined; /* candidates looked at: rule 1 stops at the one it chooses, the rest all */
+    probe_fb fb;     /* initialised on PROBE_GOP_OK, all zero otherwise */
+} probe_gop_choice;
+
+/* Picks the one framebuffer this image may draw into, or refuses.
+ *
+ * Rule 1 (PROBE_GOP_RULE_CONSOLE): the GOP of the console-out handle that
+ * passes probe_gop_check. This is the only rule when the image is started by
+ * firmware directly, and its outcome, refusals included, is unchanged by rule 2.
+ *
+ * Rule 2 (PROBE_GOP_RULE_SAME) applies only when NO candidate is on the console
+ * handle, which is what the UEFI Shell causes: it hands every application a
+ * system table whose console-out handle is its own and carries no GOP. Every
+ * candidate that passes all of probe_gop_check except the console test is
+ * collected. If at least one qualifies and all of them are the identical
+ * framebuffer (same base, size, width, height, stride and format), that
+ * framebuffer is chosen: a console splitter's virtual GOP and the physical GOP
+ * under it mirror one framebuffer, so it is the one the firmware console draws
+ * into. Qualifying GOPs that disagree give PROBE_GOP_AMBIGUOUS and nothing is
+ * chosen. A GOP that fails a mode or memory-map check does not qualify, so it
+ * is never chosen and never counts against the others. If none qualifies the
+ * status is the greatest probe_gop_check refusal, or PROBE_GOP_ABSENT for an
+ * empty list. A console handle that is present but refused is not second-guessed
+ * by rule 2, whatever else is on offer. */
+void probe_gop_select(const probe_memmap *map, const probe_gop_candidate *cand, size_t count,
+                      probe_gop_choice *out);
 
 
 uint32_t probe_fb_pack(const probe_fb *fb, uint8_t r, uint8_t g, uint8_t b);

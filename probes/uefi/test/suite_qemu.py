@@ -17,7 +17,8 @@ recording, so one more assertion costs no extra boot.
   shipped    the default image at its real 60 s timing, first frames only
 
 suite_rotation registers three more, which start from a stick that already holds
-earlier dump runs (Scenario.seed).
+earlier dump runs (Scenario.seed); suite_shell registers via-shell, the default
+image started from the pinned UEFI Shell the way the X1 stick starts it.
 
 Adding a scenario: append it to SCENARIOS and ORDER, then add a QemuCase
 subclass that mixes in the checks which apply to it.  The pure functions
@@ -83,7 +84,7 @@ DERIVED = re.compile(r"(MMU |HCR VM=|PAUTH |(?:%s)=)" % "|".join(f[0] for f in c
 FACT_FAMILIES = tuple((name, re.compile(prefix), re.compile(shape)) for name, prefix, shape in (
     ("FW REV", r"FW REV=", r"FW REV=[0-9A-F]{8}"),
     ("FW VENDOR", r"FW VENDOR=", r"FW VENDOR=\S.*"),
-    ("GOP SIZE-PX", r"GOP \d", r"GOP \d+X\d+"),
+    ("GOP SIZE-PX", r"GOP \d", r"GOP \d+X\d+ SEL=(CONSOLE|SAME)"),
     ("GOP STRIDE", r"GOP STRIDE=", r"GOP STRIDE=\d+ FMT=(BGRX|RGBX|\?)"),
     ("GOP BASE", r"GOP BASE=", r"GOP BASE=[0-9A-F]{16}"),
     ("GOP SIZE", r"GOP SIZE=", r"GOP SIZE=[0-9A-F]{16}"),
@@ -113,6 +114,7 @@ SUMMARY_LINKS = (
     ("gop_width", "GOP", "W", True), ("gop_height", "GOP", "H", True),
     ("gop_stride_pixels", "GOP", "STRIDE", True),
     ("gop_base", "GOP", "BASE", True), ("gop_size", "GOP", "SIZE", True),
+    ("gop_select", "GOP", "SEL", False),
     ("layout_scale", "LAYOUT", "SCALE", True), ("layout_cols", "LAYOUT", "COLS", True),
     ("layout_rows", "LAYOUT", "ROWS", True), ("layout_pages", "LAYOUT", "PAGES", True),
     ("config_tables", "CFG", "N", True),
@@ -136,6 +138,8 @@ class Scenario:
     hold: str = ""               # footer a run that never ends must keep showing
     full_pages: bool = True      # every page must be observed
     seed: tuple = ()             # (stick path, bytes) pairs already on the stick at boot
+    sel: str = "CONSOLE"         # rule the GOP marker must name in SEL=
+    shell: bool = False          # booted as the pinned UEFI Shell; a test-only STARTUP.NSH starts the probe
 
 
 SCENARIOS = {s.name: s for s in (
@@ -244,15 +248,19 @@ def _incomplete(scn, result, stop):
 
 
 def _execute(scn):
+    shell = kit.pinned_shell() if scn.shell else None  # skips before anything is built or booted
     build = kit.images()[scn.variant]
     assets, font, stop = kit.qemu_assets(), kit.font_table(), _STOPS[scn.stop]
+    efi, seed = build.image, dict(scn.seed)
+    if shell:
+        efi, seed = shell, {**seed, **kit.shell_launch_files(build.image)}
     attempts = 0
     while True:
         attempts += 1
         cfg = qemu_probe.RunConfig(
-            name=scn.name, efi=build.image, workdir=kit.WORK / "qemu" / scn.name,
-            el2=scn.el2, smp=scn.smp, disk=scn.disk, gop=scn.gop, extra_files=dict(scn.seed),
-            boot_timeout=90.0, pre_ebs_timeout=60.0,
+            name=scn.name, efi=efi, workdir=kit.WORK / "qemu" / scn.name,
+            el2=scn.el2, smp=scn.smp, disk=scn.disk, gop=scn.gop, extra_files=seed,
+            boot_timeout=150.0 if scn.shell else 90.0, pre_ebs_timeout=60.0,
             capture_seconds=60.0 if scn.ends_itself else 45.0, capture_interval=0.5,
             stop_when=stop)
         try:
@@ -264,7 +272,7 @@ def _execute(scn):
         # Only an incomplete recording is retried (load from other jobs can starve a guest);
         # a recording whose content is wrong fails the cases on the first attempt.
         _RETRIED.append(scn.name)
-    return Outcome(scn, result, attempts, build.build_id, build.image.read_bytes())
+    return Outcome(scn, result, attempts, build.build_id, efi.read_bytes())
 
 
 def scenario(name):
@@ -410,6 +418,7 @@ def marker_problems(view):
             problems.append(f"GOP geometry is inconsistent: {gop}")
         if gop.get("FMT") not in ("BGRX", "RGBX"):
             problems.append(f"GOP FMT {gop.get('FMT')!r} is not BGRX or RGBX")
+        expect_fields(problems, "GOP", gop, {"SEL": scn.sel})
         scale, cols, rows, pages = (field_num(layout, k) for k in ("SCALE", "COLS", "ROWS", "PAGES"))
         if None in (scale, cols, rows, pages) or not (
                 screenlib.MIN_SCALE <= scale <= screenlib.MAX_SCALE
@@ -448,7 +457,8 @@ def marker_problems(view):
     return problems
 
 
-def stick_problems(view):
+def stick_problems(view, extra=()):
+    """`extra` names stick files the harness put beside the boot image, outside the dump."""
     stick = view.result.stick
     if stick is None:
         return [f"the stick could not be read back: {view.result.stick_error}"]
@@ -456,12 +466,12 @@ def stick_problems(view):
     problems = list(checks.dump_problems(files, RUN_DIR, view.marker("DUMP")))
     if files.get(BOOT_FILE) != view.outcome.efi:
         problems.append(f"{BOOT_FILE} is not the image that was booted")
-    stray = [p for p in files if p != BOOT_FILE and not p.startswith(RUN_DIR + "/")]
+    stray = [p for p in files if p != BOOT_FILE and p not in extra and not p.startswith(RUN_DIR + "/")]
     badnames = [n for n in run if n not in RUN_PLAIN and not TABLE_NAME.fullmatch(n)]
     missing = [n for n in (*REQUIRED_TABLES, *sorted(RUN_PLAIN)) if n not in run]
     for what, names in (("stray files", stray), ("unexpected names", badnames),
-                        ("missing files", missing), ("unexpected directories",
-                                                     sorted(set(stick.dirs) - STICK_DIRS))):
+                        ("missing files", missing), ("unexpected directories", sorted(
+                            set(stick.dirs) - STICK_DIRS - {p.rpartition("/")[0] for p in extra}))):
         if names:
             problems.append(f"{what}: {names}")
     expect(problems, "RSDP.bin length", len(run.get("RSDP.bin", b"")), 36)
@@ -616,7 +626,7 @@ def expected_facts(view):
     facts = {
         "FW REV": "FW REV=%08X" % field_num(fw, "REV"),
         "FW VENDOR": "FW VENDOR=" + fw["VENDOR"],
-        "GOP SIZE-PX": f"GOP {gop['W']}X{gop['H']}",
+        "GOP SIZE-PX": f"GOP {gop['W']}X{gop['H']} SEL={gop['SEL']}",
         "GOP STRIDE": f"GOP STRIDE={gop['STRIDE']} FMT={gop['FMT']}",
         "GOP BASE": "GOP BASE=%016X" % field_num(gop, "BASE"),
         "GOP SIZE": "GOP SIZE=%016X" % field_num(gop, "SIZE"),

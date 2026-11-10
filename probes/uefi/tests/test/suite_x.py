@@ -8,8 +8,10 @@
     XAuditTests    the instruction audit of the built images, the vector table layout and
                    the source audit, each against deliberately defective input
     XQemuTests     the model image under QEMU + EDK2 (GICv3, SMMUv3, NVMe behind a root
-                   port): the whole run, the files on the stick, the record through the
-                   monitor's own gate logic, the retyped screen, a guest at EL1, the fatal page
+                   port): the whole run, the same run started from the pinned UEFI Shell
+                   (skipped without SP11_UEFI_SHELL), the files on the stick, the record
+                   through the monitor's own gate logic, the retyped screen, a guest at
+                   EL1, the fatal page
 
 QEMU is a model. A PASS there says the image's control flow, record and screen
 work against a standard firmware and a standard virtual machine; it says nothing
@@ -586,13 +588,17 @@ def machine(spec):
         qemu_probe.qemu_command = original
 
 
-def scenario(name, variant, spec, capture, el2=True, until=None, capture_when=None):
+def scenario(name, variant, spec, capture, el2=True, until=None, capture_when=None, shell=False):
+    """`shell`: boot the pinned UEFI Shell; a test-only STARTUP.NSH types the operator's command."""
     def build():
+        launcher = kit.pinned_shell() if shell else None  # skips before anything is booted
         try:
             assets = qemu_probe.find_assets()
         except qemu_probe.Unavailable as exc:
             raise unittest.SkipTest(str(exc))
-        cfg = qemu_probe.RunConfig(name=f"x-{name}", efi=x_images()[variant].image,
+        image = x_images()[variant].image
+        cfg = qemu_probe.RunConfig(name=f"x-{name}", efi=launcher or image,
+                                   extra_files=kit.shell_launch_files(image) if launcher else {},
                                    workdir=kit.work_dir(f"xq-{name}") / "run", capture_seconds=capture,
                                    el2=el2, smp=2, boot_timeout=300.0, pre_ebs_timeout=240.0,
                                    stop_when=until, capture_when=capture_when)
@@ -672,8 +678,7 @@ class XQemuTests(Base):
         if kit.SKIP_QEMU:
             self.skipTest("UEFI_PROBE_SKIP_QEMU=1")
 
-    def test_default_run_model_image(self):
-        out = default_run()
+    def model_run_problems(self, out):
         problems = [f"harness: {out.failure}"] if out.failure else []
         marks = x_markers(out)
         results = {m[1].get("ID"): m[1] for m in marks if m[0] == "RESULT"}
@@ -712,6 +717,27 @@ class XQemuTests(Base):
         bad = [r.check.payload for s in stable_screens(out) for r in s.bad_rows()]
         if bad:
             problems.append(f"{len(bad)} rows failed their per-row check: {bad[:3]}")
+        return problems
+
+    def test_default_run_model_image(self):
+        self.check(self.model_run_problems(default_run()))
+
+    def test_default_run_started_from_the_pinned_shell(self):
+        """The Shell gives the image a console handle of its own, so the probe's GOP rule must
+        find the screen by the framebuffer (SEL=SAME) for the same run to happen as above."""
+        out = scenario("shell", "model", FULL, 150, until=whole_report_seen, shell=True)
+        problems = kit.shell_launch_problems(out.serial)
+        gop = out.marker("GOP")
+        if gop is None or gop.fields.get("SEL") != "SAME":
+            problems.append(f"the GOP marker does not say SEL=SAME: {gop and gop.fields}")
+        problems += self.model_run_problems(out)
+        files = {} if out.stick is None else out.stick.files
+        names = ("results.txt", "nv2.txt", "nv2.json", "nv2.bin")
+        problems += [f"SP11DUMP/RUN01/x2-{n} was not written" for n in names
+                     if f"SP11DUMP/RUN01/x2-{n}" not in files]
+        pinned = kit.shell_pin_problem(files.get("EFI/BOOT/BOOTAA64.EFI", b""))
+        if pinned:
+            problems.append(f"EFI/BOOT/BOOTAA64.EFI is {pinned}")
         self.check(problems)
 
     def test_the_record_files_on_the_stick(self):

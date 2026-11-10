@@ -27,7 +27,9 @@ Nothing in the test tree opens a serial port, a block device or a USB device.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import importlib.util
+import json
 import os
 import re
 import shlex
@@ -168,8 +170,8 @@ NATIVE_SOURCE = ROOT / "tools" / "test-uefi-probe-logic.c"
 SANITIZE_FLAGS = ["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
                   "-fno-omit-frame-pointer"]
 NATIVE_SECTIONS = ("crc8", "string builder", "font", "line format", "layout", "framebuffer",
-                   "device path", "memory map", "decision tables", "system registers",
-                   "acpi scan", "acpi scan (fuzz)", "smbios", "fadt and madt",
+                   "framebuffer choice", "device path", "memory map", "decision tables",
+                   "system registers", "acpi scan", "acpi scan (fuzz)", "smbios", "fadt and madt",
                    "register collection", "report", "dump caps", "dump overwrite",
                    "dump errors", "dump run")
 _OK_SECTION = re.compile(r"^ok\s+(.+?)\s+(\d+) checks$")
@@ -283,6 +285,78 @@ def qemu_assets():
         except qemu_probe.Unavailable as exc:
             raise unittest.SkipTest(f"QEMU or EDK2 firmware unavailable ({exc})")
     return once("assets", find)
+
+
+# ---- The pinned UEFI Shell: the X1 stick starts the probe through it --------
+
+SHELL_ENV = "SP11_UEFI_SHELL"
+SHELL_PINS = ROOT / "tools" / "sp11-boot-media-pins.json"
+# On the real stick the operator types the probe's path at the Shell prompt: the staged tree has
+# no startup.nsh, and the media tool flags one. The emulator cannot type, so the test stick alone
+# carries a STARTUP.NSH that runs the same command. The path form is the one the operator types,
+# and the names are 8.3 upper case because the emulator's FAT writer stores no other.
+STARTUP_NSH = b"fs0:\r\nSP11\\PROBE.EFI\r\n"
+
+
+def shell_pin():
+    """(size, sha256) of the UEFI Shell as tools/sp11-boot-media-pins.json pins it."""
+    entry = json.loads(SHELL_PINS.read_text(encoding="utf-8"))["shell"]
+    return int(entry["size"]), str(entry["sha256"]).lower()
+
+
+def shell_pin_problem(data, pin=None):
+    """Why `data` is not the pinned UEFI Shell, or "" when it is."""
+    size, digest = pin or shell_pin()
+    got = hashlib.sha256(data).hexdigest()
+    if len(data) == size and got == digest:
+        return ""
+    return (f"not the pinned UEFI Shell: {len(data)} bytes, sha256 {got}; "
+            f"{SHELL_PINS.name} pins {size} bytes, sha256 {digest}")
+
+
+def pinned_shell(env=None, pin=None):
+    """The UEFI Shell file that SP11_UEFI_SHELL names, once it matches the pin.
+
+    The Shell is a downloaded third-party binary that is not in the repository, so an
+    unset variable or a missing file skips every scenario that needs it. A file that is
+    there but is not the pinned one fails: a scenario must never run, and then pass,
+    against a binary nobody pinned.
+    """
+    name = (os.environ if env is None else env).get(SHELL_ENV, "").strip()
+    if not name:
+        raise unittest.SkipTest(f"{SHELL_ENV} is not set: the pinned UEFI Shell is not available")
+    path = Path(name)
+    if not path.is_file():
+        raise unittest.SkipTest(f"{SHELL_ENV} names no file: the pinned UEFI Shell is not available")
+    problem = shell_pin_problem(path.read_bytes(), pin)
+    if problem:
+        raise AssertionError(f"the file {SHELL_ENV} names is {problem}")
+    return path
+
+
+def shell_launch_files(probe_image):
+    """Stick files (besides the Shell as BOOTAA64.EFI) that make the Shell start the probe."""
+    return {"STARTUP.NSH": STARTUP_NSH, "SP11/PROBE.EFI": Path(probe_image).read_bytes()}
+
+
+SHELL_BANNER = "UEFI Interactive Shell"
+LAUNCH_ECHO = "SP11\\PROBE.EFI"  # what the Shell echoes for the command STARTUP.NSH runs
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def shell_launch_problems(serial):
+    """Whether the serial log shows the Shell starting the probe rather than a direct boot.
+
+    The Shell prints its banner and echoes each STARTUP.NSH command, so both must come
+    before the probe's BEGIN marker. A probe booted directly prints neither.
+    """
+    text = _ANSI.sub("", serial)
+    begin = text.find(qemu_probe.MARKER_PREFIX + "BEGIN")
+    if begin < 0:
+        return ["the probe printed no BEGIN marker"]
+    return [f"the Shell's {what} {needle!r} is not in the log before the probe's BEGIN marker"
+            for what, needle in (("banner", SHELL_BANNER), ("command echo", LAUNCH_ECHO))
+            if needle not in text[:begin]]
 
 
 @dataclasses.dataclass

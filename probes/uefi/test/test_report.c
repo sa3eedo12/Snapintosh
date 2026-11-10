@@ -189,6 +189,7 @@ static void random_facts(probe_facts *f)
     f->gop_format = rnd_below(5);
     f->gop_base = rnd();
     f->gop_size = rnd();
+    f->gop_rule = (int)rnd_below(4);
     f->have_layout = (int)rnd_below(2);
     f->layout_scale = 3 + rnd_below(10);
     f->layout_cols = 1 + rnd_below(3);

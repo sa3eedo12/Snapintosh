@@ -100,6 +100,17 @@ produced only by `tools/build-uefi-tests.py`.
   on its way out, and a timer interrupt would reach this image's vector table,
   which cannot service it. Console text produced while the scope is installed is
   held back and printed after the scope is left.
+* **The framebuffer is the probe's.** `hook.c` adds no GOP logic: the image takes
+  the framebuffer `probe_gop_select` chose (`fbtext.c`). Started from the UEFI Shell,
+  which replaces the console output handle, that is the framebuffer every usable
+  GOP agrees on (`SEL=SAME`); two different usable framebuffers refuse as
+  `AMBIGUOUS GOP`. With no framebuffer `tests_hook_pre_ebs` refuses before any test
+  runs (`SP11X2 REFUSE REASON=NO LAYOUT FOR THE REPORT`, then `EBS STATE=SKIPPED
+  REASON=TESTS REFUSED`): no ExitBootServices, no phase A or phase B, no report
+  pages and no `x2-*.txt` file; only the probe's own dump is on the stick (OBSERVED
+  in QEMU with no display device). `suite_x` boots the model image through the
+  pinned Shell when `SP11_UEFI_SHELL` names it (SKIP otherwise); that is OBSERVED
+  in QEMU, and the unit's console stack is UNKNOWN until X1.
 * **A fatal page needs only the framebuffer.** The layout validated before
   ExitBootServices is kept, so a failure in phase A puts a page on the screen
   instead of a console line that may be invisible on the machine. Nothing is

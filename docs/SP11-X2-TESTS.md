@@ -47,6 +47,18 @@ meet at the same moment.
   dump, into the run directory the probe created (`\SP11DUMP\RUNnn\`). It never
   creates a directory, never overwrites a file, and writes only to the volume it
   was loaded from, and only if that volume is a USB stick.
+* Start it the way you start the probe: from the UEFI Shell. The framebuffer is
+  chosen by the probe's own rule (see "Framebuffer selection" in
+  [probes/uefi/README.md](../probes/uefi/README.md)): the GOP of the console output
+  handle, or, because the Shell replaces that handle for the programs it starts,
+  the one framebuffer that every usable GOP describes. Which rule fired is on the
+  `GOP` console line (`SEL=CONSOLE` or `SEL=SAME`) and in the dump's `summary.txt`
+  (`gop_select=`); the X2 pages do not show it. If no framebuffer can be chosen
+  (`GOP STATE=NONE WHY=...`, for example `AMBIGUOUS GOP` when usable GOPs describe
+  different framebuffers), the image runs no test: it prints `SP11X2 REFUSE
+  REASON=NO LAYOUT FOR THE REPORT` and `EBS STATE=SKIPPED REASON=TESTS REFUSED`,
+  never calls ExitBootServices, writes none of its `x2-*.txt` files and leaves only
+  the probe's own dump on the stick. The `GOP STATE=NONE WHY=...` line says why.
 * AC power, as for any hardware experiment. One hardware client at a time.
 * Have a phone or camera ready: after ExitBootServices the screen is the only
   output.
@@ -209,7 +221,10 @@ ExitBootServices), so photograph every page of the report.
 * **The first run must observe:** the real exception syndrome of the control
   (EC 0x18 with the `TPIDR_EL2` encoding), whether the redirect lands at `0x090`,
   that the vector table and the ERET to EL1 behave under the SP11's firmware
-  (EXPERIMENTAL: QEMU exercises them, the SP11 has never been tried), whether
+  (EXPERIMENTAL: QEMU exercises them, the SP11 has never been tried), which
+  framebuffer rule fired (`SEL=` on the `GOP` console line and `gop_select=` in
+  `summary.txt`; the rule works under QEMU with the pinned Shell, OBSERVED, but
+  the unit's console stack is UNKNOWN until X1), whether
   the page rows fit the panel (the layout is chosen from the framebuffer
   size), whether the UEFI memory map lists the GIC, PCIe and SMMU windows as MMIO
   (the `MAP MMIO=n UNLISTED=n` row of T05 to T07 and the probe's `memmap.txt`;

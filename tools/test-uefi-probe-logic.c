@@ -23,7 +23,7 @@
  *       tools/test-uefi-probe-logic.c probes/uefi/test/test_text.c \
  *       probes/uefi/test/test_logic.c probes/uefi/test/test_acpi.c \
  *       probes/uefi/test/test_report.c probes/uefi/test/test_psci.c \
- *       probes/uefi/test/test_dump.c \
+ *       probes/uefi/test/test_dump.c probes/uefi/test/test_gopsel.c \
  *       probes/uefi/logic.c probes/uefi/acpi.c probes/uefi/fbtext.c \
  *       probes/uefi/font6x8.c probes/uefi/report.c probes/uefi/sysreg.c \
  *       probes/uefi/psci.c \
@@ -99,6 +99,7 @@ int main(int argc, char **argv)
     test_layout();
     test_framebuffer();
     test_gop_policy();
+    test_gop_select();
     test_cache_walk();
     test_device_path();
     test_memmap();

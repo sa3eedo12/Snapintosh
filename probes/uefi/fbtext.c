@@ -68,6 +68,22 @@ const char *probe_gop_status_name(int status)
         return "BAD MODE";
     case PROBE_GOP_NOT_IN_MAP:
         return "NOT IN MEMORY MAP";
+    case PROBE_GOP_AMBIGUOUS:
+        return "AMBIGUOUS GOP";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+const char *probe_gop_rule_name(int rule)
+{
+    switch (rule) {
+    case PROBE_GOP_RULE_NONE:
+        return "NONE";
+    case PROBE_GOP_RULE_CONSOLE:
+        return "CONSOLE";
+    case PROBE_GOP_RULE_SAME:
+        return "SAME";
     default:
         return "UNKNOWN";
     }
@@ -89,6 +105,86 @@ int probe_gop_check(const probe_memmap *map, int is_console, uint64_t base, uint
         return PROBE_GOP_NOT_IN_MAP;
     *out = trial;
     return PROBE_GOP_OK;
+}
+
+static int gop_check_candidate(const probe_memmap *map, const probe_gop_candidate *c,
+                               int as_console, probe_fb *out)
+{
+    return probe_gop_check(map, as_console, c->base, c->size_bytes, c->width, c->height,
+                           c->pixels_per_scanline, c->format, out);
+}
+
+/* The size is part of the identity: two GOPs that disagree about how large the
+ * framebuffer is are not shown to be one device, so they are not mirrors. */
+static int gop_same_framebuffer(const probe_gop_candidate *a, const probe_gop_candidate *b)
+{
+    return a->base == b->base && a->size_bytes == b->size_bytes && a->width == b->width &&
+           a->height == b->height && a->pixels_per_scanline == b->pixels_per_scanline &&
+           a->format == b->format;
+}
+
+void probe_gop_select(const probe_memmap *map, const probe_gop_candidate *cand, size_t count,
+                      probe_gop_choice *out)
+{
+    probe_fb trial;
+    size_t first = 0;
+    size_t qualifying = 0;
+    int console_seen = 0;
+    int differ = 0;
+    int status = PROBE_GOP_ABSENT;
+
+    probe_memset(out, 0, sizeof *out);
+    out->examined = count;
+
+    for (size_t i = 0; i < count; i++) {
+        int s = gop_check_candidate(map, &cand[i], cand[i].is_console, &trial);
+
+        if (cand[i].is_console)
+            console_seen = 1;
+        if (s == PROBE_GOP_OK) {
+            out->status = PROBE_GOP_OK;
+            out->rule = PROBE_GOP_RULE_CONSOLE;
+            out->index = i;
+            out->examined = i + 1;
+            out->fb = trial;
+            return;
+        }
+        if (s > status)
+            status = s;
+    }
+    if (console_seen) {
+        out->status = status;
+        return;
+    }
+
+    /* The reasons of rule 1 only said "not the console"; now every candidate is
+     * judged on its mode and on the memory map alone. */
+    status = PROBE_GOP_ABSENT;
+    for (size_t i = 0; i < count; i++) {
+        int s = gop_check_candidate(map, &cand[i], 1, &trial);
+
+        if (s != PROBE_GOP_OK) {
+            if (s > status)
+                status = s;
+            continue;
+        }
+        if (qualifying++ == 0) {
+            first = i;
+            out->fb = trial;
+        } else if (!gop_same_framebuffer(&cand[first], &cand[i])) {
+            differ = 1;
+        }
+    }
+    if (qualifying == 0) {
+        out->status = status;
+    } else if (differ) {
+        probe_memset(&out->fb, 0, sizeof out->fb);
+        out->status = PROBE_GOP_AMBIGUOUS;
+    } else {
+        out->status = PROBE_GOP_OK;
+        out->rule = PROBE_GOP_RULE_SAME;
+        out->index = first;
+    }
 }
 
 uint32_t probe_fb_pack(const probe_fb *fb, uint8_t r, uint8_t g, uint8_t b)

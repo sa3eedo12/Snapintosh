@@ -424,6 +424,8 @@ static void build_facts(probe_report *r, const probe_facts *f)
         probe_sb_dec(&sb, f->gop_width);
         probe_sb_putc(&sb, 'X');
         probe_sb_dec(&sb, f->gop_height);
+        probe_sb_puts(&sb, " SEL=");
+        probe_sb_puts(&sb, probe_gop_rule_name(f->gop_rule));
     } else {
         probe_sb_puts(&sb, "GOP NONE");
     }

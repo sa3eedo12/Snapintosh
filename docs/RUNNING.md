@@ -534,7 +534,17 @@ firmware tables to `\SP11DUMP\RUNnn\` on that stick, calls ExitBootServices
 itself and then shows the EL2 state as photographable pages; photograph every
 page, header and footer included, type the rows into a file and check them with
 `python3 probes/uefi/verify-lines.py`. The operator procedure is in
-[probes/uefi/README.md](../probes/uefi/README.md). The probe installs no vector,
+[probes/uefi/README.md](../probes/uefi/README.md). Start the probe from the UEFI
+Shell the stick boots, by typing `SP11\PROBE.EFI` after `load SP11\SLBOUNCE.EFI`
+(the stick has no `startup.nsh`). The Shell replaces the console output handle
+for the programs it starts, so the probe chooses its framebuffer by a second
+rule there: the one framebuffer that every usable GOP describes; two different
+framebuffers are refused as `AMBIGUOUS GOP` (see "Framebuffer selection" in the
+probe README). The `GOP <w>X<h> SEL=...` row in the `== PRE-EBS FACTS ==`
+section of the pages says which rule fired, and `SEL=SAME` is the expected value
+when started from the Shell. That the rule works is OBSERVED in a QEMU model of
+the stick with the pinned Shell; what the unit's own console stack publishes is
+UNKNOWN until X1. The probe installs no vector,
 so it reads only ID registers that every Armv8.0 EL2 may read (a few more only
 when a feature field says they exist):
 `ID_AA64MMFR3_EL1`, `ID_AA64MMFR4_EL1`, `ID_AA64ISAR2_EL1` and `ID_AA64DFR1_EL1`
@@ -550,7 +560,8 @@ Record, besides the pages:
 
 | Where | What to record | What it means |
 | --- | --- | --- |
-| The console line `GOP`, if the console is visible | `STATE=NONE WHY=<reason>`, then `EBS STATE=SKIPPED` | The probe refused the framebuffer (`NO GOP`, `NOT CONSOLE GOP`, `BAD MODE` or `NOT IN MEMORY MAP`) and ended the run without calling ExitBootServices; the dump is kept and `summary.txt` says `gop=none`. The screen part of the run is lost, so record the reason |
+| The console line `GOP`, if the console is visible | `STATE=NONE WHY=<reason>`, then `EBS STATE=SKIPPED` | The probe refused the framebuffer (`NO GOP`, `BAD MODE`, `NOT IN MEMORY MAP` or `AMBIGUOUS GOP`) and ended the run without calling ExitBootServices; the dump is kept and `summary.txt` says `gop=none`. The screen part of the run is lost, so record the reason. `AMBIGUOUS GOP` means no GOP sits on the console output handle (as under the Shell) and the usable GOPs describe different framebuffers; `CANDIDATES=<n>` on the line counts the GOPs examined |
+| The `GOP <w>X<h> SEL=...` row in the `== PRE-EBS FACTS ==` section of the pages, and the `GOP` console line's `SEL=` | `SEL=CONSOLE` or `SEL=SAME` | Which rule chose the framebuffer: `CONSOLE` is the GOP of the console output handle, `SAME` is the framebuffer all usable GOPs agree on (expected when started from the Shell). `summary.txt` says `gop_select=` with the same word |
 | The page rows `DUMP STATE=` and `DUMP RUN=nn FILES= BYTES=` | Anything but `OK` | `OK` only if every file, then the run directory, `SP11DUMP` and the volume root, were flushed and closed; a failure shows `PARTIAL` or `ERROR`, never `OK` |
 | The PSCI page, `PSCI RUN=` | `HVC REFUSED` | The FADT declares an HVC conduit and the image made no call. `psci_conduit` in `summary.txt` names the conduit in every case |
 | `memmap.txt` and `summary.txt` in the dump | The whole files | Which windows the UEFI memory map lists as MMIO, the framebuffer's descriptor and the conduit; `memmap.txt` is the input of the window-policy choice below |

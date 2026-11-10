@@ -131,6 +131,7 @@ typedef struct {
     uint32_t gop_format;
     uint64_t gop_base;
     uint64_t gop_size;
+    int gop_rule; /* enum probe_gop_rule: which rule chose this GOP */
 
     int have_layout;
     uint32_t layout_scale;

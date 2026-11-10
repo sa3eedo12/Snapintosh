@@ -304,6 +304,7 @@ static void write_summary_txt(dump_state *d)
         kv_hex(&sb, "gop_format", f->gop_format, 1);
         kv_hex(&sb, "gop_base", f->gop_base, 16);
         kv_hex(&sb, "gop_size", f->gop_size, 16);
+        kv_str(&sb, "gop_select", probe_gop_rule_name(f->gop_rule));
     } else {
         kv_str(&sb, "gop", "none");
     }
