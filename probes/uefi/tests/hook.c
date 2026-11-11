@@ -700,6 +700,19 @@ __attribute__((noreturn)) static void halt_not_el2(uint64_t raw)
 
 __attribute__((noreturn)) void tests_hook_post_ebs(const tests_hook_ctx *c)
 {
+    /* Mirrors tests_hook_pre_ebs's order_a (same "least intrusive first" reason:
+     * ID dump, timer, DC ZVA, then the NV2 mechanics). A platform whose only path
+     * to EL2 is slbounce's ExitBootServices hook itself (OBSERVED twice on a
+     * Surface Pro 11 X1E80100: preebs_currentel decoded to EL1 both times,
+     * because the Secure-Launch SMC sequence runs inside that hook, after the
+     * firmware's own ExitBootServices has already returned) never gets to run
+     * these four in phase A: tests_hook_pre_ebs's CurrentEL check takes the SKIP
+     * branch there, before order_a's loop, so g_res[id].phase is still 0 (never
+     * run) for each of them. Phase B has just proven EL2 itself (the check
+     * above), so this is its first chance. A platform that did reach EL2 before
+     * ExitBootServices already ran and persisted these to the stick in phase A
+     * (g_res[id].phase is 1 there); this loop must not repeat that work. */
+    static const int order_a[] = {T_ID, T_TIMER, T_ZVA, T_NV2};
     static const int order_b[] = {T_DRAM, T_GIC, T_SMMU, T_PCIE, T_ADSP};
     uint64_t el_raw = tests_sys_currentel();
     uint64_t freq;
@@ -719,6 +732,20 @@ __attribute__((noreturn)) void tests_hook_post_ebs(const tests_hook_ctx *c)
 
     rebuild_report();
     draw_page(0, 1, "PHASE B STARTING");
+    /* Nothing below may reach the stick: persist_phase_a() is phase-A-only and
+     * is never called from here. T_NV2's record still reaches the operator when
+     * it runs here, through its own per-test rows: tests_run_nv2 (t_misc.c)
+     * already appends tests_nv2rec_screen_rows()'s 13 "NV2R ..." lines to
+     * r->rows[] whenever it has a record, in either phase, so rebuild_report()
+     * picks them up with no separate wiring and no risk of duplicating a record
+     * phase A already wrote to x2-nv2.bin. */
+    for (unsigned i = 0; i < sizeof order_a / sizeof order_a[0]; i++) {
+        if (g_res[order_a[i]].phase != 0)
+            continue;
+        run_test(order_a[i], 2);
+        rebuild_report();
+        draw_page(0, 1, "TEST DONE");
+    }
     for (unsigned i = 0; i < sizeof order_b / sizeof order_b[0]; i++) {
         run_test(order_b[i], 2);
         rebuild_report();

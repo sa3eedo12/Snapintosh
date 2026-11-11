@@ -47,7 +47,7 @@ X_SECTIONS = ("ids and nv classes", "faulty id images", "syndrome and hcr", "gua
               "pcie and nvme", "smmu timer zva misc", "device windows", "report and layout",
               "stick writer",
               "hook: clean run", "hook: cleanup failures", "hook: console deferral",
-              "hook: fatal page")
+              "hook: fatal page", "hook: phase b fallback")
 # Sources of the image that are not part of the host build: the entry hook and
 # the two files made of privileged instructions (audited as built, not run).
 NOT_NATIVE = {"hook.c", "sys_aarch64.c", "vectors_aarch64.c"}

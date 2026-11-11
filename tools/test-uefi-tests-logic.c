@@ -112,6 +112,7 @@ int main(int argc, char **argv)
     test_x_hook_cleanup_failures();
     test_x_hook_console();
     test_x_hook_fatal_page();
+    test_x_hook_phase_b_fallback();
     section_done();
 
     printf("%s: %u checks, %u failures\n", g_failures ? "FAIL" : "PASS", g_checks, g_failures);

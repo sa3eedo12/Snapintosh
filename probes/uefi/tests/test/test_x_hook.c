@@ -96,6 +96,7 @@ static unsigned h_idreads;
 static int h_restore_drops_result;     /* an NV2 restore that loses its own failure */
 static int h_vncr_present;
 static int h_clobber_on_read;          /* the first register read stands for an exception */
+static unsigned h_resets;              /* tests_hook_post_ebs reached g_hc->reset_system */
 
 uint64_t probe_cpu_read_sysreg(int id)
 {
@@ -130,6 +131,20 @@ void probe_cpu_park(void)
     longjmp(h_park_env, 1);
 }
 
+/* tests_hook_ctx.reset_system, the cold reset tests_hook_post_ebs calls once the
+ * report's countdown ends. A real reset never returns; the model represents
+ * that the same way probe_cpu_park() does, so run_post() (defined with the
+ * rest of the tests' world, below) can observe that the image reached here. */
+static void h_reset_system(uint32_t type, efi_status status, efi_uintn size, void *data)
+{
+    (void)type;
+    (void)status;
+    (void)size;
+    (void)data;
+    h_resets++;
+    probe_cpu_park();
+}
+
 /* An exception handler that is entered is the fatal path: the model never takes
  * exceptions, so only the callback registration is recorded. */
 void tests_sys_set_fatal(tests_fatal_fn fn)
@@ -147,11 +162,10 @@ unsigned tests_sys_fault_count(void)
     return 0;
 }
 
-int tests_sys_scope_enter(void)
-{
-    h_scope_enters++;
-    return tests_scope_enter(&h_scope, &h_wops, H_VECTORS);
-}
+/* tests_sys_scope_enter is defined below, after hook.c's text is included: it
+ * records g_current_test, which is hook.c's own static and so is not visible
+ * at this point in the file (the same reason h_reset() below touches g_res,
+ * g_post and the other hook.c statics only after that #include). */
 
 int tests_sys_scope_leave(void)
 {
@@ -361,6 +375,21 @@ static efi_simple_text_output h_conout = {.output_string = h_output_string};
 /* hook.c itself: its state is static, so the tests live in this translation unit. */
 #include "../hook.c"
 
+/* Defined here, not with tests_sys_scope_leave above: run_test() sets
+ * g_current_test (hook.c's own static) immediately before calling scope_enter(),
+ * in both phases, so recording it here gives the exact order tests actually ran
+ * in, whichever phase ran each one. */
+static int h_run_seq[TESTS_COUNT + 4]; /* +4: room to catch an accidental repeat */
+static unsigned h_run_seq_n;
+
+int tests_sys_scope_enter(void)
+{
+    h_scope_enters++;
+    if (h_run_seq_n < sizeof h_run_seq / sizeof h_run_seq[0])
+        h_run_seq[h_run_seq_n++] = g_current_test;
+    return tests_scope_enter(&h_scope, &h_wops, H_VECTORS);
+}
+
 /* ---- The tests' world ---- */
 
 #define H_W 800u
@@ -402,6 +431,9 @@ static void h_reset(void)
     h_restore_drops_result = 0;
     h_clobber_on_read = 0;
     h_vncr_present = 1;
+    h_resets = 0;
+    h_run_seq_n = 0;
+    memset(h_run_seq, 0, sizeof h_run_seq);
     memset(h_page, 0, sizeof h_page);
 
     /* A plausible core: ID registers of a core with NV2, a counter that advances. */
@@ -449,6 +481,7 @@ static void h_reset(void)
     h_ctx.memmap = &h_mm;
     h_ctx.ops = &h_pops;
     h_ctx.fb = &h_fb;
+    h_ctx.reset_system = h_reset_system;
 }
 
 static unsigned fb_lit_bytes(void)
@@ -485,6 +518,18 @@ static int run_pre(int *ret)
         return 0;
     }
     return 1;
+}
+
+/* Runs the post-ExitBootServices phase to its end. It is declared noreturn and
+ * never gives control back by itself (a fatal halt parks directly; a clean run
+ * ends in h_reset_system, which parks in its place): the caller checks
+ * h_parked == 1 afterwards to confirm it actually reached one of those halts
+ * instead of silently falling off the end of the function. */
+static void run_post(void)
+{
+    h_parked = 0;
+    if (setjmp(h_park_env) == 0)
+        tests_hook_post_ebs(&h_ctx);
 }
 
 /* ---- A clean run ---- */
@@ -863,4 +908,108 @@ void test_x_hook_fatal_page(void)
     CHECK_EQ(h_parked, 1);
     CHECK_EQ(fb_lit_bytes(), 0);
     CHECK(con_has("SP11X2 FATAL CLEANUP FAILED SCOPE ENTER ROLLBACK FAILED"));
+}
+
+/* ---- Phase B runs whatever phase A's own EL2 check skipped ---- */
+
+static int result_has_row(const tests_result *r, const char *needle)
+{
+    for (unsigned i = 0; i < r->nrows; i++)
+        if (strstr(r->rows[i], needle) != NULL)
+            return 1;
+    return 0;
+}
+
+static int report_has_row(const char *needle)
+{
+    for (unsigned i = 0; i < g_rep.count; i++)
+        if (strcmp(g_rep.row[i], needle) == 0)
+            return 1;
+    return 0;
+}
+
+/* A platform whose only path to EL2 is slbounce's ExitBootServices hook itself
+ * (OBSERVED twice on a Surface Pro 11 X1E80100: preebs_currentel decoded to EL1
+ * both times) takes tests_hook_pre_ebs's SKIP branch: order_a never runs there,
+ * and before this fallback existed it never ran anywhere, so T01, T02, T03 and
+ * T04 stayed "NOT-RUN" and K1 stayed "NOT RUN" forever, on every such platform.
+ * These checks pin down tests_hook_post_ebs's fallback against that, and that a
+ * platform which does reach EL2 before ExitBootServices (every other scenario
+ * here, and QEMU) is unaffected: phase A's own run and stick write stay exactly
+ * as they were, and phase B does not repeat them. */
+void test_x_hook_phase_b_fallback(void)
+{
+    static const int order_a_ids[] = {T_ID, T_TIMER, T_ZVA, T_NV2};
+    static const int order_b_ids[] = {T_DRAM, T_GIC, T_SMMU, T_PCIE, T_ADSP};
+    int ret;
+
+    section("hook: phase b fallback");
+
+    /* ---- preebs_el_raw decodes to EL1: the exact value both real runs recorded ---- */
+    h_reset();
+    h_facts.preebs_el_raw = 4;
+    CHECK_EQ(run_pre(&ret), 0);
+    CHECK_EQ(ret, 0);
+    CHECK_EQ(h_parked, 0);
+    CHECK(con_has("SP11X2 SKIP REASON=NOT_EL2"));
+    CHECK_EQ(h_stick_calls, 0); /* phase A wrote nothing: there was nothing to write */
+    CHECK_EQ(h_run_seq_n, 0);   /* and ran nothing */
+    for (unsigned i = 0; i < 4; i++)
+        CHECK_EQ(g_res[order_a_ids[i]].phase, 0);
+
+    run_post();
+    CHECK_EQ(h_parked, 1);
+    CHECK_EQ(h_resets, 1);
+    CHECK_EQ(h_stick_calls, 0); /* still nothing: no phase-B test may reach the stick */
+    CHECK_EQ(h_run_seq_n, 9);
+    for (unsigned i = 0; i < 4; i++)
+        CHECK_EQ(h_run_seq[i], order_a_ids[i]); /* least intrusive first, and before order_b */
+    for (unsigned i = 0; i < 5; i++)
+        CHECK_EQ(h_run_seq[4 + i], order_b_ids[i]); /* order_b itself unchanged */
+    for (unsigned i = 0; i < 4; i++) {
+        CHECK_EQ(g_res[order_a_ids[i]].phase, 2); /* ran in phase B this time */
+        CHECK(g_res[order_a_ids[i]].verdict != TV_NOT_RUN); /* a real result, not the bug's NOT-RUN */
+    }
+    CHECK_EQ(g_res[T_NV2].verdict, TV_GO);
+    /* tests_run_nv2 (t_misc.c) already appends tests_nv2rec_screen_rows()'s lines
+     * to T02's own rows whenever it has a record, in either phase: no separate
+     * wiring exists to lose, but the row text must actually be there. */
+    CHECK(result_has_row(&g_res[T_NV2], "NV2 RECORD (RETYPE: SEE GUIDE):"));
+    CHECK(result_has_row(&g_res[T_NV2], "NV2R"));
+    CHECK(report_has_row("K1 NV2: GO")); /* K1 follows whichever phase actually ran T02 */
+
+    /* ---- have_preebs_el == 0 (CurrentEL could not even be read before EBS)
+     * takes the same SKIP branch, so the same fallback must still apply ---- */
+    h_reset();
+    h_facts.have_preebs_el = 0;
+    CHECK_EQ(run_pre(&ret), 0);
+    CHECK_EQ(h_stick_calls, 0);
+    run_post();
+    CHECK_EQ(h_parked, 1);
+    for (unsigned i = 0; i < 4; i++)
+        CHECK_EQ(g_res[order_a_ids[i]].phase, 2);
+    CHECK_EQ(g_res[T_NV2].verdict, TV_GO);
+    CHECK(report_has_row("K1 NV2: GO"));
+
+    /* ---- preebs_el_raw decodes to EL2 (h_reset's own default, and every other
+     * scenario in this file): unaffected by the fallback existing ---- */
+    h_reset();
+    CHECK_EQ(run_pre(&ret), 0);
+    CHECK_EQ(h_stick_calls, 1); /* persisted once, in phase A, exactly as before */
+    CHECK_EQ(h_run_seq_n, 4);
+    for (unsigned i = 0; i < 4; i++) {
+        CHECK_EQ(h_run_seq[i], order_a_ids[i]);
+        CHECK_EQ(g_res[order_a_ids[i]].phase, 1); /* phase A, not phase B */
+    }
+
+    run_post();
+    CHECK_EQ(h_parked, 1);
+    CHECK_EQ(h_stick_calls, 1); /* still 1: phase B attempted no second write */
+    CHECK_EQ(h_run_seq_n, 9);   /* 4 (phase A) + 5 (phase B): no repeat of order_a */
+    for (unsigned i = 0; i < 4; i++)
+        CHECK_EQ(g_res[order_a_ids[i]].phase, 1); /* still phase A's result, not overwritten */
+    for (unsigned i = 0; i < 5; i++) {
+        CHECK_EQ(h_run_seq[4 + i], order_b_ids[i]);
+        CHECK_EQ(g_res[order_b_ids[i]].phase, 2);
+    }
 }

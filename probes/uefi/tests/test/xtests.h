@@ -37,6 +37,7 @@ void test_x_hook_clean(void);
 void test_x_hook_cleanup_failures(void);
 void test_x_hook_console(void);
 void test_x_hook_fatal_page(void);
+void test_x_hook_phase_b_fallback(void);
 
 /* `--emit-records`: one block per fixture record, for the Python round trip
  * through tools/nv2_record.py. */

@@ -41,10 +41,19 @@ produced only by `tools/build-uefi-tests.py`.
 
 ## Safety design
 
-* **Order.** Phase A (before ExitBootServices) runs the tests that touch no
-  device: T01, T03, T04, T02. Phase B (after) runs the read-only device tests:
-  T09, T05, T07, T06, T08. Results of phase A reach the stick; phase B is on
-  screen only.
+* **Order.** The tests that touch no device (T01, T03, T04, T02, in that
+  least-intrusive-first order) run before ExitBootServices (phase A) on a
+  platform already at EL2 there, and their results reach the stick. A platform
+  whose only path to EL2 is during/after this firmware's own ExitBootServices
+  call (OBSERVED, twice, on a Surface Pro 11 X1E80100: `tests_hook_pre_ebs`'s own
+  CurrentEL check there decoded to EL1 both times, because the Secure-Launch SMC
+  sequence runs inside slbounce's ExitBootServices hook) instead runs the same
+  four, in the same order, at the start of phase B (`tests_hook_post_ebs`),
+  screen only: `g_res[id].phase` (tracked per test) says which ones phase A
+  already ran, so phase B runs exactly the rest and never repeats a test phase A
+  did. The read-only device tests (T09, T05, T07, T06, T08) always run in phase
+  B, after any such fallback, and are always screen only: nothing may reach the
+  stick once ExitBootServices has returned.
 * **No write path to a device.** `tests_bus` (`env.h`) has a guarded 32-bit read
   and a guarded system-register read, nothing else. A read is made only inside a
   window the test justified from ACPI (MADT, MCFG, IORT) or from a register it

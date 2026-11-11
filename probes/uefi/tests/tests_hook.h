@@ -4,11 +4,20 @@
  * facts, read ACPI, written its dump to the USB stick and chosen a framebuffer;
  * the two hooks below add the tests:
  *
- *   tests_hook_pre_ebs   before ExitBootServices: the tests that touch no device
- *                        (ID dump, timer, DC ZVA, NV2), then their results to the
- *                        stick, next to the probe's dump;
- *   tests_hook_post_ebs  in place of the probe's post-exit stage: the device
- *                        tests, then the report as photographable pages.
+ *   tests_hook_pre_ebs   before ExitBootServices, on a platform already at EL2
+ *                        there: the tests that touch no device (ID dump, timer,
+ *                        DC ZVA, NV2), then their results to the stick, next to
+ *                        the probe's dump. On a platform that only reaches EL2
+ *                        during/after the firmware's own ExitBootServices call
+ *                        (OBSERVED on the Surface Pro 11 X1E80100: its
+ *                        Secure-Launch SMC sequence runs inside slbounce's
+ *                        ExitBootServices hook), this hook's own CurrentEL check
+ *                        takes the SKIP branch and runs none of them here;
+ *   tests_hook_post_ebs  in place of the probe's post-exit stage: first,
+ *                        whichever of the four above did not already run in
+ *                        phase A (screen only: nothing may reach the stick after
+ *                        ExitBootServices), then the device tests, then the
+ *                        report as photographable pages.
  */
 #ifndef TESTS_HOOK_H
 #define TESTS_HOOK_H

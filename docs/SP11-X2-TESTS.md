@@ -1,15 +1,36 @@
 <!-- SPDX-License-Identifier: MIT -->
 # SP11 X2 EL2 functional tests: operator guide
 
-**Hardware status: NOT RUN.** The image described here has never been started on
-a Surface Pro 11 or on any real machine. Everything it measures on QEMU is a
-property of QEMU. This guide says what the run will look like, how to read it,
+**Hardware status: fixed, not yet re-run.** OBSERVED, X1E80100 Surface Pro 11, 2026-11-11,
+reproduced in two independent boots: the image before this document's phase-ordering
+correction (see "A phase-ordering bug, found and fixed" below) was started and ran; T05, T07
+and T09 produced real results and T06 was interrupted mid-window-read, but T01, T02, T03 and
+T04 (including the NV2 functional test, T02, that answers K1) never ran on either boot. That
+is the bug this document and `probes/uefi/tests/hook.c` now fix. **The fix itself has not yet
+been tried on hardware**: whether T01-T04 actually run in phase B and produce a result on the
+unit, and what K1 actually decides, are still open until the next run. Everything else below
+that is not explicitly marked OBSERVED remains a property of QEMU, not of the unit. This guide
+says what the run will look like, how to read it,
 what each result means for gate X2 and kill criterion K1 of
 [SURFACE-PRO-11.md](SURFACE-PRO-11.md) (sections 6.2, 6.3 and 9), and what you must
 not do. Evidence labels: VERIFIED (reproduced by a test here), OBSERVED (read on
 the machine that ran the image), INFERRED (follows from other results),
 EXPERIMENTAL (written, emulator-tested only), UNIMPLEMENTED, UNKNOWN. The image
 never claims VERIFIED: one run on one unit verifies nothing.
+
+## A phase-ordering bug, found and fixed
+
+The first two real runs found that phase A (T01 ID dump, T03 timer, T04 DC ZVA, T02 NV2) never
+executes on this unit: `tests_hook_pre_ebs` only runs them when the CPU is already at EL2
+*before* `ExitBootServices` is called, but slbounce's hook performs the actual EL1-to-EL2
+switch *during* that very call (OBSERVED: both runs' `summary.txt` recorded
+`preebs_currentel=0x4`, i.e. EL1, at that point). So phase A always took its `NOT_EL2` skip
+path, and the on-screen `K1 NV2:` line read `NOT RUN` both times, never a verdict. Phase B
+(T09, T05, T07, T06, T08), which only needs EL2 *after* `ExitBootServices`, ran normally in
+both cases. `tests_hook_post_ebs` now also runs whichever of T01-T04 have not already run in
+phase A, in the same order, before phase B's own tests; because nothing may reach the stick
+after `ExitBootServices`, their results (including the NV2 record) reach the operator only
+through the same on-screen rows and CRC-8 checks as every other phase-B test.
 
 The image is the EL2 state probe ([probes/uefi/README.md](../probes/uefi/README.md))
 with nine tests added. You run it once, after slbounce has put the machine at EL2
@@ -65,21 +86,41 @@ meet at the same moment.
 
 ## 2. What you will see, in order
 
-**Phase A, before ExitBootServices.** The probe's usual stage (firmware facts,
-ACPI, SMBIOS, memory map, its dump to the stick), then the tests that touch no
-device, least intrusive first: T01 ID dump, T03 timer, T04 DC ZVA, T02 NV2. Each
-writes `SP11X2 PROGRESS RUNNING ...` and `SP11X2 RESULT ID=n VERDICT=... LABEL=...`
-lines to the firmware console (whether you can see that console on this machine
-is UNKNOWN; the same lines appear on a serial log when there is one). The results
-and the NV2 record are then written to the stick (`SP11X2 STICK STATE=OK
-FILES=4`). If the image is not at EL2 it runs no test and writes no result file;
-the report then consists of one page saying `NOT AT EL2: NO TEST WAS RUN`.
+**Phase A, before ExitBootServices, on a platform already at EL2 there.** The
+probe's usual stage (firmware facts, ACPI, SMBIOS, memory map, its dump to the
+stick), then the tests that touch no device, least intrusive first: T01 ID
+dump, T03 timer, T04 DC ZVA, T02 NV2. Each writes `SP11X2 PROGRESS RUNNING ...`
+and `SP11X2 RESULT ID=n VERDICT=... LABEL=...` lines to the firmware console
+(whether you can see that console on this machine is UNKNOWN; the same lines
+appear on a serial log when there is one). The results and the NV2 record are
+then written to the stick (`SP11X2 STICK STATE=OK FILES=4`).
 
-**Phase B, after ExitBootServices (screen only).** The device tests, still
-read-only: T09 DRAM map, T05 GIC, T07 SMMU, T06 PCIe and NVMe, T08 ADSP. A page
-is drawn after each. The footer names the running test, and while a device
+Whether a platform is at EL2 yet when this image reaches this point is a
+property of its own boot chain, not of this image, and is not the same on every
+platform: OBSERVED (twice, on the runs that found this gap): on a Surface Pro 11
+X1E80100 it is not — `preebs_currentel` decoded to EL1 both times — because the
+Secure-Launch SMC sequence that performs the EL1-to-EL2 switch runs inside
+slbounce's own ExitBootServices hook, after this firmware's ExitBootServices call
+has already returned success. On such a platform phase A runs none of these four
+tests here and writes none of `x2-results.txt`/`x2-nv2.*`: it logs `SP11X2 SKIP
+REASON=NOT_EL2` and goes straight on to ExitBootServices. They run in phase B
+instead (below), screen only. Whichever phase actually ran them, the summary and
+K1 lines of the one report (section 3) reflect the real result; only the stick
+files differ, per platform.
+
+**Phase B, after ExitBootServices (screen only).** First, whichever of T01, T03,
+T04 and T02 did not already run in phase A (the Surface Pro 11 case above): the
+same four tests, in the same least-intrusive-first order, now reaching you only
+through the report pages, never the stick (section 8). Then the device tests,
+still read-only: T09 DRAM map, T05 GIC, T07 SMMU, T06 PCIe and NVMe, T08 ADSP. A
+page is drawn after each. The footer names the running test, and while a device
 window is being read it names that window (`T06 ECAM 0x...`, `T06 NVME 0x...`):
 if the machine hangs, the last footer tells you which address was being read.
+
+If the image is not at EL2 even here, it runs no test at all (not even the
+device tests) and writes no result file: the report is one page saying `NOT AT
+EL2: NO TEST WAS RUN`, and the first thing to fix is the slbounce step, not this
+image.
 
 **The report.** The summary page, then one section per test, as photographable
 pages that rotate every 12 seconds, with a countdown in the footer that scales
@@ -123,6 +164,13 @@ restores the lower case the screen cannot show, and checks each line's own `*hh`
 check digits. A row that does not check is refused, never repaired: retype that
 row from the photograph.
 
+When T02 ran in phase A (section 2), `x2-nv2.bin`/`.txt`/`.json` on the stick are
+the exact record and this retyping is only a cross-check. When T02 ran in phase B
+instead (the Surface Pro 11 case), there is no stick file to prefer: the T02
+section's `NV2R ...` rows on the report pages are the only record, so photograph
+every one of them and retype with the same care, checking every `*hh` digit
+before trusting `tools/nv2_record.py show`'s output.
+
 ## 5. What each test means
 
 | Test | What it measures | What it proves | What it does not |
@@ -147,10 +195,10 @@ trapping with exactly the expected syndrome.
 
 | K1 line | Reasons shown in T02 | What to do |
 | --- | --- | --- |
-| `GO` | `GO` | The record on the stick (`x2-nv2.bin`) is the one the monitor's gate reads: ingest it with `tools/nv2_record.py` for the gate's own decision. A hardware GO record carries evidence OBSERVED. The NV2 item of gate X2 (section 6.3) is then evidenced for this unit and revision, by one run. |
+| `GO` | `GO` | When T02 ran in phase A (section 2), the record on the stick (`x2-nv2.bin`) is the one the monitor's gate reads: ingest it with `tools/nv2_record.py` for the gate's own decision. When T02 ran in phase B instead (no stick file for it: section 8), retype its `NV2R ...` rows (section 4) into text and ingest that form the same way. A hardware GO record carries evidence OBSERVED either way. The NV2 item of gate X2 (section 6.3) is then evidenced for this unit and revision, by one run. |
 | `NO-GO` | `NV NOT IMPLEMENTED`, `NV ONLY, NO NV2`, `NOT REDIRECTED`, `ID SAYS...` | Candidate for kill criterion K1 (SURFACE-PRO-11.md section 3.3: stop and report, do not improvise). Photograph T01 and T02 in full. A repeat after a cold boot is a cheap confirmation; that is this guide's recommendation, not plan text. |
 | `INCONCLUSIVE` | `MECHANICS FAULT`, `VNCR PAGE ABORT`, `CONTROL DID NOT TRAP`, `NV2 ONLY, NO NV`, `RESERVED NV/NV_FRAC`, `FUNCTIONAL TEST DID NOT RUN`, `ID REGS NOT A READING` | Do **not** decide K1 from this run. Photograph T02 in full and report it. A control that did not trap while the redirect landed is a contradiction worth a second look, not a GO. A state that could not be restored is not a T02 reason: the image halts on the `FATAL: CLEANUP FAILED` page before any result is shown (section 7). |
-| `NOT RUN` | the image was not at EL2 | Fix the slbounce step first. |
+| `NOT RUN` | the image was never at EL2, in either phase (the `NOT AT EL2: NO TEST WAS RUN` page of section 2, not the usual summary page) | Fix the slbounce step first. A platform that reaches EL2 only during/after ExitBootServices, like the Surface Pro 11 (section 2), still gets a K1 line from that phase's run: this row means neither phase ran T02, not merely that phase A did not. |
 
 A record is only ever written as a pass pair (redirect pass, control pass) by a
 run that ended in GO. A run whose machinery faulted records both checks as
@@ -164,9 +212,12 @@ EXPERIMENTAL under the tool name `SP11-X2-MODEL`, and the gate refuses it.
   NV2 test changes `HCR_EL2` and the vector base and restores them within
   milliseconds; the device tests are reads. Interrupting changes nothing on the
   disk, but it destroys the evidence of where the machine stopped.
-* Do **not** remove the USB stick until the report is on screen. Phase A writes
-  the result files before ExitBootServices (`SP11X2 STICK STATE=OK` where the
-  console is visible); after that the stick is never touched again.
+* Do **not** remove the USB stick until the report is on screen. On a platform
+  that is at EL2 before ExitBootServices, phase A writes the result files there
+  (`SP11X2 STICK STATE=OK` where the console is visible); on one that is not
+  (section 2), phase A writes nothing for these four tests and there is no such
+  line to wait for, so wait for the report itself. Either way, nothing is
+  written to the stick after ExitBootServices.
 * If the screen freezes, wait at least 10 minutes (a recommendation of this
   guide), **photograph the footer** (it names the test and the address being
   read), and only then power off. Report the footer text verbatim.
@@ -186,7 +237,8 @@ EXPERIMENTAL under the tool name `SP11-X2-MODEL`, and the gate refuses it.
 ## 8. Files on the stick
 
 In the probe's run directory (`\SP11DUMP\RUNnn\`), written before ExitBootServices
-and never overwritten:
+and never overwritten, **only by a platform that is at EL2 before
+ExitBootServices and so ran T01, T03, T04 and T02 in phase A** (section 2):
 
 | File | Content |
 | --- | --- |
@@ -195,8 +247,14 @@ and never overwritten:
 | `x2-nv2.json` | the same record as JSON |
 | `x2-nv2.bin` | the same record, 96 bytes with a CRC-32: the form the monitor's gate consumes |
 
-Phase B results exist only on the screen (nothing may write to the stick after
-ExitBootServices), so photograph every page of the report.
+A platform that only reaches EL2 during or after ExitBootServices (OBSERVED,
+twice, on a Surface Pro 11 X1E80100: section 2) runs these same four tests in
+phase B instead, and none of these four files exists for that run: T01, T03, T04
+and T02 (with its NV2 record, as the `NV2R ...` screen rows of section 4) are on
+the report pages only. Phase B's five device tests are always screen only
+(nothing may write to the stick after ExitBootServices); photograph every page of
+the report, and on a platform like the Surface Pro 11 that includes T01 to T04,
+not only T05 to T09.
 
 ## 9. What the image will not do, and what the first run must still tell us
 
@@ -220,11 +278,15 @@ ExitBootServices), so photograph every page of the report.
   source), the display register list (no study existed when this was written).
 * **The first run must observe:** the real exception syndrome of the control
   (EC 0x18 with the `TPIDR_EL2` encoding), whether the redirect lands at `0x090`,
-  that the vector table and the ERET to EL1 behave under the SP11's firmware
-  (EXPERIMENTAL: QEMU exercises them, the SP11 has never been tried), which
+  and whether T02 itself runs and what it decides (OBSERVED, twice: it has not
+  yet run at all, due to the phase-ordering bug above; EXPERIMENTAL otherwise,
+  QEMU cannot reach EL2 this way at all, see "A phase-ordering bug" above). The
+  EL2 vector table and the ERET to EL1 mechanism itself is OBSERVED to work on
+  the unit's firmware for the phase-B tests that did run (T05, T07, T09 all
+  produced a real, non-FATAL result); whether it behaves the same way for T02's
+  specific trap is still untried. Also open: which
   framebuffer rule fired (`SEL=` on the `GOP` console line and `gop_select=` in
-  `summary.txt`; the rule works under QEMU with the pinned Shell, OBSERVED, but
-  the unit's console stack is UNKNOWN until X1), whether
+  `summary.txt`; OBSERVED on the unit both times: `SEL=SAME`), whether
   the page rows fit the panel (the layout is chosen from the framebuffer
   size), whether the UEFI memory map lists the GIC, PCIe and SMMU windows as MMIO
   (the `MAP MMIO=n UNLISTED=n` row of T05 to T07 and the probe's `memmap.txt`;
