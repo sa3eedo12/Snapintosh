@@ -1,10 +1,15 @@
 # Surface Pro 11 host link: A16 inventory, Hamoa USB facts, fallback ladder and persistent log
 
-**Study and host tooling only. UNIMPLEMENTED on hardware. Hardware status: NOT RUN.** Nothing here ran on a Surface Pro.
+**Study and host tooling. UNIMPLEMENTED on hardware. Hardware status: NOT RUN.** Nothing here ran on a Surface Pro.
 It answers WS-B items B2 and B3 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) as far as public sources and a host can: what
 in q1n1's USB host link is A16-specific, what the public Hamoa and Denali device trees say about the USB path, how the
 D5 ladder and kill criterion K3 decide, and a design for a persistent log. It also records the host tool
 `tools/sp11_usb_ports.py`, its tests, and a default-off q1n1 patch that removes the A16 hard-coding from the SP11 path.
+**The q1n1 patch is now applied and pushed** (independently re-verified, 2026-11-11: dry-run, apply, full suite 12/12
+plus the board-info carrier's own 41/41, all with `Q1N1_BASE_DIR` set to a pristine copy of the same pinned commit;
+the default build is still byte-identical) to [sa3eedo12/q1n1](https://github.com/sa3eedo12/q1n1) branch
+`sa3eedo12-sp11-host-link`, two commits on top of the pinned commit (section 10): the board-info carrier, then the
+USB host-link gate. Not yet merged to `Snapintosh/q1n1` main, and still host-only: nothing below changes that.
 
 | Label | Meaning in this study |
 | --- | --- |
