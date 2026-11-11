@@ -936,10 +936,17 @@ static int report_has_row(const char *needle)
  * These checks pin down tests_hook_post_ebs's fallback against that, and that a
  * platform which does reach EL2 before ExitBootServices (every other scenario
  * here, and QEMU) is unaffected: phase A's own run and stick write stay exactly
- * as they were, and phase B does not repeat them. */
+ * as they were, and phase B does not repeat them.
+ *
+ * The fallback's own run order deliberately differs from phase A's order_a: a
+ * video-timed run on the same Surface Pro 11 unit OBSERVED the board reset
+ * during T_TIMER (T03) before it, or anything after it, could finish or
+ * render, so the fallback runs T_NV2 right after T_ID instead of last -
+ * order_a_fallback_ids below, not order_a_normal_ids. */
 void test_x_hook_phase_b_fallback(void)
 {
-    static const int order_a_ids[] = {T_ID, T_TIMER, T_ZVA, T_NV2};
+    static const int order_a_normal_ids[] = {T_ID, T_TIMER, T_ZVA, T_NV2};
+    static const int order_a_fallback_ids[] = {T_ID, T_NV2, T_TIMER, T_ZVA};
     static const int order_b_ids[] = {T_DRAM, T_GIC, T_SMMU, T_PCIE, T_ADSP};
     int ret;
 
@@ -955,7 +962,7 @@ void test_x_hook_phase_b_fallback(void)
     CHECK_EQ(h_stick_calls, 0); /* phase A wrote nothing: there was nothing to write */
     CHECK_EQ(h_run_seq_n, 0);   /* and ran nothing */
     for (unsigned i = 0; i < 4; i++)
-        CHECK_EQ(g_res[order_a_ids[i]].phase, 0);
+        CHECK_EQ(g_res[order_a_normal_ids[i]].phase, 0);
 
     run_post();
     CHECK_EQ(h_parked, 1);
@@ -963,12 +970,12 @@ void test_x_hook_phase_b_fallback(void)
     CHECK_EQ(h_stick_calls, 0); /* still nothing: no phase-B test may reach the stick */
     CHECK_EQ(h_run_seq_n, 9);
     for (unsigned i = 0; i < 4; i++)
-        CHECK_EQ(h_run_seq[i], order_a_ids[i]); /* least intrusive first, and before order_b */
+        CHECK_EQ(h_run_seq[i], order_a_fallback_ids[i]); /* T_NV2 right after T_ID, before order_b */
     for (unsigned i = 0; i < 5; i++)
         CHECK_EQ(h_run_seq[4 + i], order_b_ids[i]); /* order_b itself unchanged */
     for (unsigned i = 0; i < 4; i++) {
-        CHECK_EQ(g_res[order_a_ids[i]].phase, 2); /* ran in phase B this time */
-        CHECK(g_res[order_a_ids[i]].verdict != TV_NOT_RUN); /* a real result, not the bug's NOT-RUN */
+        CHECK_EQ(g_res[order_a_fallback_ids[i]].phase, 2); /* ran in phase B this time */
+        CHECK(g_res[order_a_fallback_ids[i]].verdict != TV_NOT_RUN); /* a real result, not the bug's NOT-RUN */
     }
     CHECK_EQ(g_res[T_NV2].verdict, TV_GO);
     /* tests_run_nv2 (t_misc.c) already appends tests_nv2rec_screen_rows()'s lines
@@ -987,19 +994,20 @@ void test_x_hook_phase_b_fallback(void)
     run_post();
     CHECK_EQ(h_parked, 1);
     for (unsigned i = 0; i < 4; i++)
-        CHECK_EQ(g_res[order_a_ids[i]].phase, 2);
+        CHECK_EQ(g_res[order_a_fallback_ids[i]].phase, 2);
     CHECK_EQ(g_res[T_NV2].verdict, TV_GO);
     CHECK(report_has_row("K1 NV2: GO"));
 
     /* ---- preebs_el_raw decodes to EL2 (h_reset's own default, and every other
-     * scenario in this file): unaffected by the fallback existing ---- */
+     * scenario in this file): unaffected by the fallback existing. Phase A runs
+     * its own order_a (least intrusive first) here, untouched. */
     h_reset();
     CHECK_EQ(run_pre(&ret), 0);
     CHECK_EQ(h_stick_calls, 1); /* persisted once, in phase A, exactly as before */
     CHECK_EQ(h_run_seq_n, 4);
     for (unsigned i = 0; i < 4; i++) {
-        CHECK_EQ(h_run_seq[i], order_a_ids[i]);
-        CHECK_EQ(g_res[order_a_ids[i]].phase, 1); /* phase A, not phase B */
+        CHECK_EQ(h_run_seq[i], order_a_normal_ids[i]);
+        CHECK_EQ(g_res[order_a_normal_ids[i]].phase, 1); /* phase A, not phase B */
     }
 
     run_post();
@@ -1007,7 +1015,7 @@ void test_x_hook_phase_b_fallback(void)
     CHECK_EQ(h_stick_calls, 1); /* still 1: phase B attempted no second write */
     CHECK_EQ(h_run_seq_n, 9);   /* 4 (phase A) + 5 (phase B): no repeat of order_a */
     for (unsigned i = 0; i < 4; i++)
-        CHECK_EQ(g_res[order_a_ids[i]].phase, 1); /* still phase A's result, not overwritten */
+        CHECK_EQ(g_res[order_a_normal_ids[i]].phase, 1); /* still phase A's result, not overwritten */
     for (unsigned i = 0; i < 5; i++) {
         CHECK_EQ(h_run_seq[4 + i], order_b_ids[i]);
         CHECK_EQ(g_res[order_b_ids[i]].phase, 2);

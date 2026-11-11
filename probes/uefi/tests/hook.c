@@ -700,19 +700,34 @@ __attribute__((noreturn)) static void halt_not_el2(uint64_t raw)
 
 __attribute__((noreturn)) void tests_hook_post_ebs(const tests_hook_ctx *c)
 {
-    /* Mirrors tests_hook_pre_ebs's order_a (same "least intrusive first" reason:
-     * ID dump, timer, DC ZVA, then the NV2 mechanics). A platform whose only path
-     * to EL2 is slbounce's ExitBootServices hook itself (OBSERVED twice on a
-     * Surface Pro 11 X1E80100: preebs_currentel decoded to EL1 both times,
-     * because the Secure-Launch SMC sequence runs inside that hook, after the
-     * firmware's own ExitBootServices has already returned) never gets to run
-     * these four in phase A: tests_hook_pre_ebs's CurrentEL check takes the SKIP
-     * branch there, before order_a's loop, so g_res[id].phase is still 0 (never
-     * run) for each of them. Phase B has just proven EL2 itself (the check
-     * above), so this is its first chance. A platform that did reach EL2 before
-     * ExitBootServices already ran and persisted these to the stick in phase A
-     * (g_res[id].phase is 1 there); this loop must not repeat that work. */
-    static const int order_a[] = {T_ID, T_TIMER, T_ZVA, T_NV2};
+    /* A platform whose only path to EL2 is slbounce's ExitBootServices hook
+     * itself (OBSERVED twice on a Surface Pro 11 X1E80100: preebs_currentel
+     * decoded to EL1 both times, because the Secure-Launch SMC sequence runs
+     * inside that hook, after the firmware's own ExitBootServices has already
+     * returned) never gets to run these four in phase A: tests_hook_pre_ebs's
+     * CurrentEL check takes the SKIP branch there, before its order_a's loop,
+     * so g_res[id].phase is still 0 (never run) for each of them. Phase B has
+     * just proven EL2 itself (the check above), so this is its first chance.
+     * A platform that did reach EL2 before ExitBootServices already ran and
+     * persisted these to the stick in phase A (g_res[id].phase is 1 there);
+     * this loop must not repeat that work.
+     *
+     * Unlike tests_hook_pre_ebs's order_a ("least intrusive first": ID dump,
+     * timer, DC ZVA, then the NV2 mechanics), this fallback runs T_NV2 right
+     * after T_ID instead of last. T_NV2 only reads c->ids (filled by T_ID:
+     * tests_run_nv2 never touches a T_TIMER or T_ZVA result), so the reorder
+     * changes nothing it depends on. It is deliberate: on this same Surface
+     * Pro 11 unit, a video-timed run OBSERVED the screen hold on "RUNNING T03
+     * TIMER" for the entire ~12-15 s it was recorded, with no FATAL page, and
+     * then the board reset before T_TIMER (or anything after it) could finish
+     * or render. T_TIMER's own loop is bounded by a plain software counter
+     * (200000 guarded single-register reads), not by elapsed time, so this
+     * stall's exact cause is NOT YET CONFIRMED; nothing here assumes one. What
+     * is confirmed is that whatever is resetting this board does so on a
+     * budget too tight to reach T_NV2 in the original order. Running T_NV2
+     * immediately after T_ID spends that budget on the one test this image
+     * exists to answer (the K1 NV2 gate) before T_TIMER can put it at risk. */
+    static const int order_a[] = {T_ID, T_NV2, T_TIMER, T_ZVA};
     static const int order_b[] = {T_DRAM, T_GIC, T_SMMU, T_PCIE, T_ADSP};
     uint64_t el_raw = tests_sys_currentel();
     uint64_t freq;

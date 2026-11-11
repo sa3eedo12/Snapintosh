@@ -1,14 +1,19 @@
 <!-- SPDX-License-Identifier: MIT -->
 # SP11 X2 EL2 functional tests: operator guide
 
-**Hardware status: fixed, not yet re-run.** OBSERVED, X1E80100 Surface Pro 11, 2026-11-11,
-reproduced in two independent boots: the image before this document's phase-ordering
-correction (see "A phase-ordering bug, found and fixed" below) was started and ran; T05, T07
-and T09 produced real results and T06 was interrupted mid-window-read, but T01, T02, T03 and
-T04 (including the NV2 functional test, T02, that answers K1) never ran on either boot. That
-is the bug this document and `probes/uefi/tests/hook.c` now fix. **The fix itself has not yet
-been tried on hardware**: whether T01-T04 actually run in phase B and produce a result on the
-unit, and what K1 actually decides, are still open until the next run. Everything else below
+**Hardware status: two bugs found on hardware, the second fix not yet re-run.** OBSERVED,
+X1E80100 Surface Pro 11, 2026-11-11. Run 1 and run 2 (image before this document's
+phase-ordering correction; see "A phase-ordering bug, found and fixed" below): T05, T07 and
+T09 produced real results and T06 was interrupted mid-window-read, but T01, T02, T03 and T04
+(including the NV2 functional test, T02, that answers K1) never ran on either boot. Run 3
+(image with that correction applied, phase B now running T01, T03, T04, T02 as a fallback):
+T01 ran to completion and produced a real, CRC-verified result (ID dump, `NV=2 NV_FRAC=0`).
+The run then held on `RUNNING T03 TIMER` for the entire ~12-15 s of a 120 fps video recording
+of the screen, with no `FATAL:` page, and the board reset before T03, T02, or anything after
+them, could finish or render; see "A second finding: T03 stalls and the board resets" below.
+T02, the test that actually answers K1, has still never run on this unit. **The reorder fix
+below has not yet been tried on hardware**: whether T02 now runs and produces a verdict before
+whatever resets the board, is still open until the next run. Everything else below
 that is not explicitly marked OBSERVED remains a property of QEMU, not of the unit. This guide
 says what the run will look like, how to read it,
 what each result means for gate X2 and kill criterion K1 of
@@ -39,6 +44,29 @@ answer on paper: **does this core redirect an EL2-register access made from EL1
 into the page named by `VNCR_EL2` (FEAT_NV2), and does the same access trap when
 NV2 is off?** The other eight tests collect the device state the monitor will
 meet at the same moment.
+
+## A second finding: T03 stalls and the board resets
+
+Run 3 (the image with the phase-ordering fix above) reached EL2 through phase B, as expected,
+and ran T01 to completion: a full ID-register dump, CRC-verified against the photographed
+rows, agreeing with the earlier probe's passive read (`NV=2 NV_FRAC=0`). The fallback then
+started T03 (the timer test) next, in phase A's original least-intrusive-first order. A 120
+fps video recording of the screen, taken from a fresh attempt, showed the footer holding on
+`RUNNING T03 TIMER` for the entire recorded window (frame-by-frame identical from 0.25 s to
+12.0 s), then going dark within 0.2-0.3 s; no `FATAL:` page ever appeared. `tests_run_timer`
+(`probes/uefi/tests/t_misc.c`) polls `CNTPCT_EL0` in a loop bounded by a plain software
+counter (up to 200000 guarded single-register reads, not by elapsed time), waiting for the
+value to change; each guarded read is one `mrs` instruction plus a volatile flag check
+(`probes/uefi/tests/sys_aarch64.c`), so the loop is not expected to cost more than a few
+milliseconds even in the worst case it is built to detect (a counter that never advances).
+**The exact cause of the multi-second stall is NOT CONFIRMED** (OBSERVED: the stall and the
+reset; INFERRED only: what inside or around the loop is actually slow, and whether the reset
+is time-based or triggered by something this code does). What the project's own checks did
+confirm, by inspection, is that T02 (the NV2 test that answers K1) depends only on T01's
+already-filled ID context, not on T03 or T04's results, so it can safely move earlier.
+`tests_hook_post_ebs`'s fallback order is therefore now `T_ID, T_NV2, T_TIMER, T_ZVA`: T02
+gets its chance, and is drawn to the screen, before T03 is reached at all. Phase A's own
+order (for a platform where it runs normally, before ExitBootServices) is unchanged.
 
 ## 1. Before you start
 
@@ -108,14 +136,15 @@ instead (below), screen only. Whichever phase actually ran them, the summary and
 K1 lines of the one report (section 3) reflect the real result; only the stick
 files differ, per platform.
 
-**Phase B, after ExitBootServices (screen only).** First, whichever of T01, T03,
-T04 and T02 did not already run in phase A (the Surface Pro 11 case above): the
-same four tests, in the same least-intrusive-first order, now reaching you only
-through the report pages, never the stick (section 8). Then the device tests,
-still read-only: T09 DRAM map, T05 GIC, T07 SMMU, T06 PCIe and NVMe, T08 ADSP. A
-page is drawn after each. The footer names the running test, and while a device
-window is being read it names that window (`T06 ECAM 0x...`, `T06 NVME 0x...`):
-if the machine hangs, the last footer tells you which address was being read.
+**Phase B, after ExitBootServices (screen only).** First, whichever of T01, T02,
+T03 and T04 did not already run in phase A (the Surface Pro 11 case above): the
+same four tests, but T02 (NV2) right after T01 instead of last (see "A second
+finding" above), now reaching you only through the report pages, never the stick
+(section 8). Then the device tests, still read-only: T09 DRAM map, T05 GIC, T07
+SMMU, T06 PCIe and NVMe, T08 ADSP. A page is drawn after each. The footer names
+the running test, and while a device window is being read it names that window
+(`T06 ECAM 0x...`, `T06 NVME 0x...`): if the machine hangs, the last footer tells
+you which address was being read.
 
 If the image is not at EL2 even here, it runs no test at all (not even the
 device tests) and writes no result file: the report is one page saying `NOT AT
@@ -248,10 +277,11 @@ ExitBootServices and so ran T01, T03, T04 and T02 in phase A** (section 2):
 | `x2-nv2.bin` | the same record, 96 bytes with a CRC-32: the form the monitor's gate consumes |
 
 A platform that only reaches EL2 during or after ExitBootServices (OBSERVED,
-twice, on a Surface Pro 11 X1E80100: section 2) runs these same four tests in
-phase B instead, and none of these four files exists for that run: T01, T03, T04
-and T02 (with its NV2 record, as the `NV2R ...` screen rows of section 4) are on
-the report pages only. Phase B's five device tests are always screen only
+three times now, on a Surface Pro 11 X1E80100: section 2) runs these same four
+tests in phase B instead (T01, then T02, T03, T04 in whatever order they have
+not already run: "A second finding" above), and none of these four files exists
+for that run: T01 to T04 (with T02's NV2 record, as the `NV2R ...` screen rows
+of section 4) are on the report pages only. Phase B's five device tests are always screen only
 (nothing may write to the stick after ExitBootServices); photograph every page of
 the report, and on a platform like the Surface Pro 11 that includes T01 to T04,
 not only T05 to T09.
@@ -278,11 +308,17 @@ not only T05 to T09.
   source), the display register list (no study existed when this was written).
 * **The first run must observe:** the real exception syndrome of the control
   (EC 0x18 with the `TPIDR_EL2` encoding), whether the redirect lands at `0x090`,
-  and whether T02 itself runs and what it decides (OBSERVED, twice: it has not
-  yet run at all, due to the phase-ordering bug above; EXPERIMENTAL otherwise,
-  QEMU cannot reach EL2 this way at all, see "A phase-ordering bug" above). The
+  and whether T02 itself runs and what it decides (OBSERVED, three times now: it
+  has not yet run at all. Twice due to the phase-ordering bug above; a third time
+  because phase B's fallback, in its original order, ran T03 before T02 and T03
+  stalled then the board reset ("A second finding" above) before T02's turn came.
+  EXPERIMENTAL otherwise, QEMU cannot reach EL2 this way at all). T01, run
+  through the phase-B fallback in that third attempt, is the one phase-A test
+  OBSERVED to complete and produce a real, CRC-verified result on this unit
+  (`NV=2 NV_FRAC=0`); whether T02 can do the same, now that it runs right after
+  T01, is what the fallback's reorder exists to find out. The
   EL2 vector table and the ERET to EL1 mechanism itself is OBSERVED to work on
-  the unit's firmware for the phase-B tests that did run (T05, T07, T09 all
+  the unit's firmware for the phase-B tests that did run (T01, T05, T07, T09 all
   produced a real, non-FATAL result); whether it behaves the same way for T02's
   specific trap is still untried. Also open: which
   framebuffer rule fired (`SEL=` on the `GOP` console line and `gop_select=` in
