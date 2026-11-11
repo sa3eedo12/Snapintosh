@@ -1,27 +1,24 @@
 <!-- SPDX-License-Identifier: MIT -->
 # SP11 X2 EL2 functional tests: operator guide
 
-**Hardware status: two bugs found on hardware, the second fix not yet re-run.** OBSERVED,
-X1E80100 Surface Pro 11, 2026-11-11. Run 1 and run 2 (image before this document's
-phase-ordering correction; see "A phase-ordering bug, found and fixed" below): T05, T07 and
-T09 produced real results and T06 was interrupted mid-window-read, but T01, T02, T03 and T04
-(including the NV2 functional test, T02, that answers K1) never ran on either boot. Run 3
-(image with that correction applied, phase B now running T01, T03, T04, T02 as a fallback):
-T01 ran to completion and produced a real, CRC-verified result (ID dump, `NV=2 NV_FRAC=0`).
-The run then held on `RUNNING T03 TIMER` for the entire ~12-15 s of a 120 fps video recording
-of the screen, with no `FATAL:` page, and the board reset before T03, T02, or anything after
-them, could finish or render; see "A second finding: T03 stalls and the board resets" below.
-T02, the test that actually answers K1, has still never run on this unit. **The reorder fix
-below has not yet been tried on hardware**: whether T02 now runs and produces a verdict before
-whatever resets the board, is still open until the next run. Everything else below
-that is not explicitly marked OBSERVED remains a property of QEMU, not of the unit. This guide
+**Hardware status: K1 decided — GO. NV2 is confirmed functionally usable on this unit.**
+OBSERVED, X1E80100 Surface Pro 11, 2026-11-11, run 4 (build `89889B7FEB3C`, the NV2-reorder
+fix below): T01 and T02 both ran to completion. T02's verdict is `K1 NV2: GO` (`VNCR_EL2`
+redirect PASS, the NV2-off negative control PASS, state restored and cleanup OK), CRC-verified
+row by row (90/90) and independently confirmed with `tools/nv2_record.py show --check` against
+the retyped record (`gate: ALLOW`). Runs 1-3 (below) found and fixed two bugs before this
+result was reachable at all; see "A phase-ordering bug" and "A second finding" for that history.
+T03, T04 and items 9-13 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3 are still NOT RUN
+(the same board reset shortly after T01/T02 that run 3 found, still unexplained, happens again
+right after T02 in run 4) — none of that affects K1, which only needs T01 and T02. Evidence
+labels: VERIFIED (reproduced by a test here), OBSERVED (read on
+the machine that ran the image), INFERRED (follows from other results),
+EXPERIMENTAL (written, emulator-tested only), UNIMPLEMENTED, UNKNOWN. The image
+never claims VERIFIED: one run on one unit verifies nothing. This guide
 says what the run will look like, how to read it,
 what each result means for gate X2 and kill criterion K1 of
 [SURFACE-PRO-11.md](SURFACE-PRO-11.md) (sections 6.2, 6.3 and 9), and what you must
-not do. Evidence labels: VERIFIED (reproduced by a test here), OBSERVED (read on
-the machine that ran the image), INFERRED (follows from other results),
-EXPERIMENTAL (written, emulator-tested only), UNIMPLEMENTED, UNKNOWN. The image
-never claims VERIFIED: one run on one unit verifies nothing.
+not do.
 
 ## A phase-ordering bug, found and fixed
 
@@ -67,6 +64,33 @@ already-filled ID context, not on T03 or T04's results, so it can safely move ea
 `tests_hook_post_ebs`'s fallback order is therefore now `T_ID, T_NV2, T_TIMER, T_ZVA`: T02
 gets its chance, and is drawn to the screen, before T03 is reached at all. Phase A's own
 order (for a platform where it runs normally, before ExitBootServices) is unchanged.
+
+## Run 4: K1 decided — GO
+
+With T02 moved ahead of T03, run 4 (same unit, build `89889B7FEB3C`) reached T02 before the
+reset that stops run 3 at T03. T01 and T02 both ran to completion and rendered their full
+results; the board then held on `RUNNING T03 TIMER` and reset again, as run 3 found, but by
+then T02's verdict was already on screen. Transcribed and CRC-verified row by row (90/90 OK,
+`probes/uefi/verify-lines.py`), cross-checked against `tools/nv2_record.py`:
+
+* T01: `ID_AA64MMFR2_EL1.NV` == 2, `NV_FRAC` == 0 (matching the earlier passive-probe read and
+  T01's own two prior runs), `PARANGE=4` (44-bit), `VMIDBITS=16`, `ECV=2`, `FGT=1`, `VH=1`.
+* T02: `CTL NV2 OFF: TRAPPED AS EXPECTED` (the negative control), `RED NV2 ON: LANDED IN PAGE`
+  (the redirect), `RESTORED=YES MECH=NO CLEANUP=OK`, `WHY GO`, `K1 CLEAR: NV2 USABLE`. The NV2
+  record's own fields (`MIDR_EL1`, `REVIDR_EL1`, `ID_AA64MMFR2_EL1`, `ID_AA64MMFR4_EL1`) agree
+  exactly with T01's independently rendered copies of the same registers.
+* The record's embedded `*hh` check (the format `tools/nv2_record.py` itself reads, computed
+  over the lowercase, unsplit body before the screen's own uppercase rendering and 38-column
+  wrap) matches on every one of its 13 lines once reconstructed in that form.
+* `python3 tools/nv2_record.py show --soc x1e80100 --live-midr 0x00000000512F0011
+  --live-revidr 0x0 --live-mmfr2 0x1201011112101011 --live-mmfr4 0x0 --check` on the
+  reconstructed record: `parse: PARSED`, `gate: ALLOW`, exit 0.
+
+K1 did not fire: NV2 is functionally usable on this unit. T03, T04 and items 9-13 of
+[SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3 remain NOT RUN; none of them bear on K1.
+The record is a measurement of this one machine (`tools/nv2_record.py`'s own rule): it is kept
+under `build/`, never committed, and never shown here in full; the embedding of it into an
+actual monitor build is separate, later work.
 
 ## 1. Before you start
 

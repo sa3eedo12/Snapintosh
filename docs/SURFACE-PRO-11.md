@@ -1,9 +1,11 @@
 # Can Snapintosh run on a Surface Pro 11 (Snapdragon X Elite X1E80100)?
 
 **The port: UNIMPLEMENTED. Host-side groundwork: EXPERIMENTAL. Hardware status:
-NOT RUN.** Nothing in this document has run on a Surface Pro. It records what a
-port would need, in what order, and what would stop it. What exists today is
-host-side only: the A16 regression baseline
+gates X1 and X2 have run on a Surface Pro 11 (2026-11-11); K1 did not fire
+(NV2 confirmed functionally usable, OBSERVED).** Everything else in this
+document has not run on a Surface Pro. It records what the rest of a port
+would need, in what order, and what would stop it. What exists today beyond
+that one result is host-side only: the A16 regression baseline
 ([section 9.2](#92-reproducing-the-a16-baseline)), and a set of models,
 validators, studies and an EFI probe. The SP11 code in `compat/` and `probes/`
 builds only with `-DSNAP_PLATFORM_SP11=1`, and the A16 monitor stays
@@ -11,17 +13,18 @@ byte-identical without it. [Section 9.3](#93-host-tests-for-the-sp11-groundwork)
 lists every host test and what it does not prove, and
 [section 6.5](#65-where-each-gate-stands) states where each gate stands.
 
-**Result: possible in principle, a large port, with one silicon-level
-go/no-go.** The A16 model is an EL2 monitor that presents the Apple platform
-contracts while the stock J700/T8140 kernel runs at EL1, believing it is at
-EL2 through FEAT_NV2. That model carries over only if the first-generation
-Oryon cores implement nested virtualization usably. Whether they do is
-UNKNOWN: the raw ID-register values are not public, and the indirect hints are
-not evidence. A functional test at gate X2
-([section 6.3](#63-x2-silicon-qualification)) settles it before any of the
-large work (GPU, storage, input) starts. The instrument for that test is
-written and has only run under QEMU ([SP11-X2-TESTS.md](SP11-X2-TESTS.md)).
-If NV2 is absent, the plan stops there.
+**Result: possible in principle, a large port, with the one silicon-level
+go/no-go now decided.** The A16 model is an EL2 monitor that presents the
+Apple platform contracts while the stock J700/T8140 kernel runs at EL1,
+believing it is at EL2 through FEAT_NV2. That model carries over only if the
+first-generation Oryon cores implement nested virtualization usably. A
+functional test at gate X2 ([section 6.3](#63-x2-silicon-qualification))
+answers that, before any of the large work (GPU, storage, input) starts: run
+on the unit on 2026-11-11, it OBSERVED `ID_AA64MMFR2_EL1.NV` == 2 (NV_frac ==
+0), an EL1 access to an EL2 register landing in the page named by `VNCR_EL2`
+when NV2 is on, and the same access trapping with NV2 off. K1 did not fire.
+The raw ID-register values and the indirect hints that made this UNKNOWN
+beforehand are superseded by this direct, on-core measurement.
 
 The target is the Surface Pro 11th Edition (OLED, codename Denali) with the
 Snapdragon X Elite X1E80100 ("Hamoa", 12 Oryon v1 cores). The finish line is a
@@ -291,12 +294,12 @@ row 23).
 | --- | --- | --- | --- |
 | Firmware entry | UEFI enters at EL2 directly (OBSERVED: one boot, recorded in q1n1 `docs/A16-FIRST-EL2-BOOT.md`) | UEFI at EL1 under Gunyah. EL2 only through slbounce plus an older Microsoft-signed `tcblaunch.exe` (VERIFIED from slbounce's source and README; OBSERVED on one community unit) | New gate X1. Instrument: the EFI state probe (EXPERIMENTAL, QEMU-tested only). |
 | EL2 regime on entry | Firmware-native; the monitor is a non-VHE host (VERIFIED) | slbounce returns with `HCR_EL2` = TGE+E2H (VHE), the MMU on and UEFI's tables reinterpreted (VERIFIED, slbounce source) | A VHE host or a de-VHE trampoline. Decision record and host model: [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) (EXPERIMENTAL, linked into no build). |
-| FEAT_NV2 | Measured `NV` == 2 (VERIFIED, code comment) | **UNKNOWN** raw; indirect hints only | X2 stop gate. **Host groundwork (A3, EXPERIMENTAL):** an SP11 monitor build refuses to launch without an embedded functional record for this core, so NV and NV2 stay clear; the A16 build is unchanged. |
+| FEAT_NV2 | Measured `NV` == 2 (VERIFIED, code comment) | Measured `NV` == 2, `NV_frac` == 0, `VNCR_EL2` redirect PASS and the NV2-off negative control PASS on the unit (OBSERVED, 2026-11-11; X2 item 2) | X2 stop gate, resolved: K1 did not fire. **Host groundwork (A3, EXPERIMENTAL):** an SP11 monitor build refuses to launch without an embedded functional record for this core, so NV and NV2 stay clear; the A16 build is unchanged. The record from this run is not yet embedded in a monitor build. |
 | CPUs | 6 guest vCPUs; `GUEST_CPU_COUNT` is the literal `6U` on A16 (a `-D` override is a macro redefinition) and defaults to `6U` and is overridable on SP11 only (`GUEST_CPU_COUNT` in `compat/cpu.h`); the A16 build is byte-identical | 12 Oryon v1 in 3 clusters of 4, no E/P split (VERIFIED, device tree; the guest-visible affinities and MPIDR values are INFERRED until X2) | Placement and redistributor-discovery models exist (`compat/topology.c`, host-tested); a count other than 6 still needs the follow-ups listed under C2 |
 | GIC | GICD `0x17000000`, GICR `0x17080000` stride `0x40000`, hard-coded | The same bases in `hamoa.dtsi`, with the GICR window sized for 12 redistributors (VERIFIED). An ITS node is present at `0x17040000`; the upstream EL2 overlay comments that Gunyah's ITS emulation seems broken (a developer's note, read but not measured). | Discover and cross-check; never assume |
-| Timer | 19.2 MHz host counter. The guest's 24 MHz timebase comes from trapped counter reads, and the monitor refuses to start a vCPU without a non-zero `ID_AA64MMFR0_EL1.ECV` and a matching `CNTFRQ_EL0` (VERIFIED, read: `probes/xnuboot/prepare.c`, `docs/KERNEL-PATCHES.md`) | `CNTFRQ_EL0` reads 19.2 MHz and `ID_AA64MMFR0_EL1.ECV` reads 2 in a third-party Windows-side CPU profile of another X1E80100 machine (E26; OBSERVED on another unit, hypervisor-filtered view). The pinned Hamoa device tree gives the architected timer no frequency. Neither value has been read on this unit at EL2 (UNKNOWN until X2); the monitor's existing refusal on a `CNTFRQ_EL0` or ECV mismatch makes a surprise fail closed. Linux carries an Oryon X1 erratum, "Broken CNTVOFF_EL2", worked around by trapping the virtual timer and counter, which needs FEAT_ECV (E17; VERIFIED, read). That it applies to this unit is INFERRED until the MIDR is read at X2. | Functional tests; relocation risk (R6). Offset policy and model: [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 3 (EXPERIMENTAL). |
-| PAuth | QARMA3 reported in ISAR2 | QARMA5 reported in ISAR1 (APA = 5, GPA = 1) with APA3 = GPA3 = 0 in the same third-party profile; not read on this unit (E26; OBSERVED on another unit) | ID-register normalization. **Host groundwork (C4, EXPERIMENTAL):** `compat/oryon-idregs.c`; an unrecorded MIDR refuses the launch. |
-| Stage 2 | 36-bit IPA, 4K granule, 8-bit VMID (VERIFIED). The A16 also reports PARange 44 bits and no 16K granule ([FEASIBILITY.md](FEASIBILITY.md)), so 36 bits is a monitor choice. | PARange 44 bits, VMIDBits 8 and no 16K granule in the same third-party profile; not read on this unit (E26; OBSERVED on another unit) | Audit the DRAM and MMIO map. **Host groundwork (C5, EXPERIMENTAL):** the model `compat/ipa-geometry.c` and an SP11-gated check in `probes/xnuboot/stage2.c`. |
+| Timer | 19.2 MHz host counter. The guest's 24 MHz timebase comes from trapped counter reads, and the monitor refuses to start a vCPU without a non-zero `ID_AA64MMFR0_EL1.ECV` and a matching `CNTFRQ_EL0` (VERIFIED, read: `probes/xnuboot/prepare.c`, `docs/KERNEL-PATCHES.md`) | `ID_AA64MMFR0_EL1.ECV` reads 2 on this unit at EL2 (OBSERVED, 2026-11-11, X2 item 1), matching the third-party profile of another X1E80100 machine (E26). `CNTFRQ_EL0` itself is still unread: T03, the timer test, has not completed on this unit (a board reset a short, fixed time after T01, not yet explained; [SP11-X2-TESTS.md](SP11-X2-TESTS.md)). The pinned Hamoa device tree gives the architected timer no frequency. The MIDR is now read (`0x00000000512F0011`, OBSERVED): the Oryon X1 "Broken CNTVOFF_EL2" erratum workaround (E17) applies to this unit, no longer only INFERRED. | Functional tests; relocation risk (R6). Offset policy and model: [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 3 (EXPERIMENTAL). |
+| PAuth | QARMA3 reported in ISAR2 | QARMA5 reported in ISAR1 (APA = 5, GPA = 1) with APA3 = GPA3 = 0 in the same third-party profile; confirmed on this unit (OBSERVED, 2026-11-11: APA=5/API=0/GPA=1/GPI=0, passive probe and X2 T01 agree) | ID-register normalization. **Host groundwork (C4, EXPERIMENTAL):** `compat/oryon-idregs.c`; an unrecorded MIDR refuses the launch. |
+| Stage 2 | 36-bit IPA, 4K granule, 8-bit VMID (VERIFIED). The A16 also reports PARange 44 bits and no 16K granule ([FEASIBILITY.md](FEASIBILITY.md)), so 36 bits is a monitor choice. | PARange 44 bits and no 16K granule confirmed on this unit (OBSERVED, 2026-11-11, X2 item 1: `PARANGE=4` i.e. 44-bit, `TGRAN 16K=NO`), matching the third-party profile. VMIDBits reads 16 on this unit, not the 8 that profile reported (OBSERVED; a real difference, not yet explained) | Audit the DRAM and MMIO map. **Host groundwork (C5, EXPERIMENTAL):** the model `compat/ipa-geometry.c` and an SP11-gated check in `probes/xnuboot/stage2.c`. |
 | Storage | Virtual ANS2 over the real NVMe, window design (VERIFIED) | NVMe on `pcie6a` behind a PCIe SMMUv3 (VERIFIED device tree). The SMMU state is UNKNOWN. | Port `compat/nvme-host.c`. **Host groundwork (S2/S3, EXPERIMENTAL):** an SP11 window contract in `compat/nvme-host.c` under `SNAP_PLATFORM_SP11`, not called by the monitor yet: an SP11 monitor refuses to adopt the SSD (prepare status -145) instead of falling back to the A16 adoption; audit and per-machine questions in [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md). |
 | Display | AdrenoDisplay, 2880x1800 at 60 Hz | Samsung ATNA30DW01 13-inch OLED, 2880x1920 (3:2) (VERIFIED in public sources: the Linux binding and Microsoft's tech specs; this unit's GOP mode is INFERRED), on `mdss_dp3`, 4-lane eDP up to HBR3 (VERIFIED, upstream device tree). See [SP11-DISPLAY-STUDY.md](SP11-DISPLAY-STUDY.md). | Reuse the firmware pipeline. The A16's dispcc and eDP constants are wrong on Hamoa and must not be reused. |
 | GPU | Adreno X2-90 (a8xx), chip `0x44070041` | Adreno X1-85 (a7xx, gen70500). Device-tree compatible `qcom,adreno-43050c01` and GMU `adreno-gmu-x185.1` (VERIFIED). Upstream `drivers/gpu/drm/msm/adreno/a7xx_catalog.c:376-380` binds chip id `0x43050c01` to `gen70500_sqe.fw` and `gen70500_gmu.bin` (VERIFIED). The entry spans lines 375-418; it also selects the 48-slot `a730_protect` CP_PROTECT table, GMU chip-id word `0x7050001` and 3 MiB of GMEM, and names no zap firmware (VERIFIED at that commit; [SP11-GPU-A7XX-STUDY.md](SP11-GPU-A7XX-STUDY.md) section 1.1). Silicon read-back pending (X8a). | The largest port |
@@ -697,14 +700,38 @@ and NVMe state and T07 the PCIe SMMUv3 state (item 6), T08 ADSP and PMIC-GLINK
 (item 8). It writes the NV2 record of item 2 and its results next to the probe's
 dump on the stick, and writes no PCIe, NVMe, SMMU, GIC, display, clock, power or
 voltage register. [SP11-X2-TESTS.md](SP11-X2-TESTS.md) is the operator guide.
-EXPERIMENTAL: tested on the host and under QEMU only. Its EL1 stub, vector
-tables and ERET path have never run on a Surface Pro, and the first run must
-observe them. Not covered by the image: items 9 to 13 and the `CNTVOFF_EL2`
-comparison across cores (T01 does read the ID registers behind M1). Hardware
-status: NOT RUN.
+Hardware status: run on the unit (2026-11-11, build `89889B7FEB3C`). T01 and
+T02 produced real, CRC-verified, OBSERVED results (`ID_AA64MMFR2_EL1.NV` == 2,
+`NV_frac` == 0; `VNCR_EL2` redirect PASS; the NV2-off negative control PASS;
+K1 NV2: GO), independently confirmed against `tools/nv2_record.py`'s own
+gate-mirroring logic (`show --check` on the retyped record: `gate: ALLOW`). Its
+EL1 stub, vector tables and ERET path are no longer untried: T02 exercises
+exactly that path, with a clean restore (`RESTORED=YES MECH=NO CLEANUP=OK`).
+An earlier run (before the fix below) also got real results from T05 (FAIL:
+a redistributor walk found zero frames for all 12 cores despite a correct
+MADT), T07 (UNKNOWN: a register read faulted) and T09 (PASS), and left T06
+interrupted mid-window-read. T03 and T04 remain NOT RUN on every attempt so
+far: this unit's firmware resets the board a fixed, short time after T01
+completes, for a reason not yet confirmed (see the phase-B test order below);
+T02 now runs before T03 specifically so K1 is decided regardless. Not covered
+by any run: items 9 to 13 and the `CNTVOFF_EL2` comparison across cores (T01
+does read the ID registers behind M1).
+
+**Phase-B test order (OBSERVED, Surface Pro 11, 2026-11-11).** This unit's
+firmware only reaches EL2 during slbounce's own `ExitBootServices` hook, never
+before it, so `tests_hook_pre_ebs`'s phase-A tests (T01 to T04) never run
+there; `tests_hook_post_ebs` runs them as a phase-B fallback instead, through
+the same on-screen rows (no stick write is possible after
+`ExitBootServices`). Within that fallback, T02 (NV2, the test that decides K1)
+runs right after T01 instead of last, because a video-timed run OBSERVED the
+board reset during T03 before T02 could take its turn, and T02 depends only on
+T01's ID-register read, not on T03 or T04. Details, including why the stall's
+cause is not yet confirmed, are in
+[SP11-X2-TESTS.md](SP11-X2-TESTS.md).
 
 **How the instrument fails closed (hardened after an independent review;
-EXPERIMENTAL, host and QEMU tests only).**
+EXPERIMENTAL except where OBSERVED above; host and QEMU tests, plus the one
+real run, so far).**
 
 * *State.* Every guarded test runs under the image's own EL2 vector table, and
   each register the image writes is saved first and restored on every path. The
@@ -763,7 +790,11 @@ EXPERIMENTAL, host and QEMU tests only).**
   conduit and the `GOP` line (section 6.2).
 
 **Exit:** a local qualification report with labels. **Decision D4:** usable NV2
-proceeds; absent NV2 stops here (K1). The choice between a VHE host and a
+proceeds; absent NV2 stops here (K1). **Decided, 2026-11-11: NV2 is usable on
+this unit (OBSERVED); K1 did not fire; the plan proceeds.** Item 2's result is
+in; items 3, 4 and 9 to 13 of the qualification report above are not, so the
+gate's full exit criterion is not yet met even though the one criterion that
+could stop the plan (K1) has been resolved. The choice between a VHE host and a
 de-VHE entry is recorded with its evidence; the recommended default and what
 would change it are in [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2.9.
 
@@ -790,15 +821,17 @@ reordering X0 to X11), listed after X11.
 
 ### 6.5 Where each gate stands
 
-Hardware status is NOT RUN for every gate: no gate has been attempted on a
-Surface Pro. The host groundwork column lists what exists, all of it
-EXPERIMENTAL and none of it validated on hardware. Section 9.3 lists the tests.
+Hardware status: X1 and X2 have run on a Surface Pro 11 (2026-11-11); X2's K1
+did not fire (NV2 confirmed usable, OBSERVED; [section 6.3](#63-x2-silicon-qualification)).
+Every other gate is NOT RUN: no further gate has been attempted. The host
+groundwork column lists what exists for those, all of it EXPERIMENTAL and none
+of it validated on hardware. Section 9.3 lists the tests.
 
 | Gate | Host groundwork | Still needed before the gate can close |
 | --- | --- | --- |
 | X0 | Boot-media staging tool (`tools/stage-sp11-boot-media.py`, which checks the shell against its pinned hash); five `tcblaunch.exe` candidates staged from the unit; N2 to N4 matched to the public package | The rest of N5 (Surface UEFI version, Secure Boot state, SoC SKU, RAM); the BitLocker recovery key stored off the device, and the choice of the Secure Boot and BitLocker way ([section 8.1](#81-secure-boot-and-bitlocker)); an older `tcblaunch.exe` if none of the five works (K2). The SSD backup is waived for X1 to X3 and needed before X6; recovery media are needed before X3 and X6 (N7) |
-| X1 | EFI state probe (`probes/uefi`, two images, QEMU-tested; hardened after an independent review: no unguarded newer ID register, no `hvc`, a GOP and dump policy that fails closed) and the stick layout | The unit; Secure Boot off; which of the five builds slbounce accepts; whether `ResetSystem` works afterwards (R18); the first-run observations of [section 6.2](#62-x1-el2-through-slbounce) |
-| X2 | The X2 test image (T01 to T09; guarded reads, a halt on a failed restore, device windows refused unless plausible); the NV2 record format and `tools/nv2_record.py`; the SP11-gated NV2 launch gate and Oryon PAuth normalization; host models of the EL2 entry, timer offsets and `DC ZVA` | Running the image on the unit, with the first-run observations of [section 6.3](#63-x2-silicon-qualification). Not covered by the image: the APSS watchdog, display, USB link state, the EL2 entry measurements and `CNTVOFF_EL2` across cores |
+| X1 | EFI state probe (`probes/uefi`, two images, QEMU-tested; hardened after an independent review: no unguarded newer ID register, no `hvc`, a GOP and dump policy that fails closed) and the stick layout | **Done, 2026-11-11.** Build 28144's `tcblaunch.exe` reaches EL2 under slbounce; `ResetSystem` does not work afterwards (R18 answered: no); the first-run observations of [section 6.2](#62-x1-el2-through-slbounce) (`SEL=SAME`, PSCI conduit SMC, GICv4.1) are recorded there. slbounce's blanket `clear_dcache_range()` sweep before `ExitBootServices` hangs this unit's firmware (matching a public upstream issue on a different Surface model); the pinned build still has it, so a production monitor build needs the same fix a test-only local variant used to get past it |
+| X2 | The X2 test image (T01 to T09; guarded reads, a halt on a failed restore, device windows refused unless plausible); the NV2 record format and `tools/nv2_record.py`; the SP11-gated NV2 launch gate and Oryon PAuth normalization; host models of the EL2 entry, timer offsets and `DC ZVA` | **K1 decided (GO), 2026-11-11.** T03, T04 and the `CNTVOFF_EL2` comparison across cores are still NOT RUN (a recurring board reset a fixed, short time after T01, not yet explained); so are items 9 to 13 (the APSS watchdog, display, USB link state, the EL2 entry measurements), none of which affect K1. Embedding the obtained record in an actual monitor build is also still to do |
 | X3 | Descriptor-driven USB port table (the descriptor now lists the two controllers, INFERRED) and a default-off q1n1 path; the D5 ladder, K3 and a persistent-log design | The link itself. The DWC3 core id (X2): until it is measured, `emit-c` needs `--allow-unmeasured-id`. PHY, clock and repeater bring-up is UNIMPLEMENTED (q1n1 programs none of it); the DRAM-retention test; the q1n1 port (B1) |
 | X4 | Board descriptor and board-info ABI; ACPI cross-check; vCPU placement and GIC discovery models; the monitor's launch refusal for a vCPU count that needs the fair lock (-146); stage-2 geometry model and its SP11-gated check; Hamoa thermal-guard model | Call sites for the topology, board-info and thermal models (UNIMPLEMENTED); the measurements that replace every INFERRED value; the vCPU count the J700 guest tolerates |
 | X5 | Display pipeline decision model (`compat/display-pipeline-check.c`) and the GOP/EDID mode validator, linked by nothing | The X2 display reads; whether the firmware leaves the display blocks readable at EL2 |
