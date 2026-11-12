@@ -878,17 +878,25 @@ q1n1 is a sibling checkout, not a submodule.
 
 **Status of B1 (host only; EXPERIMENTAL; hardware NOT RUN).**
 [SP11-Q1N1-BOOT-STUDY.md](SP11-Q1N1-BOOT-STUDY.md) holds the A16 entry/chainload/console inventory (A16-specific,
-firmware-coupled or generic, file and line at the pinned commit), a design for the SP11 flow built around three real
-hardware constraints from this week's runs: EL2 appears only inside slbounce's own `ExitBootServices` hook (never
-before it), the hook's blanket dcache sweep hangs this unit's firmware, and the board resets itself a short,
-unexplained time after a certain point post-bounce. It proposes a scoped, attribute-filtered, chunked replacement for
-the sweep (not a blanket `#if 0`), agrees with and sharpens [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md)'s existing
-recommendation to normalize EL2 inside a Snapintosh fork of slbounce's `trans.s`, and ports the GOP two-tier selection
-already proven on hardware in the passive probe into q1n1's framebuffer console. Nothing here has been applied to
-q1n1 or slbounce; a small, host-tested, illustrative model of the sweep design (`tools/sp11_ebs_sweep_model.py`) is
-included. **Not done:** any of the above as a real q1n1 or slbounce patch; whether the scoped sweep actually avoids
-this unit's hang (UNKNOWN; the faulting address was never captured); the fail-closed EL check, the `trans.s` edit and
-the chainload test harness are all UNIMPLEMENTED.
+firmware-coupled or generic, file and line at the pinned commit) and the design: a scoped, attribute-filtered,
+chunked replacement for slbounce's blanket dcache sweep; EL2 normalization inside a Snapintosh fork of slbounce's
+`trans.s`; and the GOP two-tier selection already proven on hardware in the passive probe, ported into q1n1's entry
+path. **Implemented and pushed, 2026-11-12** (independently re-verified from fresh checkouts: 31/31 host tests on the
+slbounce side, 14/14 on the q1n1 side, zero skips, every default-off and shared-ABI proof re-run and confirmed): a
+Snapintosh fork of slbounce ([sa3eedo12/slbounce](https://github.com/sa3eedo12/slbounce) branch
+`sa3eedo12-sp11-boot`, one commit on the pinned commit, two independent default-off gates,
+`SLBOUNCE_SCOPED_SWEEP` and `SLBOUNCE_SP11_DEVHE`) and q1n1's own flow
+([sa3eedo12/q1n1](https://github.com/sa3eedo12/q1n1) branch `sa3eedo12-sp11-boot`, one commit on
+`sa3eedo12-sp11-host-link`: the fail-closed EL2 check, the declared-ranges handshake with the slbounce fork, the
+reordered console-first boot, the ported GOP selection, and a chainload candidate table). One real bug was found
+and fixed during implementation (a missing second `TLBI`-with-barriers in the de-VHE sequence, caught by
+disassembling the built object against `compat/el2-entry-model.c`'s canonical sequence, now a permanent regression
+test). Neither repository's branch is merged upstream. **Not done:** anything on hardware (by construction: slbounce
+cannot be modelled in QEMU); whether the scoped sweep actually avoids this unit's hang (UNKNOWN, the faulting
+address was never captured); a real chainload stage-address table (no generator exists; the real DRAM map is still
+unmeasured). The next step is building an actual bootable image with these gates and testing on the unit, starting
+with `SLBOUNCE_SCOPED_SWEEP` alone before adding `SLBOUNCE_SP11_DEVHE` — the de-VHE register writes run with the MMU
+off and no console until they finish, the highest-risk single step this plan has proposed so far.
 
 **Status of B2 and B3 (host only; EXPERIMENTAL; hardware NOT RUN).**
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) holds the A16 USB inventory

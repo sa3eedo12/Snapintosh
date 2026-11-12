@@ -1,8 +1,12 @@
 <!-- SPDX-License-Identifier: MIT -->
 # SP11 q1n1 boot study: entry, chainload and console on Hamoa (WS-B item B1)
 
-**Status: UNIMPLEMENTED target, EXPERIMENTAL host models. Nothing here has run on a Surface Pro 11, nothing is
-applied to q1n1, and no code in this patch is linked into any build.** It answers WS-B item B1 of
+**Status: this design is now implemented and host-verified (2026-11-12), still untried on a Surface Pro 11.**
+[sa3eedo12/slbounce](https://github.com/sa3eedo12/slbounce) branch `sa3eedo12-sp11-boot` and
+[sa3eedo12/q1n1](https://github.com/sa3eedo12/q1n1) branch `sa3eedo12-sp11-boot` carry it as real, default-off,
+host-tested code (31/31 and 14/14 tests respectively, independently re-verified from fresh checkouts; see
+[SURFACE-PRO-11.md](SURFACE-PRO-11.md)'s "Status of B1"). Nothing has run on a Surface Pro 11, and no code here is
+linked into any default build. It answers WS-B item B1 of
 [SURFACE-PRO-11.md](SURFACE-PRO-11.md) as far as public sources, the pinned q1n1 tree and a host can: which parts of
 q1n1's A16 entry/chainload/console path are A16-specific, firmware-coupled or generic; a design for q1n1's SP11 boot
 flow that treats every real-hardware fact [SP11-X2-TESTS.md](SP11-X2-TESTS.md) and
