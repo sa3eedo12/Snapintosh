@@ -733,3 +733,39 @@ actual source, say so explicitly... rather than silently picking one."
 - **[SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2.4/2.9's recommendation (A1 primary)** is not contradicted by
   this study; it is confirmed and sharpened (section 6), with one premise corrected (A1's "cost" of forking slbounce
   is shared with, not additional to, the fork section 4 already requires).
+
+## 14. Addendum, 2026-11-12: what the first hardware attempts and a QEMU run corrected
+
+Everything above was written before q1n1 ran on the unit. Three attempts and a QEMU run of the implemented flow
+corrected it in four places. Evidence labels: the hardware observations are OBSERVED, the code facts are VERIFIED by
+reading the cited source, and nothing here is hardware evidence for the sweep itself (still NOT RUN).
+
+- **Section 9.1 / F01 / F04 were not carried through.** The text above says the SP11 production path should skip the
+  A16 USB boot window; the delivered flow did not. `proxy_efi_main`'s `usb_mode` branch still calls
+  `q1n1_boot_window`, which looks for the BIOS312 `UsbConfigDxe` image by an exact fingerprint and refuses with
+  `REFUSED: UsbConfigDxe USB0 core/qscratch table differs from BIOS312` before any USB register is touched, so
+  `--boot` cannot reach ExitBootServices on the Surface. `--uart-proxy` refuses without a PL011. Skipping the window
+  would make the post-EBS proxy touch the fixture USB table's invented bases and a PL011 driver on a GENI UART, so the
+  refusal is left in place until B2 supplies a real table. The existing `--el2` diagnostic (post-EBS it draws only
+  to the framebuffer) is the step-1 vehicle instead.
+- **Section 4.4 / 7.2: the framebuffer is not a declarable range.** The "seven ranges" were taken from `gpu_setup()`'s
+  exclusion list, which includes the framebuffer. On this unit the framebuffer is wholly inside one RESERVED (type 0)
+  descriptor, attribute `0x100F` (probe dumps `x1-run01..03`), and the scoped sweep accepts only types 1-6 and 9, so
+  declaring it makes ExitBootServices fail on every attempt. The list is six ranges (heap, DMA arena, stage slot,
+  image, map buffer, preload table), each listed only if populated; `--el2` declares its image and map buffer.
+  `tools/test-sp11-ebs-sweep-model.py` pins the refusal. Nothing reads the framebuffer after ExitBootServices, so
+  leaving it out can at worst leave stale pixels (INFERRED).
+- **Section 5.5 / 7.2: a refusal has to explain itself.** The scoped sweep returns a bare `EFI_ABORTED` and prints
+  nothing, and every cause (no table, a malformed table, more than 512 descriptors, a range split across descriptors,
+  a wrong type, no WB bit) collapses into it. q1n1 therefore prints each declared range against the map
+  (descriptor count, type, attribute, containment) before ExitBootServices and again on the failure and success
+  pages. It reports facts and leaves the policy in slbounce.
+- **Section 8.2: the selection logic was right; the inputs were not (UNCONFIRMED how).** The unit's recorded maps run
+  through q1n1's ported selection give the same answer as the probe, yet attempt 3 refused the only GOP as
+  `NOT IN MEMORY MAP`. Two real defects in the gathering code were fixed (a copy silently truncated at 512 entries,
+  and a buffer a fifth the probe's size), but whether either caused the refusal is not known. The plain text console
+  now prints the map status, size and entry count and, per candidate, its verdict and first overlapping descriptor.
+
+Open after this addendum: the cause of attempt 3's refusal; whether the unit's map at q1n1's run time stays within
+slbounce's 512-descriptor bound; whether the scoped sweep lets ExitBootServices through; whether EL2 is then reached;
+the post-bounce reset; and `SLBOUNCE_SP11_DEVHE`, untried.

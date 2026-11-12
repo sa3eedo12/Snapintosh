@@ -832,7 +832,7 @@ of it validated on hardware. Section 9.3 lists the tests.
 | X0 | Boot-media staging tool (`tools/stage-sp11-boot-media.py`, which checks the shell against its pinned hash); five `tcblaunch.exe` candidates staged from the unit; N2 to N4 matched to the public package | The rest of N5 (Surface UEFI version, Secure Boot state, SoC SKU, RAM); the BitLocker recovery key stored off the device, and the choice of the Secure Boot and BitLocker way ([section 8.1](#81-secure-boot-and-bitlocker)); an older `tcblaunch.exe` if none of the five works (K2). The SSD backup is waived for X1 to X3 and needed before X6; recovery media are needed before X3 and X6 (N7) |
 | X1 | EFI state probe (`probes/uefi`, two images, QEMU-tested; hardened after an independent review: no unguarded newer ID register, no `hvc`, a GOP and dump policy that fails closed) and the stick layout | **Done, 2026-11-11.** Build 28144's `tcblaunch.exe` reaches EL2 under slbounce; `ResetSystem` does not work afterwards (R18 answered: no); the first-run observations of [section 6.2](#62-x1-el2-through-slbounce) (`SEL=SAME`, PSCI conduit SMC, GICv4.1) are recorded there. slbounce's blanket `clear_dcache_range()` sweep before `ExitBootServices` hangs this unit's firmware (matching a public upstream issue on a different Surface model); the pinned build still has it, so a production monitor build needs the same fix a test-only local variant used to get past it |
 | X2 | The X2 test image (T01 to T09; guarded reads, a halt on a failed restore, device windows refused unless plausible); the NV2 record format and `tools/nv2_record.py`; the SP11-gated NV2 launch gate and Oryon PAuth normalization; host models of the EL2 entry, timer offsets and `DC ZVA` | **K1 decided (GO), 2026-11-11.** T03, T04 and the `CNTVOFF_EL2` comparison across cores are still NOT RUN (a recurring board reset a fixed, short time after T01, not yet explained); so are items 9 to 13 (the APSS watchdog, display, USB link state, the EL2 entry measurements), none of which affect K1. Embedding the obtained record in an actual monitor build is also still to do |
-| X3 | Descriptor-driven USB port table (the descriptor now lists the two controllers, INFERRED) and a default-off q1n1 path (applied and pushed to a q1n1 fork, 2026-11-11, not yet merged upstream); the D5 ladder, K3 and a persistent-log design | The link itself. The DWC3 core id (X2): until it is measured, `emit-c` needs `--allow-unmeasured-id`. PHY, clock and repeater bring-up is UNIMPLEMENTED (q1n1 programs none of it); the DRAM-retention test; the q1n1 port (B1), not yet started: a new UEFI boot flow (slbounce integration, early EL2 normalization, chainload, a framebuffer console), comparable in size to the X1/X2 groundwork itself |
+| X3 | Descriptor-driven USB port table (the descriptor now lists the two controllers, INFERRED) and a default-off q1n1 path (applied and pushed to a q1n1 fork, 2026-11-11, not yet merged upstream); the D5 ladder, K3 and a persistent-log design | The link itself. The DWC3 core id (X2): until it is measured, `emit-c` needs `--allow-unmeasured-id`. PHY, clock and repeater bring-up is UNIMPLEMENTED (q1n1 programs none of it); the DRAM-retention test; the q1n1 port (B1): implemented on the host and pushed to forks (2026-11-12), but on the unit it has not yet got past GOP selection or reached ExitBootServices (see Status of B1), and its USB boot-window path is still A16-only |
 | X4 | Board descriptor and board-info ABI; ACPI cross-check; vCPU placement and GIC discovery models; the monitor's launch refusal for a vCPU count that needs the fair lock (-146); stage-2 geometry model and its SP11-gated check; Hamoa thermal-guard model | Call sites for the topology, board-info and thermal models (UNIMPLEMENTED); the measurements that replace every INFERRED value; the vCPU count the J700 guest tolerates |
 | X5 | Display pipeline decision model (`compat/display-pipeline-check.c`) and the GOP/EDID mode validator, linked by nothing | The X2 display reads; whether the firmware leaves the display blocks readable at EL2 |
 | X6 | SP11 window contract in `compat/nvme-host.c`; the monitor's refusal to adopt the SSD until that contract is wired (-145); the `sp11` profile of the partition planner (readers counted by content, with the MBR visibility reported); synthetic GPT fixtures | Descriptor fields for the NVMe segment, BDF and SMMU stream; the SMMU state; a call site that enforces the contract; the operator's one GPT entry |
@@ -897,6 +897,39 @@ address was never captured); a real chainload stage-address table (no generator 
 unmeasured). The next step is building an actual bootable image with these gates and testing on the unit, starting
 with `SLBOUNCE_SCOPED_SWEEP` alone before adding `SLBOUNCE_SP11_DEVHE` — the de-VHE register writes run with the MMU
 off and no console until they finish, the highest-risk single step this plan has proposed so far.
+
+**B1 on the unit (2026-11-12, three attempts; q1n1 has not yet reached ExitBootServices there).** OBSERVED: the
+SP11-gated `q1n1.efi` runs from the UEFI Shell. Attempts 1 and 2 (no-argument preflight, then `--boot`) found no GOP
+at all: that build enumerated handles with `LocateHandleBuffer`, which returned none for the GOP protocol GUID in a
+session where the probe's `LocateHandle` finds them (unexplained, so the probe's proven call is now used). Attempt 3,
+with `LocateHandle`, found the handles and q1n1's own GOP validation refused the framebuffer as `NOT IN MEMORY MAP`
+(the first attempt with a per-condition diagnostic, so whether attempts 1 and 2 had the same cause is unknown). The
+passive probe selects the same GOP on this unit (`SEL=SAME`: 2880x1920 BGRX inside one RESERVED, type 0, descriptor,
+attribute `0x100F`), and replaying the unit's three recorded maps (`x1-run01..03`) through q1n1's selection code on the
+host returns OK, so the map q1n1 saw at run time differed from the probe's. The cause is **UNCONFIRMED**. The code now
+prints the evidence on the plain text console (handle count, map status, size, stride and entry count, and per
+candidate its geometry, base, verdict and the first overlapping descriptor's type, attribute and extent), so one
+photograph decides it. Two defects that could produce exactly this symptom were fixed regardless: a 512-entry, 24 KiB
+map copy that silently dropped the end of a longer map (the framebuffer's descriptor is the 225th of 226 here, and the
+array is two ascending runs, not one), now a 128 KiB buffer and a parser that refuses a map it cannot hold.
+
+**Corrections to the B1 design found by reading the code and running it under QEMU (VERIFIED on the host; hardware
+NOT RUN).** (1) `--boot` cannot reach ExitBootServices on this firmware: it enters the A16 USB boot window, which
+refuses on the BIOS312 `UsbConfigDxe` fingerprint before touching any USB register. The study named this gap
+(F01/F04, section 9.1: take a path that skips the window) and it was not implemented; skipping it naively would drive
+the invented fixture USB bases and a PL011 driver on a GENI UART, so it is deliberately left refused until B2 lands.
+`--uart-proxy` also refuses (no PL011). The existing `--el2` diagnostic, which touches nothing but the framebuffer
+after ExitBootServices, is the step-1 vehicle. (2) `--el2` declared no ranges, because it read a global that only
+`--boot` sets, so the scoped-sweep slbounce would have refused it; it now declares its image and map buffer (found
+by running it under QEMU; `tools/test-q1n1-sp11-qemu.py` in the q1n1 fork guards it). (3) The framebuffer must not be
+a declared range: this unit's lies in a RESERVED (type 0) descriptor and the sweep takes only types 1-6 and 9, so
+declaring it makes ExitBootServices fail on every attempt (`tools/test-sp11-ebs-sweep-model.py` pins this). The study's
+"seven ranges" are six. (4) slbounce's scoped sweep refuses with a bare `EFI_ABORTED` and prints nothing, so q1n1 now
+prints each declared range against the map (descriptor count, type, attribute, containment) before ExitBootServices,
+and again on the failure and success pages. Still UNKNOWN: whether the scoped sweep gets ExitBootServices through on
+this unit (the unit's map must also stay within the sweep's 512-descriptor bound), whether EL2 is then reached, and
+the unexplained post-bounce reset. The next attempt is the preflight with and without slbounce loaded, then `--el2`
+with the scoped-sweep slbounce (`SLBOUNCE_SP11_DEVHE` still unset).
 
 **Status of B2 and B3 (host only; EXPERIMENTAL; hardware NOT RUN).**
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) holds the A16 USB inventory
