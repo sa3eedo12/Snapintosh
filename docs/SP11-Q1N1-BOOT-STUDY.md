@@ -801,3 +801,8 @@ Three things changed in this study's account.
   now links it straight after
   `trans.o`, inside that window, and a link-map test pins it. Everything the sequence executes with the MMU off is
   again inside the window upstream's design relies on. Hardware: NOT RUN.
+- *The de-VHE run gets progress markers, qualified first.* With the MMU off and no console a hang in the trampoline
+  shows nothing, so the fork can draw squares in a framebuffer strip (opt-in, `SLBOUNCE_SP11_MARKERS`). Their stores are
+  data accesses with the MMU off, which section 6's model refuses and no hardware has qualified, so a dry-run build that
+  draws and halts before any configuration write is to be run first. Plan and evidence labels: SURFACE-PRO-11.md, Status
+  of B1. Hardware: NOT RUN.

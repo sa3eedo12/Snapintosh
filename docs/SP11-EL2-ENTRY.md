@@ -316,7 +316,10 @@ checks this model against one unit's inputs; it is not a hardware result for the
 ### 2.11 What the model does not prove
 
 It proves a sequence against the rules in 2.2, not the hardware. It does not model speculative TLB fills, the data
-caches, branch prediction, or SError and interrupt delivery during the window. It abstracts `SCTLR_EL2`, and it models
+caches, branch prediction, or SError and interrupt delivery during the window. It also cannot represent the real
+trampoline's own data accesses with the MMU off: the loads of the saved register images (the canonical sequence has
+none) and, in the slbounce fork's progress-marker build, stores to the framebuffer, each placed after an `isb` that
+follows the last register write and tested structurally, but unqualified on hardware (SURFACE-PRO-11.md, Status of B1). It abstracts `SCTLR_EL2`, and it models
 nine registers: the rest of the EL2 state that q1n1 and the monitor expect (`MDCR_EL2`, `ICC_SRE_EL2`, `CNTVOFF_EL2`,
 interrupt routing, the vector table) is not checked, so "the state q1n1 sees on the A16" is INFERRED to be sufficient,
 not proved. The strict rules marked INFERRED may refuse a sequence that works on silicon (two such are known and

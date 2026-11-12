@@ -1009,6 +1009,35 @@ run (NOT RUN).
 Until then the new build's reading is the one to trust, and it has been right in all five of its runs
 (attempts 4 and 5).
 
+**The de-VHE gate and its progress markers (EXPERIMENTAL; hardware NOT RUN).** The slbounce fork's
+`SLBOUNCE_SP11_DEVHE` build converts the saved EL1 images to the non-VHE layouts and enters EL2 with `E2H` clear. It is
+untried on the unit, and its register writes run with the MMU off and no console. `SLBOUNCE_SP11_MARKERS` (it needs the
+de-VHE gate; fork commit `380f25a`) makes a hang in it readable: small white squares in a strip at the top right of the
+GOP framebuffer, which the display scans out whatever the CPU is doing. Slot 0 is drawn from C just before
+ExitBootServices, slots 1 to 3 by `tb_longjmp` (entered; `HCR_EL2` written and synchronized; configuration and TLB
+maintenance done), and a bar across every slot means the saved TCR could not be converted. There is deliberately no
+marker after the `SCTLR_EL2` write: a store with the MMU on in the new regime could itself fault, which would look the
+same as the flip failing; q1n1's page is that signal. A square proves its stores landed, not that the `dsb sy` that
+closes it returned. A planner decides from the GOP mode and the memory map whether the framebuffer may be written (the
+whole framebuffer inside one descriptor of a type q1n1 also accepts) and draws nothing otherwise; the hook calls no
+service that allocates, because any allocation after q1n1's last `GetMemoryMap` would invalidate the map key.
+
+The markers are data stores with the MMU off. The EL2 entry model refuses those (`DATA_ACCESS_MMU_OFF`,
+[SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2.2); the existing trampoline already loads its saved images that way,
+and the stores are the new part. An independent review flagged them as unqualified on this unit. They are INFERRED safe
+(the framebuffer is DRAM-backed reserved memory that the firmware itself writes, and slbounce's own failure screen draws
+on a framebuffer with the MMU off), not measured. So markers are a separate opt-in, and the plan is three runs, each a
+power-cycle apart. **(A)** `SLBOUNCE_SP11_MARKERS_DRYRUN` draws slots 0 to 4 and halts before any de-VHE configuration
+write, to qualify the stores by themselves: five squares mean the stores landed and the barriers of slots 1 to 3
+returned. **(B)** The markers build: success is q1n1's page with `HCR_EL2` `0x88000010` and `TCR_EL2` `0x80843514`; a
+hang shows how far it got. **(C)** The same de-VHE build without markers, after any hang in B, to separate the markers
+from the sequence; it is byte-identical to the build tested before the markers existed (pinned by hash in the fork's
+`tools/test-sp11-defaultoff.py`). Builds staged for A to C (SHA-256 prefixes): dry run `bf322f899461`, markers
+`4107c28c194e`, no markers `3032fda349f1`. Host side (68 tests across the fork's four suites, none skipped): the planner against an independent
+oracle, the unit's three recorded memory maps and ten seeded bugs; the assembled trampoline in every gate combination
+with nine seeded mutants (no store while a register write is unsynchronized; only scratch registers; the exact squares);
+the hook's source; the Makefile's refusal of meaningless gate combinations.
+
 **Corrections to the B1 design found by reading the code and the link map and running it under QEMU (VERIFIED on
 the host and under QEMU; (2) and (4) were also exercised on hardware in attempt 4).** (1) `--boot` cannot reach ExitBootServices on this firmware: it enters the A16 USB boot window, which
 refuses on the BIOS312 `UsbConfigDxe` fingerprint before touching any USB register. The study named this gap
