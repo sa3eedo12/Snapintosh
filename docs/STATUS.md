@@ -43,8 +43,11 @@ recent full desktop sessions, which ran about 25 to 30 minutes each.
 - **Not supported:** audio, cameras, Bluetooth, sleep and wake, external
   displays, the 120 Hz panel mode, and any other machine or macOS build.
   A Surface Pro 11 (X1E80100) port is planned in
-  [SURFACE-PRO-11.md](SURFACE-PRO-11.md); it is UNIMPLEMENTED and has not
-  run on hardware. Host-side groundwork exists and is EXPERIMENTAL (see
+  [SURFACE-PRO-11.md](SURFACE-PRO-11.md); it is UNIMPLEMENTED. Its first gates
+  have run on a unit (X1 and X2 on 2026-11-11, and on 2026-11-12 q1n1 reached
+  EL2 through a scoped-sweep slbounce fork and read back its EL2 state, all
+  OBSERVED on one unit), and nothing beyond that has. Host-side groundwork
+  exists and is EXPERIMENTAL (see
   [Surface Pro 11 (planned)](#surface-pro-11-planned) below). The A16 monitor
   is byte-identical without `-DSNAP_PLATFORM_SP11=1`.
 - **Host required.** Every boot is driven from a Mac over USB-C through q1n1.
@@ -52,9 +55,12 @@ recent full desktop sessions, which ran about 25 to 30 minutes each.
 
 ## Surface Pro 11 (planned)
 
-The port to the Surface Pro 11 (Snapdragon X Elite X1E80100) is UNIMPLEMENTED,
-and nothing in this section has run on a Surface Pro: hardware status is NOT RUN
-for every row. The rows are host-side groundwork. Each is EXPERIMENTAL (tested
+The port to the Surface Pro 11 (Snapdragon X Elite X1E80100) is UNIMPLEMENTED.
+Hardware status: X1 and X2 ran on a unit on 2026-11-11, and on 2026-11-12 q1n1
+reached EL2 on it through a scoped-sweep slbounce fork and read back its EL2
+state (OBSERVED, one unit; [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.5).
+Everything else in this section is NOT RUN on a Surface Pro. The rows are
+host-side groundwork. Each is EXPERIMENTAL (tested
 on the host, and the EFI images also under QEMU) and is built only with
 `-DSNAP_PLATFORM_SP11=1` or as a standalone host tool. The plan, the gates and
 the evidence are in [SURFACE-PRO-11.md](SURFACE-PRO-11.md), whose section 9.3
@@ -68,7 +74,7 @@ lists the tests.
 | EL2 entry (VHE or de-VHE), timer offsets, `DC ZVA` | EXPERIMENTAL host models and decision record ([SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md)); linked into no build |
 | Thermal guard | EXPERIMENTAL read-only model; refuses every admission until X2 measures the platform |
 | `tools/cycle.py --target sp11` | EXPERIMENTAL refusal layer; only the passive checks run, and no SP11 hardware flow exists (UNIMPLEMENTED). `--target` must be spelled in full, and the modes that can write NVMe need a per-run authorization on top of the standing ones |
-| EFI state probe and X2 functional test image | EXPERIMENTAL, QEMU only ([SP11-X2-TESTS.md](SP11-X2-TESTS.md)); they are the instruments for gates X1 and X2. Hardened after an independent review, with host tests and QEMU only: the passive probe reads no unguarded newer ID register and the PSCI image refuses an HVC conduit; the tests image halts on a framebuffer-only fatal page (nothing written to the stick, no ExitBootServices) when a restore fails, and refuses device windows that are not plausible or that the memory map calls RAM or firmware. Hardware NOT RUN |
+| EFI state probe and X2 functional test image | EXPERIMENTAL ([SP11-X2-TESTS.md](SP11-X2-TESTS.md)); they are the instruments for gates X1 and X2, which ran on a unit once on 2026-11-11 (OBSERVED). Hardened after an independent review, with host tests and QEMU only: the passive probe reads no unguarded newer ID register and the PSCI image refuses an HVC conduit; the tests image halts on a framebuffer-only fatal page (nothing written to the stick, no ExitBootServices) when a restore fails, and refuses device windows that are not plausible or that the memory map calls RAM or firmware. The hardening was verified on the host and under QEMU |
 | Boot media | EXPERIMENTAL staging tool for the USB stick; preparing the stick is the operator's step |
 | USB host link, display, input, NVMe window, GPU (a7xx) | Studies and host models ([host link](SP11-HOST-LINK-STUDY.md), [display](SP11-DISPLAY-STUDY.md), [input](SP11-INPUT-STUDY.md), [NVMe window](SP11-NVME-WINDOW.md), [GPU](SP11-GPU-A7XX-STUDY.md)), EXPERIMENTAL. No bring-up code exists: PHY and clock bring-up, the display and GPU drivers and the input driver are UNIMPLEMENTED |
 | Wi-Fi (stretch goal) | Study and a board-container reader ([Wi-Fi](SP11-WIFI-STUDY.md)), EXPERIMENTAL. The module is WCN7850-class, not the A16's QCC2072. No bring-up code exists: the hand-off survey, admission, the firmware boot and the driver port are UNIMPLEMENTED |

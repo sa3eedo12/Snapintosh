@@ -3,9 +3,10 @@
 **The port: UNIMPLEMENTED. Host-side groundwork: EXPERIMENTAL. Hardware status:
 gates X1 and X2 have run on a Surface Pro 11 (2026-11-11); K1 did not fire
 (NV2 confirmed functionally usable, OBSERVED). Gate X3 has been started: on
-2026-11-12 q1n1 itself reached EL2 on the unit once, through a scoped-sweep fork
-of slbounce, and drew its framebuffer console (OBSERVED; [section 7](#7-workstreams),
-Status of B1).** Everything else in this
+2026-11-12 q1n1 itself reached EL2 on the unit in two runs, through a scoped-sweep
+fork of slbounce, drew its framebuffer console and, in the second, read back its
+own EL2 state (OBSERVED; [section 7](#7-workstreams), Status of B1).** Everything
+else in this
 document has not run on a Surface Pro. It records what the rest of a port
 would need, in what order, and what would stop it. What exists today beyond
 that one result is host-side only: the A16 regression baseline
@@ -836,7 +837,7 @@ of it validated on hardware. Section 9.3 lists the tests.
 | X0 | Boot-media staging tool (`tools/stage-sp11-boot-media.py`, which checks the shell against its pinned hash); five `tcblaunch.exe` candidates staged from the unit; N2 to N4 matched to the public package | The rest of N5 (Surface UEFI version, Secure Boot state, SoC SKU, RAM); the BitLocker recovery key stored off the device, and the choice of the Secure Boot and BitLocker way ([section 8.1](#81-secure-boot-and-bitlocker)); an older `tcblaunch.exe` if none of the five works (K2). The SSD backup is waived for X1 to X3 and needed before X6; recovery media are needed before X3 and X6 (N7) |
 | X1 | EFI state probe (`probes/uefi`, two images, QEMU-tested; hardened after an independent review: no unguarded newer ID register, no `hvc`, a GOP and dump policy that fails closed) and the stick layout | **Done, 2026-11-11.** Build 28144's `tcblaunch.exe` reaches EL2 under slbounce; `ResetSystem` does not work afterwards (R18 answered: no); the first-run observations of [section 6.2](#62-x1-el2-through-slbounce) (`SEL=SAME`, PSCI conduit SMC, GICv4.1) are recorded there. slbounce's blanket `clear_dcache_range()` sweep before `ExitBootServices` hangs this unit's firmware (matching a public upstream issue on a different Surface model); the pinned build still has it, so a production monitor build needs the same fix a test-only local variant used to get past it; the Snapintosh fork's scoped sweep got through it once (OBSERVED, 2026-11-12; Status of B1 under WS-B) |
 | X2 | The X2 test image (T01 to T09; guarded reads, a halt on a failed restore, device windows refused unless plausible); the NV2 record format and `tools/nv2_record.py`; the SP11-gated NV2 launch gate and Oryon PAuth normalization; host models of the EL2 entry, timer offsets and `DC ZVA` | **K1 decided (GO), 2026-11-11.** T03, T04 and the `CNTVOFF_EL2` comparison across cores are still NOT RUN (a recurring board reset a fixed, short time after T01, not yet explained); so are items 9 to 13 (the APSS watchdog, display, USB link state, the EL2 entry measurements), none of which affect K1. Embedding the obtained record in an actual monitor build is also still to do |
-| X3 | Descriptor-driven USB port table (the descriptor now lists the two controllers, INFERRED) and a default-off q1n1 path (applied and pushed to a q1n1 fork, 2026-11-11, not yet merged upstream); the D5 ladder, K3 and a persistent-log design | The link itself. The DWC3 core id (X2): until it is measured, `emit-c` needs `--allow-unmeasured-id`. PHY, clock and repeater bring-up is UNIMPLEMENTED (q1n1 programs none of it); the DRAM-retention test; the q1n1 port (B1): implemented and pushed to forks (2026-11-12); on the unit it reached EL2 once under the scoped-sweep slbounce and drew its console (OBSERVED, `--el2`; see Status of B1), but its stability, the de-VHE gate, chainload and the whole USB path are not done, and its USB boot-window path is still A16-only |
+| X3 | Descriptor-driven USB port table (the descriptor now lists the two controllers, INFERRED) and a default-off q1n1 path (applied and pushed to a q1n1 fork, 2026-11-11, not yet merged upstream); the D5 ladder, K3 and a persistent-log design | The link itself. The DWC3 core id (X2): until it is measured, `emit-c` needs `--allow-unmeasured-id`. PHY, clock and repeater bring-up is UNIMPLEMENTED (q1n1 programs none of it); the DRAM-retention test; the q1n1 port (B1): implemented and pushed to forks (2026-11-12); on the unit it reached EL2 in two runs under the scoped-sweep slbounce, drew its console and read back its EL2 state (OBSERVED, `--el2`; see Status of B1), and its first page stayed up for about 40 minutes, but the de-VHE gate, chainload and the whole USB path are not done (the de-VHE gate is built and host-tested, hardware NOT RUN), and its USB boot-window path is still A16-only |
 | X4 | Board descriptor and board-info ABI; ACPI cross-check; vCPU placement and GIC discovery models; the monitor's launch refusal for a vCPU count that needs the fair lock (-146); stage-2 geometry model and its SP11-gated check; Hamoa thermal-guard model | Call sites for the topology, board-info and thermal models (UNIMPLEMENTED); the measurements that replace every INFERRED value; the vCPU count the J700 guest tolerates |
 | X5 | Display pipeline decision model (`compat/display-pipeline-check.c`) and the GOP/EDID mode validator, linked by nothing | The X2 display reads; whether the firmware leaves the display blocks readable at EL2 |
 | X6 | SP11 window contract in `compat/nvme-host.c`; the monitor's refusal to adopt the SSD until that contract is wired (-145); the `sp11` profile of the partition planner (readers counted by content, with the MBR visibility reported); synthetic GPT fixtures | Descriptor fields for the NVMe segment, BDF and SMMU stream; the SMMU state; a call site that enforces the contract; the operator's one GPT entry |
@@ -901,7 +902,7 @@ proposed so far); why the blanket sweep hung (UNKNOWN, the faulting address was 
 sweep's one success is not an explanation of it); a real chainload stage-address table (no generator exists; the
 real DRAM map is still unmeasured). What the first hardware run showed is in the next paragraph.
 
-**B1 on the unit (2026-11-12, four attempts; the fourth reached EL2).** *Attempts 1 to 3* (OBSERVED, earlier builds).
+**B1 on the unit (2026-11-12, five attempts; the fourth and fifth reached EL2).** *Attempts 1 to 3* (OBSERVED, earlier builds).
 Attempts 1 and 2 (no-argument preflight, then `--boot`) found no GOP at all: that build enumerated handles with
 `LocateHandleBuffer`, which returned none for the GOP protocol GUID in a session where the probe's `LocateHandle` finds
 them (unexplained, so the probe's proven call is now used). Attempt 3, with `LocateHandle`, found the handles and
@@ -936,19 +937,79 @@ behind a frozen image (the blink rate was not timed). The X2 runs' board reset, 
 started, therefore does not come from the post-bounce environment alone; what the X2 image did differently is not
 yet isolated. What the run does not show: that the sweep is sufficient in general (one run, and only a framebuffer
 page ran afterwards); why the blanket sweep hung; or anything about the de-VHE gate. The run read no EL2 control
-register, so the CPU's EL2 state here (VHE host, `E2H` and `TGE` set, `VM` clear, as X2's T01 read it) is INFERRED.
+register, so the CPU's EL2 state here (VHE host, `E2H` and `TGE` set, `VM` clear, as X2's T01 read it) was INFERRED;
+attempt 5 below measured it.
 No GIC, timer-interrupt or USB code ran: `--el2` does not call `proxy_main`, and all of DAIF is masked from
 `q1n1_enter` on.
 
-*Attempt 3's refusal is unexplained.* The first guesses are ruled out by attempt 4's counters: attempt 3's build copied
-the map into a 24 KiB, 512-entry buffer, and this unit's map is 228 to 233 descriptors (about 11 KiB), so neither
-limit was reached. The rewrite since then fixed latent defects (a silently truncated copy, a buffer a fifth the
-probe's size) but is not shown to have fixed attempt 3's refusal, which did not recur in three runs of the new build
-(session state at the time is the other candidate). The console report that now prints on every run will show the
-facts if it recurs.
+*Attempt 5* (OBSERVED, one fresh boot of the Shell; q1n1 `91748c0`, `Q1N1.EFI` SHA-256 `5872a9723cf2...`, which adds a
+build stamp, a live uptime line and a read-only EL2 register block to the page; the same `SLBOUNCE.EFI` and
+`tcblaunch.exe` as attempt 4; the evidence is again the operator's photographs, and every register digit below was
+checked against zoomed crops of them). In that one boot, in order:
 
-**Corrections to the B1 design found by reading the code and running it under QEMU (VERIFIED on the host and
-under QEMU; (2) and (4) were also exercised on hardware in attempt 4).** (1) `--boot` cannot reach ExitBootServices on this firmware: it enters the A16 USB boot window, which
+1. `SP11\Q1N1-OLD-BDFF824.EFI` (attempt 3's commit `bdff824`, rebuilt: the same size as the binary that ran then, but
+   not byte-identical because a COFF timestamp differs) printed "No usable GOP framebuffer.". Then `SP11\Q1N1.EFI`
+   printed "GOP framebuffer captured.": 2 handles, a 226-descriptor, 10,848-byte map (stride 48), both candidates
+   2880x1920 at `0xE4800000`, one overlapping descriptor (type 0, attribute `0x100F`), selection OK by rule SAME.
+2. `load SP11\SLBOUNCE.EFI`, then the old build again: "No usable GOP framebuffer." once more.
+3. `SP11\Q1N1.EFI --el2`: ExitBootServices returned and the CPU was at EL2 (`ENTRY EL` 1, `CURRENT EL` 2). The page
+   carried `BUILD 91748C0E4CD8` (the commit's own stamp), `UPTIME 11 S` at the photograph, 232 descriptors and the two
+   declared ranges (image `0xCE7E0000`, `0x15D000` bytes; map buffer `0xCEBC3000`, `0x40000` bytes), each inside one
+   descriptor (types 1 and 2, attribute `0x100F`), the declaring `SetVariable` returning 0. Its read-only EL2 block,
+   read by q1n1 right after the bounce:
+
+| Register | Value | Decoded |
+| --- | --- | --- |
+| `HCR_EL2` | `0x0000000488000000` | E2H, RW and TGE set; VM clear: a VHE host |
+| `SCTLR_EL2` | `0x0000100030C5183D` | M, C and I set; WXN and EE clear |
+| `TCR_EL2` | `0x0000000480803514` | TCR_EL1 layout: T0SZ 20 (44-bit VA), 4 KiB granule, inner-shareable write-back write-allocate, IPS 44 bits, TG1 4 KiB, EPD1 set |
+| `TTBR0_EL2`, `TTBR1_EL2` | `0xA7F2E000`, `0xFFFFFFFFFFFFF000` | TTBR1 walks are off (EPD1); the register holds all ones above the page offset |
+| `MAIR_EL2` | `0xFFBB4400` | attributes 0x00 (device), 0x44 (non-cacheable), 0xBB (write-through), 0xFF (write-back) |
+| `VBAR_EL2` | `0xCE7EB800` | q1n1's own vectors, installed by q1n1 itself: inside its image (base `0xCE7E0000` plus `0xB800`), 2 KiB aligned |
+| `CPTR_EL2`, `CNTHCTL_EL2` | `0x300000`, `0x3` | VHE layouts: FPEN = 0b11 (FP and SIMD not trapped); EL0 counter access allowed |
+| `CNTFRQ_EL0`, `MPIDR_EL1` | `0x124F800`, `0x80000000` | 19.2 MHz; core 0 |
+| `DAIF`, `SPSEL` | `0x3C0`, `1` | all four masked; SP_EL2 selected |
+
+What attempt 5 establishes, for this unit and one boot. (a) Attempt 3's refusal belongs to the old code, not to its
+session: the rebuilt old binary failed twice in one boot, before and after slbounce was loaded, and the new build
+succeeded in the same boot, so the old binary's behaviour is not a session effect (attempt 3's own binary is not
+byte-identical to the control, so "the same code" holds as far as the source commit and the size do). (b) The EL2 state
+after the scoped-sweep bounce is the VHE host state X2's T01 read, now read by a second program: the firmware's own
+EL1 translation setup (its MAIR, TCR and TTBR0 images, with TTBR1 walks off) carried into the EL2 registers, the MMU
+and caches on, every interrupt class masked. That matches the arrival the de-VHE sequence assumes (MMU on,
+`E2H` = `TGE` = 1; [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2.10, M2 and M3 in part). q1n1's own code is
+identity mapped (its `VBAR_EL2` is an address q1n1 took from its own symbols and lies at its physical image base plus
+`0xB800`; INFERRED). (c) The live uptime line
+advanced to 11 s on the unit (one sample; a second, a minute later, was not taken). What it does not show: the cause
+of (a); that the sweep suffices once more than a page runs afterwards; anything about the de-VHE gate; the EL1
+images before the bounce, `MDCR_EL2` and the vector page, which the block does not read.
+
+Replayed on the host (EXPERIMENTAL, host only; hardware NOT RUN): the model driver's `test_observed_sp11`
+(`tools/test-el2-entry-transition.c`) takes these images as the arrival state. Each is a valid image of its VHE
+layout; TCR `0x480803514` converts to `0x80843514` (same T0SZ, granule, shareability and cacheability, IPS moved to PS,
+RES1 bits 31 and 23 set); TTBR0 carries over unchanged (no ASID to drop); and `slbounce-devhe` run with these values is
+accepted under the strict policy. The slbounce fork's `ObservedUnit` test runs the shipped converter on the same TCR
+and requires the same answer. The model does not cover one thing this unit could break, and nothing has measured it:
+the firmware's stage 1 descriptors were written for the EL1 regime and are used now by the EL2 and EL0 regime (bit 54
+is UXN, bit 53 PXN). Under the non-VHE regime after the flip bit 54 is a single XN bit and bit 53 and `nG` are RES0, so
+a descriptor that sets UXN on an executable page would fault on the first fetch after the MMU comes back on. Public
+EDK2's `ArmMmuLib` sets or clears PXN and UXN together (INFERRED here, not checked against this firmware), so this is a
+risk to measure, not a finding; a read-only walk of `TTBR0_EL2` from q1n1 would measure it (UNIMPLEMENTED).
+
+*Attempt 3's refusal: reproduced with the old code, not explained.* The selection logic is the same in both builds:
+the change from `bdff824` to the new tree only adds to `sp11-fbgop.c` (VERIFIED by reading the diff). The
+firmware-facing glue in `main.c` differs: a 24 KiB, 512-entry map buffer against a 128 KiB aligned one, an inline
+conversion against a checked parse, and diagnostic bookkeeping. The old glue was compiled and its disassembly read
+against the source (VERIFIED): it does what the source says, its map buffer is 16-byte aligned inside the image's
+`.bss`, the `.data` section is writable and `SizeOfImage` covers it. This unit's map (226 to 233 descriptors, about
+11 KiB) is under both of the old limits. So none of those is the cause, and what is left is a difference in what the
+firmware returns or does for the old call, which the code does not show. Two preflight-only variants would separate it
+(the new code with the old 24 KiB buffer; the old code with a 128 KiB buffer); neither has been built or run (NOT RUN).
+Until then the new build's reading is the one to trust, and it has been right in all five of its runs
+(attempts 4 and 5).
+
+**Corrections to the B1 design found by reading the code and the link map and running it under QEMU (VERIFIED on
+the host and under QEMU; (2) and (4) were also exercised on hardware in attempt 4).** (1) `--boot` cannot reach ExitBootServices on this firmware: it enters the A16 USB boot window, which
 refuses on the BIOS312 `UsbConfigDxe` fingerprint before touching any USB register. The study named this gap
 (F01/F04, section 9.1: take a path that skips the window) and it was not implemented; skipping it naively would drive
 the invented fixture USB bases and a PL011 driver on a GENI UART, so it is deliberately left refused until B2 lands.
@@ -962,8 +1023,13 @@ declaring it makes ExitBootServices fail on every attempt (`tools/test-sp11-ebs-
 prints each declared range against the map (descriptor count, type, attribute, containment) before ExitBootServices,
 and again on the failure and success pages. Attempt 4 declared the image and the map buffer only and both were
 accepted; that the sweep would refuse a declared framebuffer (3) rests on slbounce's code and the host model, and was
-not tried on hardware. Still UNKNOWN after attempt 4: the X2 image's post-bounce reset (what it does that q1n1's page
-does not), the de-VHE gate, and why the blanket sweep hung.
+not tried on hardware. (5) The de-VHE converter that `tb_longjmp` calls was linked after libfdt, about 37 KiB from
+`tb_longjmp` and outside the two-page transition-back image that `sl.c` hands tcblaunch (`tb_size`, from `tb_entry`'s
+page); found by reading the link map while replaying attempt 5's registers, and fixed in the fork (it is now linked
+straight after `trans.o`, inside the window, with a link-map test and a far-placement mutant that must fail it).
+VERIFIED on the host; it removes one assumption from the first de-VHE hardware run and does not make that run safe.
+Still UNKNOWN after attempt 5: the X2 image's post-bounce reset (what it does that q1n1's page does not), the de-VHE
+gate on hardware, why the blanket sweep hung, and what differs in the old GOP glue.
 
 **Status of B2 and B3 (host only; EXPERIMENTAL; hardware NOT RUN).**
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) holds the A16 USB inventory

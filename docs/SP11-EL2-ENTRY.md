@@ -287,7 +287,8 @@ A read-back of `HCR_EL2.E2H` = 0 is conclusive only when `E2H0` is 0 (D8.13.1 CD
 
 ### 2.10 The X1 and X2 evidence that settles it
 
-Nothing below has been run. Gates are those of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6; every row that writes
+Only M2 and M3 have been measured, in part and once (the paragraph after the table); nothing else below has been run.
+Gates are those of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6; every row that writes
 a register is a hardware step that needs its own authorization.
 
 | ID | Measurement | Gate | Expected if A works | Changes the decision |
@@ -300,6 +301,17 @@ a register is a hardware step that needs its own authorization.
 | M6 | Per-core `CNTVOFF_EL2` behaviour (section 3.6) | X2 | see C3 | C3 policy |
 | M7 | `DCZID_EL0` and a functional DC ZVA test (section 4.6) | X2 | see C6 | C6 |
 | M8 | The regime (`E2H`, `TGE`) under which the NV2 functional test ran | X2 | the post-de-VHE one | If NV2 works only with the host in VHE: reopen the matrix |
+
+**M2 and M3, answered in part (OBSERVED, one run, 2026-11-12).** q1n1's EL2 page read the boot CPU's state right after
+slbounce's VHE return: `HCR_EL2` 0x488000000 (E2H, RW, TGE), `SCTLR_EL2` 0x100030C5183D (M, C, I set), `TCR_EL2`
+0x480803514 (TCR_EL1 layout, T0SZ 20, 4 KiB, EPD1 set), `TTBR0_EL2` 0xA7F2E000, `TTBR1_EL2` 0xFFFFFFFFFFFFF000, `MAIR_EL2`
+0xFFBB4400, `CPTR_EL2` 0x300000, `CNTHCTL_EL2` 0x3. That is the arrival `boot-devhe` assumes (MMU on, E2H = TGE = 1), and
+EPD1 set means no live mapping uses TTBR1 (M3's second half); q1n1's own vectors sit inside its image, so its code is
+identity mapped (INFERRED). Not measured: the EL1 images before the bounce (M2's second half), `MDCR_EL2`, `AT S1E2R`
+per address (M3's first half), and whether the firmware's EL1-format stage 1 descriptors stay valid under the non-VHE
+regime (bit 54 is a single XN bit there, bit 53 and `nG` are RES0). The model driver's `test_observed_sp11` replays
+these images: the TCR converts to 0x80843514 and `slbounce-devhe` with them is accepted under the strict policy. That
+checks this model against one unit's inputs; it is not a hardware result for the sequence.
 
 ### 2.11 What the model does not prove
 

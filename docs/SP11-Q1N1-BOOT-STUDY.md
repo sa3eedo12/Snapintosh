@@ -765,8 +765,9 @@ reading the cited source, and nothing here is hardware evidence for the sweep it
   `NOT IN MEMORY MAP`. Two real defects in the gathering code were fixed (a copy silently truncated at 512 entries,
   and a buffer a fifth the probe's size), but attempt 4 shows neither can have caused it here: the unit's map is 228
   descriptors (233 with slbounce loaded), about 11 KiB, under both limits. The refusal did not recur in three runs of
-  the new build, and the cause stays unknown (a difference between the two builds that the code does not show, or
-  session state at the time). The plain text console prints the map status, size and entry count and, per candidate,
+  the new build, and the cause stays unknown (attempt 5, below, rules session state out: what differs is the old
+  build's gathering code or what the firmware does for it, and the code does not show which). The plain text console
+  prints the map status, size and entry count and, per candidate,
   its verdict and first overlapping descriptor on every run.
 
 **Update, 2026-11-12 (attempt 4, OBSERVED, one run).** With the fixes above and a scoped-sweep slbounce loaded, `--el2`
@@ -779,3 +780,24 @@ page runs afterwards, and it does not explain the hang.
 
 Open after this addendum: the cause of attempt 3's refusal; what the X2 image does that q1n1's page does not, since
 that image's board reset did not recur here; and `SLBOUNCE_SP11_DEVHE`, untried.
+
+**Update, 2026-11-12 (attempt 5, OBSERVED, one fresh boot; the numbers are in SURFACE-PRO-11.md, Status of B1).**
+Three things changed in this study's account.
+
+- *Attempt 3's refusal belongs to the old code.* Attempt 3's commit, rebuilt, printed "No usable GOP framebuffer."
+  twice in the one boot (before and after slbounce was loaded) while the current build captured the same GOP in that
+  boot, so session state is ruled out. The selection functions are identical in both builds (the diff only adds to
+  `sp11-fbgop.c`), the old glue's disassembly matches its source, and its buffer was aligned, writable and inside the
+  image; this unit's map is under its limits. The cause is therefore not in anything read so far (UNKNOWN). Two
+  preflight-only variants would separate it and have not been run.
+- *The post-bounce EL2 state is now measured, not inferred.* q1n1's page read it right after the bounce: `HCR_EL2`
+  `0x488000000` (E2H, RW, TGE), `SCTLR_EL2` `0x100030C5183D` (MMU and caches on), `TCR_EL2` `0x480803514` (TTBR0 walk of
+  44 bits, 4 KiB, TTBR1 walks off), `TTBR0_EL2` `0xA7F2E000`, `MAIR_EL2` `0xFFBB4400`, `CPTR_EL2` `0x300000`,
+  `CNTHCTL_EL2` `0x3`. Section 6's de-VHE sequence was replayed against these on the host: it is accepted, and the
+  TCR conversion gives `0x80843514`. One assumption it still makes is unmeasured: that the firmware's EL1-format
+  stage 1 descriptors stay valid under the non-VHE regime (a single XN bit, `nG` and bit 53 RES0).
+- *The converter's placement was wrong.* The A1 trampoline (section 6) calls a TCR converter from `tb_longjmp`, and the
+  call went to code 37 KiB away, outside the two pages `sl.c` gives tcblaunch as the transition-back image. The fork
+  now links it straight after
+  `trans.o`, inside that window, and a link-map test pins it. Everything the sequence executes with the MMU off is
+  again inside the window upstream's design relies on. Hardware: NOT RUN.
