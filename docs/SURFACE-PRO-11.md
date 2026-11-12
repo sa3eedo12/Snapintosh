@@ -902,11 +902,12 @@ proposed so far); why the blanket sweep hung (UNKNOWN, the faulting address was 
 sweep's one success is not an explanation of it); a real chainload stage-address table (no generator exists; the
 real DRAM map is still unmeasured). What the first hardware run showed is in the next paragraph.
 
-**B1 on the unit (2026-11-12, five attempts; the fourth and fifth reached EL2).** *Attempts 1 to 3* (OBSERVED, earlier builds).
+**B1 on the unit (2026-11-12 and 2026-11-13, six attempts; the fourth to sixth reached EL2).** *Attempts 1 to 3* (OBSERVED, earlier builds).
 Attempts 1 and 2 (no-argument preflight, then `--boot`) found no GOP at all: that build enumerated handles with
 `LocateHandleBuffer`, which returned none for the GOP protocol GUID in a session where the probe's `LocateHandle` finds
 them (unexplained, so the probe's proven call is now used). Attempt 3, with `LocateHandle`, found the handles and
-q1n1's own validation refused the framebuffer as `NOT IN MEMORY MAP`.
+q1n1's own validation refused the framebuffer as `NOT IN MEMORY MAP` (explained by attempt 6: the build's map buffer was
+smaller than the size the firmware demands).
 
 *Attempt 4* (OBSERVED, one run; q1n1 `cdba364`, `Q1N1.EFI` SHA-256 `5b723fe1d835...`; the slbounce fork's commit
 `cbad2a7` built with `SLBOUNCE_SCOPED_SWEEP` only, `SLBOUNCE.EFI` SHA-256 `54a6115be425...`, `SLBOUNCE_SP11_DEVHE`
@@ -996,20 +997,52 @@ a descriptor that sets UXN on an executable page would fault on the first fetch 
 EDK2's `ArmMmuLib` sets or clears PXN and UXN together (INFERRED here, not checked against this firmware), so this is a
 risk to measure, not a finding; a read-only walk of `TTBR0_EL2` from q1n1 would measure it (UNIMPLEMENTED).
 
-*Attempt 3's refusal: reproduced with the old code, not explained.* The selection logic is the same in both builds:
-the change from `bdff824` to the new tree only adds to `sp11-fbgop.c` (VERIFIED by reading the diff). The
-firmware-facing glue in `main.c` differs: a 24 KiB, 512-entry map buffer against a 128 KiB aligned one, an inline
-conversion against a checked parse, and diagnostic bookkeeping. The old glue was compiled and its disassembly read
-against the source (VERIFIED): it does what the source says, its map buffer is 16-byte aligned inside the image's
-`.bss`, the `.data` section is writable and `SizeOfImage` covers it. This unit's map (226 to 233 descriptors, about
-11 KiB) is under both of the old limits. So none of those is the cause, and what is left is a difference in what the
-firmware returns or does for the old call, which the code does not show. Two preflight-only variants would separate it
-(the new code with the old 24 KiB buffer; the old code with a 144,000-byte one); both are built and neither has been
-run (NOT RUN).
-Until then the new build's reading is the one to trust, and it has been right in all five of its runs
-(attempts 4 and 5).
+*Attempt 3's refusal: explained by attempt 6, below.* Until then the account was: the selection logic is the same in
+both builds (the change from `bdff824` to the new tree only adds to `sp11-fbgop.c`, VERIFIED by reading the diff); the
+old glue was compiled and its disassembly read against the source (VERIFIED), and its map buffer is 16-byte aligned
+inside the image's `.bss`, in a writable `.data` that `SizeOfImage` covers; and "this unit's map (226 to 233
+descriptors, about 11 KiB) is under both of the old limits". That last step was the mistake. It compared the map the
+firmware returns with the buffer, and the firmware checks the buffer against a larger figure.
 
-**The de-VHE gate and its progress markers (EXPERIMENTAL; hardware NOT RUN).** The slbounce fork's
+*Attempt 6* (OBSERVED, one boot of the Shell, the stick being `fs3:` that time; the slbounce fork's commit `380f25a`,
+q1n1 `91748c0`, the same `tcblaunch.exe`; the evidence is the operator's photographs IMG_9705, 9706, 9707, 9709 and
+9710, every digit below checked against zoomed crops of them). In order:
+
+1. *The two GOP isolation variants, preflight only, no slbounce.* `SP11\Q1N1-B.EFI` (`bdff824` with a 144,000-byte map
+   buffer) printed "GOP framebuffer captured." in both runs the photographs show (one typed at the bare `Shell>` prompt,
+   one at `FS3:\>`). `SP11\Q1N1-A.EFI` (`91748c0` with a 24 KiB buffer) printed "No usable GOP framebuffer." in the run
+   whose output is fully visible (typed at `FS3:\>`; the first photograph also shows the tail of an earlier run, its
+   command off the screen, that ended the same way), with `map status 0x8000000000000005, EMPTY, 33504 bytes, stride 48, 0
+   entries` and both candidates (2880x1920 at `0xE4800000`, `0x1518000` bytes) "NOT IN MEMORY MAP", rule NONE.
+   `0x8000000000000005` is `EFI_BUFFER_TOO_SMALL`: given 24,576 bytes the firmware asked for 33,504, which is 698
+   descriptors of 48 bytes, while a larger buffer gets this unit's map as 226 to 232 descriptors (10,848 to 11,136
+   bytes). The two variants change one constant each, so the buffer is the cause: `bdff824`'s `map_buf` was 512 x 48 =
+   24,576 bytes, and its gathering code (`if (!get_memory_map(...) && ...)`, VERIFIED by reading it) treats a failed
+   call as an empty map, which the selection then reports as `NOT IN MEMORY MAP`. Why the demand is three times the
+   returned map is INFERRED: EDK2's `CoreGetMemoryMap` sizes that answer from its uncoalesced internal list and merges
+   adjacent runs on output; this firmware was not checked. The new build's 128 KiB is 3.9 times the demand, the demand
+   changes with what has been allocated, and q1n1 commit `ce21912` makes a host test require at least twice the
+   observed figure (the 24 KiB and 64 KiB buffers fail it, 72 KiB and 128 KiB pass).
+2. *Run A of the de-VHE plan (below).* `load SP11\SLBOUNCE-DRYRUN.EFI` (`bf322f899461...`: scoped sweep, de-VHE and
+   markers gates, dry run) printed "Success" and `Available: 0x0`; its banner gives `TB entrypoint is 0xD5098DC4,
+   Image is at 0xD5098000, size= 0x2000`, so the entry is at page offset `0xDC4` inside the two-page image, the
+   `0x4DC4` the dry-run build's link map gives it. Then `SP11\Q1N1.EFI --el2`: "GOP framebuffer captured." (a 232-descriptor, 11,136-byte map;
+   selection OK by rule SAME), the declared ranges (image `0xCDB0E000` and `0x15D000` bytes, map buffer `0xCEC09000`
+   and `0x40000` bytes, each inside one descriptor of type 1 and 2 with attribute `0x100F`, `SetVariable` returning 0)
+   and "Leaving firmware now.". The panel then showed **five squares**: in the photograph of the top right of the panel
+   (IMG_9710) five equal squares, about 30 px each at a 42.5 px pitch, which is the 32 px square and 48 px pitch of the
+   plan scaled by the camera, and nothing in slots 5 to 7. The photograph does not include the Shell text, so it does
+   not show the console freezing, and the power state during the run was not recorded.
+
+What run A establishes, for this unit and one boot: the hook armed and slot 0 was drawn (the unit's GOP geometry was
+accepted); ExitBootServices returned into the bounce; `tb_longjmp` ran at EL2 with the MMU off, past the TLBI and the
+`VBAR_EL2` and `TPIDR_EL0` restores that precede its first marker; data stores to the framebuffer with the MMU off,
+each closed by `dsb sy`, land on this unit (slots 1 to 3), and slot 3's barrier returned (slot 4 was drawn after it).
+Those stores were INFERRED safe before; they are now OBSERVED to work once. What it does not show: any de-VHE
+configuration write (the dry run skips every one of them, by construction), the `SCTLR_EL2` write that turns the MMU
+back on, the return to q1n1, slot 4's own barrier, or repeatability.
+
+**The de-VHE gate and its progress markers (EXPERIMENTAL; run A OBSERVED, runs B and C NOT RUN).** The slbounce fork's
 `SLBOUNCE_SP11_DEVHE` build converts the saved EL1 images to the non-VHE layouts and enters EL2 with `E2H` clear. It is
 untried on the unit, and its register writes run with the MMU off and no console. `SLBOUNCE_SP11_MARKERS` (it needs the
 de-VHE gate; fork commit `380f25a`) makes a hang in it readable: small white squares in a strip at the top right of the
@@ -1024,14 +1057,14 @@ service that allocates, because any allocation after q1n1's last `GetMemoryMap` 
 
 The markers are data stores with the MMU off. The EL2 entry model refuses those (`DATA_ACCESS_MMU_OFF`,
 [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2.2); the existing trampoline already loads its saved images that way,
-and the stores are the new part. An independent review flagged them as unqualified on this unit. They are INFERRED safe
+and the stores are the new part. An independent review flagged them as unqualified on this unit. They were INFERRED safe
 (the framebuffer is DRAM-backed reserved memory that the firmware itself writes, and slbounce's own failure screen draws
-on a framebuffer with the MMU off), not measured. So markers are a separate opt-in, and the plan is three runs, each a
+on a framebuffer with the MMU off) until run A measured them (attempt 6: OBSERVED to work once). So markers are a separate opt-in, and the plan is three runs, each a
 power-cycle apart. **(A)** `SLBOUNCE_SP11_MARKERS_DRYRUN` draws slots 0 to 4 and halts before any de-VHE configuration
 write, to qualify the stores by themselves: five squares mean the stores landed and the barriers of slots 1 to 3
-returned. **(B)** The markers build: success is q1n1's page with `HCR_EL2` `0x88000010` and `TCR_EL2` `0x80843514`; a
-hang shows how far it got. **(C)** The same de-VHE build without markers, after any hang in B, to separate the markers
-from the sequence; it is byte-identical to the build tested before the markers existed (pinned by hash in the fork's
+returned. **Run A showed five squares (attempt 6, above).** **(B)** The markers build: success is q1n1's page with `HCR_EL2` `0x88000010` and `TCR_EL2` `0x80843514`; a
+hang shows how far it got (NOT RUN). **(C)** The same de-VHE build without markers, after any hang in B, to separate the markers
+from the sequence (NOT RUN); it is byte-identical to the build tested before the markers existed (pinned by hash in the fork's
 `tools/test-sp11-defaultoff.py`). Builds staged for A to C (SHA-256 prefixes): dry run `bf322f899461`, markers
 `4107c28c194e`, no markers `3032fda349f1`. Host side (68 tests across the fork's four suites, none skipped): the planner against an independent
 oracle, the unit's three recorded memory maps and ten seeded bugs; the assembled trampoline in every gate combination
@@ -1058,8 +1091,9 @@ not tried on hardware. (5) The de-VHE converter that `tb_longjmp` calls was link
 page); found by reading the link map while replaying attempt 5's registers, and fixed in the fork (it is now linked
 straight after `trans.o`, inside the window, with a link-map test and a far-placement mutant that must fail it).
 VERIFIED on the host; it removes one assumption from the first de-VHE hardware run and does not make that run safe.
-Still UNKNOWN after attempt 5: the X2 image's post-bounce reset (what it does that q1n1's page does not), the de-VHE
-gate on hardware, why the blanket sweep hung, and what differs in the old GOP glue.
+Still UNKNOWN after attempt 6: the X2 image's post-bounce reset (what it does that q1n1's page does not), the de-VHE
+gate on hardware (runs B and C), why the blanket sweep hung, and why `LocateHandleBuffer` found no GOP handle in
+attempts 1 and 2.
 
 **Status of B2 and B3 (host only; EXPERIMENTAL; hardware NOT RUN).**
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) holds the A16 USB inventory

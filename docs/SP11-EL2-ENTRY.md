@@ -287,7 +287,8 @@ A read-back of `HCR_EL2.E2H` = 0 is conclusive only when `E2H0` is 0 (D8.13.1 CD
 
 ### 2.10 The X1 and X2 evidence that settles it
 
-Only M2 and M3 have been measured, in part and once (the paragraph after the table); nothing else below has been run.
+Only M2 and M3 have been measured, in part and once (the paragraph after the table), and the marker stores once more
+(the paragraph after that); nothing else below has been run.
 Gates are those of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6; every row that writes
 a register is a hardware step that needs its own authorization.
 
@@ -313,13 +314,20 @@ regime (bit 54 is a single XN bit there, bit 53 and `nG` are RES0). The model dr
 these images: the TCR converts to 0x80843514 and `slbounce-devhe` with them is accepted under the strict policy. That
 checks this model against one unit's inputs; it is not a hardware result for the sequence.
 
+**The marker stores (OBSERVED, one run, 2026-11-13).** The slbounce fork's dry-run build (`SLBOUNCE_SP11_MARKERS_DRYRUN`)
+ran `tb_longjmp` as far as its markers and halted before any de-VHE configuration write. All five squares appeared on
+the panel, so data stores to the GOP framebuffer with the MMU off, each closed by `dsb sy`, land on this unit. That is
+the one thing 2.11 said was unqualified about the markers; it says nothing about the register writes, the second TLBI
+group or the `SCTLR_EL2` write, none of which have run.
+
 ### 2.11 What the model does not prove
 
 It proves a sequence against the rules in 2.2, not the hardware. It does not model speculative TLB fills, the data
 caches, branch prediction, or SError and interrupt delivery during the window. It also cannot represent the real
 trampoline's own data accesses with the MMU off: the loads of the saved register images (the canonical sequence has
 none) and, in the slbounce fork's progress-marker build, stores to the framebuffer, each placed after an `isb` that
-follows the last register write and tested structurally, but unqualified on hardware (SURFACE-PRO-11.md, Status of B1). It abstracts `SCTLR_EL2`, and it models
+follows the last register write and tested structurally, and observed to land on the unit once (the dry-run build,
+2026-11-13; SURFACE-PRO-11.md, Status of B1). It abstracts `SCTLR_EL2`, and it models
 nine registers: the rest of the EL2 state that q1n1 and the monitor expect (`MDCR_EL2`, `ICC_SRE_EL2`, `CNTVOFF_EL2`,
 interrupt routing, the vector table) is not checked, so "the state q1n1 sees on the A16" is INFERRED to be sufficient,
 not proved. The strict rules marked INFERRED may refuse a sequence that works on silicon (two such are known and

@@ -46,7 +46,9 @@ recent full desktop sessions, which ran about 25 to 30 minutes each.
   [SURFACE-PRO-11.md](SURFACE-PRO-11.md); it is UNIMPLEMENTED. Its first gates
   have run on a unit (X1 and X2 on 2026-11-11, and on 2026-11-12 q1n1 reached
   EL2 through a scoped-sweep slbounce fork and read back its EL2 state, all
-  OBSERVED on one unit), and nothing beyond that has. Host-side groundwork
+  OBSERVED on one unit; on 2026-11-13 a dry run of that fork's de-VHE trampoline
+  drew its progress markers with the MMU off, and no de-VHE configuration write
+  has run), and nothing beyond that has. Host-side groundwork
   exists and is EXPERIMENTAL (see
   [Surface Pro 11 (planned)](#surface-pro-11-planned) below). The A16 monitor
   is byte-identical without `-DSNAP_PLATFORM_SP11=1`.
@@ -59,6 +61,9 @@ The port to the Surface Pro 11 (Snapdragon X Elite X1E80100) is UNIMPLEMENTED.
 Hardware status: X1 and X2 ran on a unit on 2026-11-11, and on 2026-11-12 q1n1
 reached EL2 on it through a scoped-sweep slbounce fork and read back its EL2
 state (OBSERVED, one unit; [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.5).
+On 2026-11-13 a dry run of that fork's de-VHE trampoline drew its progress
+markers with the MMU off (OBSERVED, one boot); the de-VHE configuration writes
+themselves have not run.
 Everything else in this section is NOT RUN on a Surface Pro. The rows are
 host-side groundwork. Each is EXPERIMENTAL (tested
 on the host, and the EFI images also under QEMU) and is built only with

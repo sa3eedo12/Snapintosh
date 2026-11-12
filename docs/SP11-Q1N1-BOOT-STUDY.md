@@ -760,13 +760,14 @@ reading the cited source, and nothing here is hardware evidence for the sweep it
   a wrong type, no WB bit) collapses into it. q1n1 therefore prints each declared range against the map
   (descriptor count, type, attribute, containment) before ExitBootServices and again on the failure and success
   pages. It reports facts and leaves the policy in slbounce.
-- **Section 8.2: the selection logic was right; attempt 3's inputs are unexplained.** The unit's recorded maps run
-  through q1n1's ported selection give the same answer as the probe, yet attempt 3 refused the only GOP as
-  `NOT IN MEMORY MAP`. Two real defects in the gathering code were fixed (a copy silently truncated at 512 entries,
-  and a buffer a fifth the probe's size), but attempt 4 shows neither can have caused it here: the unit's map is 228
-  descriptors (233 with slbounce loaded), about 11 KiB, under both limits. The refusal did not recur in three runs of
-  the new build, and the cause stays unknown (attempt 5, below, rules session state out: what differs is the old
-  build's gathering code or what the firmware does for it, and the code does not show which). The plain text console
+- **Section 8.2: the selection logic was right; attempt 3's refusal was the map buffer (explained by attempt 6,
+  below).** The unit's recorded maps run through q1n1's ported selection give the same answer as the probe, yet attempt 3
+  refused the only GOP as `NOT IN MEMORY MAP`. Two real defects in the gathering code were fixed (a copy silently
+  truncated at 512 entries, and a buffer a fifth the probe's size), and the second of them was the cause. The earlier
+  reading of attempt 4, that neither could have mattered because the unit's map is 228 descriptors (233 with slbounce
+  loaded), about 11 KiB, under both limits, compared the size of the map the firmware returns with the buffer. The
+  firmware checks the buffer against a larger figure, 33,504 bytes on this unit, and the old code read a failed call as
+  an empty map. The plain text console
   prints the map status, size and entry count and, per candidate,
   its verdict and first overlapping descriptor on every run.
 
@@ -806,3 +807,20 @@ Three things changed in this study's account.
   data accesses with the MMU off, which section 6's model refuses and no hardware has qualified, so a dry-run build that
   draws and halts before any configuration write is to be run first. Plan and evidence labels: SURFACE-PRO-11.md, Status
   of B1. Hardware: NOT RUN.
+
+**Update, 2026-11-13 (attempt 6, OBSERVED, one boot; the numbers are in SURFACE-PRO-11.md, Status of B1).** Two
+questions closed, one opened.
+
+- *Attempt 3's refusal is explained.* The preflight-only variants separated it. The new build with the old 24 KiB map
+  buffer printed "No usable GOP framebuffer." with `map status 0x8000000000000005` (`EFI_BUFFER_TOO_SMALL`), 33,504
+  bytes wanted and no entries; `bdff824` with a 144,000-byte buffer captured the framebuffer. The firmware asks for
+  about three times the size of the map it returns (698 against 226 to 232 descriptors; why is INFERRED, not
+  checked), the old call treated its failure as an empty map, and the selection then reported the framebuffer as not
+  in the memory map. The 128 KiB buffer that was added for the wrong reason is the fix, and q1n1 `ce21912` now keeps a
+  test on its size.
+- *The progress markers work on this unit.* Run A, the dry run, drew all five of its squares. Data stores to the
+  framebuffer with the MMU off, from `tb_longjmp` at EL2, landed; slot 3's closing barrier returned. That removes the
+  one unmeasured assumption the review had flagged in the markers themselves. It says nothing about the de-VHE
+  configuration writes, which the dry run skips by construction.
+- *Open: the de-VHE run.* Run B (markers) and, after any hang, run C (no markers) are the next hardware steps.
+  Hardware: B and C NOT RUN.
