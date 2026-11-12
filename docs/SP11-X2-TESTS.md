@@ -65,6 +65,16 @@ already-filled ID context, not on T03 or T04's results, so it can safely move ea
 gets its chance, and is drawn to the screen, before T03 is reached at all. Phase A's own
 order (for a platform where it runs normally, before ExitBootServices) is unchanged.
 
+**Update, 2026-11-12 (OBSERVED, one run).** q1n1's `--el2` page (B1; [SURFACE-PRO-11.md](SURFACE-PRO-11.md), Status of
+B1), reached through the same slbounce bounce with a scoped sweep instead of the test-only no-sweep variant, was
+still running about 40 minutes after it appeared (operator report; its heartbeat block was still blinking), with no
+reset. So the reset is not a fixed-time property of the post-bounce environment: it follows something this image
+does. Candidates, all INFERRED and none tested: the guarded-read machinery's exception handling or vector setup;
+interrupts left unmasked after the hook (q1n1 masks all of DAIF at entry; this hook's state is unrecorded); an access
+to a timer register that wedges the core, with the reset then a watchdog bite (T03 touches `CNTVOFF_EL2`, which
+Linux treats as broken on Oryon X1, E17); the no-sweep slbounce variant itself. q1n1's page reads `CNTFRQ_EL0` once and
+polls `CNTPCT_EL0` continuously at EL2 without trouble, so those two registers are not the cause.
+
 ## Run 4: K1 decided — GO
 
 With T02 moved ahead of T03, run 4 (same unit, build `89889B7FEB3C`) reached T02 before the

@@ -773,8 +773,9 @@ reading the cited source, and nothing here is hardware evidence for the sweep it
 got through ExitBootServices and reached EL2 on the unit, and q1n1's framebuffer console drew its page (the numbers are
 in SURFACE-PRO-11.md, Status of B1). So the section 4.4 design survived its first contact with hardware for the case it
 was built for (the blanket sweep hangs; two declared ranges, an image and a map buffer, both inside single
-loader-typed descriptors with WB, do not). That is one run: it does not show the sweep suffices once more than a
-framebuffer page runs afterwards, and it does not explain the hang.
+loader-typed descriptors with WB, do not). The page then stayed up with its heartbeat still blinking roughly 40
+minutes later (operator report). That is one run: it does not show the sweep suffices once more than a framebuffer
+page runs afterwards, and it does not explain the hang.
 
-Open after this addendum: the page's stability over time; the cause of attempt 3's refusal; the post-bounce reset
-seen in the X2 runs; and `SLBOUNCE_SP11_DEVHE`, untried.
+Open after this addendum: the cause of attempt 3's refusal; what the X2 image does that q1n1's page does not, since
+that image's board reset did not recur here; and `SLBOUNCE_SP11_DEVHE`, untried.

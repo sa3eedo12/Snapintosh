@@ -929,12 +929,16 @@ device identifiers):
    declaring `SetVariable` returning 0.
 
 What this establishes, for this unit and one run: the scoped sweep let ExitBootServices through where the blanket
-sweep hangs it, the bounce landed, and q1n1's own framebuffer console works at EL2. What it does not: that the sweep
-is sufficient in general (one run, and only a framebuffer page ran afterwards); why the blanket sweep hung; how long
-the page survives (the X2 runs' board reset, a fixed few seconds after T03 started, is neither ruled in nor out for
-this page); or anything about the de-VHE gate. The run read no EL2 control register, so the CPU's EL2 state here (VHE
-host, `E2H` and `TGE` set, `VM` clear, as X2's T01 read it) is INFERRED. No GIC, timer or USB code ran: `--el2` does
-not call `proxy_main`.
+sweep hangs it, the bounce landed, and q1n1's own framebuffer console works at EL2. The page also stayed up: the
+operator reported no reset and, at a check roughly 40 minutes after the photograph, the page's heartbeat block
+(toggled by a `CNTPCT_EL0` poll against `CNTFRQ_EL0` at EL2) was still blinking, so the core was running, not hung
+behind a frozen image (the blink rate was not timed). The X2 runs' board reset, a fixed few seconds after T03
+started, therefore does not come from the post-bounce environment alone; what the X2 image did differently is not
+yet isolated. What the run does not show: that the sweep is sufficient in general (one run, and only a framebuffer
+page ran afterwards); why the blanket sweep hung; or anything about the de-VHE gate. The run read no EL2 control
+register, so the CPU's EL2 state here (VHE host, `E2H` and `TGE` set, `VM` clear, as X2's T01 read it) is INFERRED.
+No GIC, timer-interrupt or USB code ran: `--el2` does not call `proxy_main`, and all of DAIF is masked from
+`q1n1_enter` on.
 
 *Attempt 3's refusal is unexplained.* The first guesses are ruled out by attempt 4's counters: attempt 3's build copied
 the map into a 24 KiB, 512-entry buffer, and this unit's map is 228 to 233 descriptors (about 11 KiB), so neither
@@ -958,8 +962,8 @@ declaring it makes ExitBootServices fail on every attempt (`tools/test-sp11-ebs-
 prints each declared range against the map (descriptor count, type, attribute, containment) before ExitBootServices,
 and again on the failure and success pages. Attempt 4 declared the image and the map buffer only and both were
 accepted; that the sweep would refuse a declared framebuffer (3) rests on slbounce's code and the host model, and was
-not tried on hardware. Still UNKNOWN after attempt 4: the page's stability over time and the X2 runs' unexplained
-post-bounce reset, the de-VHE gate, and why the blanket sweep hung.
+not tried on hardware. Still UNKNOWN after attempt 4: the X2 image's post-bounce reset (what it does that q1n1's page
+does not), the de-VHE gate, and why the blanket sweep hung.
 
 **Status of B2 and B3 (host only; EXPERIMENTAL; hardware NOT RUN).**
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) holds the A16 USB inventory
