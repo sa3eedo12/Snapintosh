@@ -876,6 +876,20 @@ q1n1 is a sibling checkout, not a submodule.
 | B2 | DWC3 on `usb_1_ss0` or `usb_1_ss1` derived from the descriptor (the A16's hard-coded `0x0A600000` happens to match `usb_1_ss0`, but is not trusted); xHCI plus CDC-NCM against the Mac gadget; PD, retimer and ADSP state understood; USB2-only enumeration is acceptable; recovery after cable moves. |
 | B3 | A DRAM-retention test result; the framebuffer console always on; the D5 fallback ladder exercised for one link failure. |
 
+**Status of B1 (host only; EXPERIMENTAL; hardware NOT RUN).**
+[SP11-Q1N1-BOOT-STUDY.md](SP11-Q1N1-BOOT-STUDY.md) holds the A16 entry/chainload/console inventory (A16-specific,
+firmware-coupled or generic, file and line at the pinned commit), a design for the SP11 flow built around three real
+hardware constraints from this week's runs: EL2 appears only inside slbounce's own `ExitBootServices` hook (never
+before it), the hook's blanket dcache sweep hangs this unit's firmware, and the board resets itself a short,
+unexplained time after a certain point post-bounce. It proposes a scoped, attribute-filtered, chunked replacement for
+the sweep (not a blanket `#if 0`), agrees with and sharpens [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md)'s existing
+recommendation to normalize EL2 inside a Snapintosh fork of slbounce's `trans.s`, and ports the GOP two-tier selection
+already proven on hardware in the passive probe into q1n1's framebuffer console. Nothing here has been applied to
+q1n1 or slbounce; a small, host-tested, illustrative model of the sweep design (`tools/sp11_ebs_sweep_model.py`) is
+included. **Not done:** any of the above as a real q1n1 or slbounce patch; whether the scoped sweep actually avoids
+this unit's hang (UNKNOWN; the faulting address was never captured); the fail-closed EL check, the `trans.s` edit and
+the chainload test harness are all UNIMPLEMENTED.
+
 **Status of B2 and B3 (host only; EXPERIMENTAL; hardware NOT RUN).**
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) holds the A16 USB inventory
 (what is A16-specific, what is firmware-coupled, what is generic), the Hamoa and
@@ -1443,6 +1457,8 @@ maintainer's acceptance ([section 11.2](#112-decisions-for-the-project-owner)).
   image),
   [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) (USB, the D5 ladder and the
   persistent log: B2, B3),
+  [SP11-Q1N1-BOOT-STUDY.md](SP11-Q1N1-BOOT-STUDY.md) (q1n1's entry, chainload
+  and console path on Hamoa: B1),
   [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md) (the NVMe window contract and
   Appendix D: S2, S3),
   [SP11-DISPLAY-STUDY.md](SP11-DISPLAY-STUDY.md) (the firmware display
