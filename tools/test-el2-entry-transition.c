@@ -261,6 +261,71 @@ static void test_references(void)
     CHECK(el2m_cpus_consistent(pair, 2) == EL2M_OK);
 }
 
+/* --- the register images the unit held after the bounce ------------------------ */
+/* OBSERVED on a Surface Pro 11 (MIDR 0x512f0011): q1n1 91748c0's EL2 page, read with slbounce's scoped sweep and
+ * the unmodified VHE restore, one run, 2026-11-12 (docs/SURFACE-PRO-11.md, Status of B1). The firmware's EL1
+ * translation setup, carried into the EL2 registers by tb_longjmp as VHE images. Nothing below is a measurement of
+ * the de-VHE trampoline itself: the values are inputs the trampoline will convert, replayed so that the
+ * conversion is checked against the real unit's numbers and not only the model's canonical test data. */
+#define OBS_HCR     UINT64_C(0x0000000488000000)  /* E2H, RW, TGE */
+#define OBS_TCR     UINT64_C(0x0000000480803514)  /* T0SZ 20, 4 KiB, IPS 44 bits, EPD1 set (TTBR1 walks off) */
+#define OBS_TTBR0   UINT64_C(0x00000000a7f2e000)
+#define OBS_MAIR    UINT64_C(0x00000000ffbb4400)
+#define OBS_CNTHCTL UINT64_C(0x0000000000000003)
+#define OBS_CPTR    UINT64_C(0x0000000000300000)  /* FPEN = 0b11, as the firmware's CPACR_EL1 */
+#define OBS_SCTLR   UINT64_C(0x0000100030c5183d)
+#define OBS_TCR_NVHE UINT64_C(0x0000000080843514) /* what the unit's TCR becomes: same walk, non-VHE layout */
+/* The architectural RES1 bits of SCTLR_EL2 with HCR_EL2.E2H clear (4, 5, 11, 16, 18, 22, 23, 28, 29), which
+ * arm64 Linux's SCTLR_EL2_RES1 also lists. The model has no SCTLR layout table, so this one check is local. */
+#define SCTLR_EL2_NVHE_RES1 UINT64_C(0x30c50830)
+
+static void test_observed_sp11(void)
+{
+    uint64_t o;
+    CHECK(el2m_effective_e2h(&PLAT, OBS_HCR) == 1 && el2m_layout_of(&PLAT, OBS_HCR) == EL2M_VHE);
+    CHECK((OBS_HCR & EL2M_HCR_TGE) && (OBS_HCR & EL2M_HCR_RW) && !(OBS_HCR & 1));
+
+    /* Every image the unit holds is a valid image of the layout it was written in. */
+    CHECK(el2m_image_valid(EL2M_TCR, EL2M_VHE, OBS_TCR));
+    CHECK(el2m_image_valid(EL2M_TTBR0, EL2M_VHE, OBS_TTBR0));
+    CHECK(el2m_image_valid(EL2M_CNTHCTL, EL2M_VHE, OBS_CNTHCTL));
+    CHECK(el2m_image_valid(EL2M_CPTR, EL2M_VHE, OBS_CPTR));
+    CHECK((OBS_SCTLR & EL2M_CANON_SCTLR_ON) == EL2M_CANON_SCTLR_ON);
+
+    /* The conversion keeps the unit's translation walk and changes only the layout. */
+    CHECK(el2m_tcr_vhe_to_nvhe(OBS_TCR, &o) == 0 && o == OBS_TCR_NVHE);
+    CHECK(el2m_image_valid(EL2M_TCR, EL2M_NVHE, o));
+    CHECK(el2m_ttbr0_vhe_to_nvhe(OBS_TTBR0) == OBS_TTBR0);      /* no ASID to drop */
+    CHECK(el2m_image_valid(EL2M_TTBR0, EL2M_NVHE, OBS_TTBR0));
+    /* The final SCTLR_EL2 write is the unit's own image: it already carries every non-VHE RES1 bit. */
+    CHECK((OBS_SCTLR & SCTLR_EL2_NVHE_RES1) == SCTLR_EL2_NVHE_RES1);
+
+    /* The trampoline copies CNTHCTL_EL2 = 3 unconverted on purpose (nothing trapped for EL1, which means what
+     * it did for EL0 before); converting the unit's image instead would trap EL1's physical counter and timer. */
+    CHECK(el2m_cnthctl_convert(EL2M_VHE, EL2M_NVHE, OBS_CNTHCTL, &o) == 0 && o == 0);
+    CHECK(el2m_image_valid(EL2M_CNTHCTL, EL2M_NVHE, 0x3));
+    CHECK(el2m_image_valid(EL2M_CPTR, EL2M_NVHE, UINT64_C(0x22ff)));
+
+    /* slbounce's restore with those values substituted still passes the strict policy from the arrival slbounce
+     * gives it (the MMU already off, the TLB unknown). Operation indices follow slbounce_devhe_ops: 9 CNTHCTL,
+     * 10 CPTR, 11 TTBR0, 12 TCR, 13 MAIR, 18 SCTLR. */
+    const struct arrival tcb = { 1, 0, 0, 1 };
+    struct buf b;
+    size_t f;
+    load(&b, &el2m_seq_slbounce_devhe);
+    CHECK(b.n > 18 && b.ops[7].reg == EL2M_HCR && b.ops[9].reg == EL2M_CNTHCTL && b.ops[10].reg == EL2M_CPTR &&
+          b.ops[11].reg == EL2M_TTBR0 && b.ops[12].reg == EL2M_TCR && b.ops[13].reg == EL2M_MAIR &&
+          b.ops[18].reg == EL2M_SCTLR);
+    b.ops[9] = msr(EL2M_CNTHCTL, 0x3, EL2M_NVHE);
+    b.ops[10] = msr(EL2M_CPTR, 0x22ff, EL2M_NVHE);
+    b.ops[11] = msr(EL2M_TTBR0, el2m_ttbr0_vhe_to_nvhe(OBS_TTBR0), EL2M_NVHE);
+    CHECK(el2m_tcr_vhe_to_nvhe(OBS_TCR, &o) == 0);
+    b.ops[12] = msr(EL2M_TCR, o, EL2M_NVHE);
+    b.ops[13] = msr(EL2M_MAIR, OBS_MAIR, 0);
+    b.ops[18] = msr(EL2M_SCTLR, OBS_SCTLR, 0);
+    CHECK(run_buf(&PLAT, &STRICT, &el2m_seq_slbounce_devhe, &b, tcb, &f, 0) == EL2M_OK);
+}
+
 /* --- two CPUs ---------------------------------------------------------------- */
 static void test_cpus(void)
 {
@@ -488,6 +553,7 @@ int main(int argc, char **argv)
     test_references();
     test_cpus();
     test_images();
+    test_observed_sp11();
     test_e2h0();
     test_rules();
     test_redirection();
