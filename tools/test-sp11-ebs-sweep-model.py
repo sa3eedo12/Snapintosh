@@ -90,6 +90,21 @@ class ScopedSweep(unittest.TestCase):
         with self.assertRaises(m.SweepRefused):
             m.scoped_sweep([d], [(0x6000, 0x1000)])
 
+    def test_a_framebuffer_in_a_reserved_descriptor_is_refused_but_loader_ranges_are_not(self):
+        # OBSERVED on the Surface Pro 11 unit (probe dumps, 2026-11-11/12): the GOP framebuffer lies
+        # wholly inside one RESERVED (type 0) descriptor, attribute 0x100F. Declaring it makes the
+        # scoped sweep refuse ExitBootServices on every attempt, so q1n1's declared-ranges list omits
+        # it; the image and the memory-map buffer sit in loader descriptors and are accepted.
+        # Addresses are synthetic; only the types and the attribute shape are the unit's.
+        image = m.Descriptor(m.EFI_LOADER_CODE, base=0x40000000, pages=0x160)
+        map_buffer = m.Descriptor(m.EFI_LOADER_DATA, base=0x41000000, pages=0x40)
+        framebuffer = m.Descriptor(m.EFI_RESERVED_MEMORY_TYPE, base=0x90000000, pages=0x21C0, attribute=0x100F)
+        descriptors = [image, map_buffer, framebuffer]
+        q1n1_ranges = [(0x40000000, 0x160 * m.PAGE_BYTES), (0x41000000, 0x40 * m.PAGE_BYTES)]
+        self.assertTrue(m.scoped_sweep(descriptors, q1n1_ranges))
+        with self.assertRaises(m.SweepRefused):
+            m.scoped_sweep(descriptors, q1n1_ranges + [(0x90000000, 0x1518000)])
+
     def test_a_range_split_across_a_descriptor_boundary_is_refused(self):
         a = m.Descriptor(m.EFI_LOADER_DATA, base=0x1000, pages=1)
         b = m.Descriptor(m.EFI_LOADER_DATA, base=0x2000, pages=1)
