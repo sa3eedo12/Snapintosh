@@ -816,7 +816,8 @@ questions closed, one opened.
   bytes wanted and no entries; `bdff824` with a 144,000-byte buffer captured the framebuffer. The firmware asks for
   about three times the size of the map it returns (698 against 226 to 232 descriptors; why is INFERRED, not
   checked), the old call treated its failure as an empty map, and the selection then reported the framebuffer as not
-  in the memory map. The 128 KiB buffer that was added for the wrong reason is the fix, and q1n1 `ce21912` now keeps a
+  in the memory map. The 128 KiB buffer added with the first fixes was already the cure, although the analysis at the
+  time judged it irrelevant, and q1n1 `ce21912` now keeps a
   test on its size.
 - *The progress markers work on this unit.* Run A, the dry run, drew all five of its squares. Data stores to the
   framebuffer with the MMU off, from `tb_longjmp` at EL2, landed; slot 3's closing barrier returned. That removes the
