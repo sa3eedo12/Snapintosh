@@ -1004,7 +1004,8 @@ against the source (VERIFIED): it does what the source says, its map buffer is 1
 `.bss`, the `.data` section is writable and `SizeOfImage` covers it. This unit's map (226 to 233 descriptors, about
 11 KiB) is under both of the old limits. So none of those is the cause, and what is left is a difference in what the
 firmware returns or does for the old call, which the code does not show. Two preflight-only variants would separate it
-(the new code with the old 24 KiB buffer; the old code with a 128 KiB buffer); neither has been built or run (NOT RUN).
+(the new code with the old 24 KiB buffer; the old code with a 144,000-byte one); both are built and neither has been
+run (NOT RUN).
 Until then the new build's reading is the one to trust, and it has been right in all five of its runs
 (attempts 4 and 5).
 
