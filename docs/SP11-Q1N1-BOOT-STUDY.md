@@ -760,12 +760,21 @@ reading the cited source, and nothing here is hardware evidence for the sweep it
   a wrong type, no WB bit) collapses into it. q1n1 therefore prints each declared range against the map
   (descriptor count, type, attribute, containment) before ExitBootServices and again on the failure and success
   pages. It reports facts and leaves the policy in slbounce.
-- **Section 8.2: the selection logic was right; the inputs were not (UNCONFIRMED how).** The unit's recorded maps run
+- **Section 8.2: the selection logic was right; attempt 3's inputs are unexplained.** The unit's recorded maps run
   through q1n1's ported selection give the same answer as the probe, yet attempt 3 refused the only GOP as
   `NOT IN MEMORY MAP`. Two real defects in the gathering code were fixed (a copy silently truncated at 512 entries,
-  and a buffer a fifth the probe's size), but whether either caused the refusal is not known. The plain text console
-  now prints the map status, size and entry count and, per candidate, its verdict and first overlapping descriptor.
+  and a buffer a fifth the probe's size), but attempt 4 shows neither can have caused it here: the unit's map is 228
+  descriptors (233 with slbounce loaded), about 11 KiB, under both limits. The refusal did not recur in three runs of
+  the new build, and the cause stays unknown (a difference between the two builds that the code does not show, or
+  session state at the time). The plain text console prints the map status, size and entry count and, per candidate,
+  its verdict and first overlapping descriptor on every run.
 
-Open after this addendum: the cause of attempt 3's refusal; whether the unit's map at q1n1's run time stays within
-slbounce's 512-descriptor bound; whether the scoped sweep lets ExitBootServices through; whether EL2 is then reached;
-the post-bounce reset; and `SLBOUNCE_SP11_DEVHE`, untried.
+**Update, 2026-11-12 (attempt 4, OBSERVED, one run).** With the fixes above and a scoped-sweep slbounce loaded, `--el2`
+got through ExitBootServices and reached EL2 on the unit, and q1n1's framebuffer console drew its page (the numbers are
+in SURFACE-PRO-11.md, Status of B1). So the section 4.4 design survived its first contact with hardware for the case it
+was built for (the blanket sweep hangs; two declared ranges, an image and a map buffer, both inside single
+loader-typed descriptors with WB, do not). That is one run: it does not show the sweep suffices once more than a
+framebuffer page runs afterwards, and it does not explain the hang.
+
+Open after this addendum: the page's stability over time; the cause of attempt 3's refusal; the post-bounce reset
+seen in the X2 runs; and `SLBOUNCE_SP11_DEVHE`, untried.
