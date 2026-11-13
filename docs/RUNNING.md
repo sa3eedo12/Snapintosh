@@ -454,8 +454,10 @@ rather than restore data.
 **What you need.** A USB stick of 1 GB or more (the staged tree is a few MB,
 and step 4 erases everything on the stick), with a USB-C plug or an adapter,
 formatted FAT32 with an MBR scheme (step 4 does it). Also a Type Cover or a USB
-keyboard: the stick has no `startup.nsh` (`tools/stage-sp11-boot-media.py
-verify` fails a tree that contains one), so you type every command at the
+keyboard: the stick has no `startup.nsh` unless you opt in to
+[autorun](#optional-run-planned-experiments-from-the-stick-autorun) below
+(`tools/stage-sp11-boot-media.py verify` fails a tree whose `startup.nsh` is not
+the one an autorun plan generates), so by default you type every command at the
 firmware shell yourself. That the firmware passes either keyboard to the shell
 is INFERRED. The staged tree holds:
 
@@ -522,6 +524,94 @@ normal boot order. With way A, turn Secure Boot back on in the firmware setup
 before Windows boots; with the SSD removed, do that before the SSD goes back
 in.
 
+### Optional: run planned experiments from the stick (autorun)
+
+Off by default and opt-in per staged tree. Without it the stick runs nothing by
+itself and you type every command. With it, the Shell's own `startup.nsh` runs
+one pre-validated step per boot and nobody types. A step is `load` of one slbounce
+build, once, then one application. Nothing can run after the application calls
+ExitBootServices, so the script runs one step per boot and writes that step's
+marker file (`SP11\DONE<k>.TXT`) before the step starts: a step that hangs is
+never repeated.
+
+Status. Hardware: NOT RUN. QEMU: OBSERVED with stand-in images in place of
+slbounce and q1n1 (`python3 tools/test-sp11-autorun-qemu.py`, EXPERIMENTAL
+evidence) under the pinned Shell binary (UEFI Interactive Shell v2.2,
+edk2-stable202608) and QEMU's edk2-stable202408 firmware: the script is found in
+`EFI\BOOT`, runs after the countdown with no key sent, runs one step per boot,
+and ESC at the countdown skips it. The lookup order, the `homefilesystem`
+variable and the ESC test agree with the `Shell.c` of the edk2-stable202608 tag
+that Shell reports (read, not run on the unit). INFERRED for the unit: that its
+firmware, USB stack and Type Cover behave the same (in particular that ESC reaches
+the countdown), and that the Shell file on the stick is the pinned one (it is if
+the tree was staged with the default pins).
+
+Stage it on the Mac, in the directory `stage` made, never on the mounted stick (the
+tool refuses `/Volumes`). Give each file's SHA-256 from your own record of the
+reviewed build, not one computed from the file about to be staged:
+
+```sh
+python3 tools/stage-sp11-boot-media.py autorun --dest <staged-directory> --name devhe-mark \
+    --file SLBOUNCE-DEVHE-MARK.EFI <slbounce-build> <sha256> --file Q1N1.EFI <q1n1.efi> <sha256> \
+    --step "SLBOUNCE-DEVHE-MARK.EFI Q1N1.EFI --el2"     # one --step per boot, in order
+python3 tools/stage-sp11-boot-media.py verify --dest <staged-directory>   # COMPLETE, shell_pin: match
+```
+
+It copies the named files into `SP11\` (checking each hash after the copy; a name that
+is already staged, such as the base tree's `SLBOUNCE.EFI` or `PROBE.EFI`, must have
+the same bytes and is never replaced), writes
+`EFI\BOOT\startup.nsh` and `SP11\PLAN.TXT` (the steps with their hashes), changes the
+autorun paragraph of `SP11\README.TXT` and lists all of it in the manifest. It
+refuses a base tree that is not `COMPLETE`, a missing or mismatching source, and
+anything outside a short table: the slbounce builds `SLBOUNCE.EFI`,
+`SLBOUNCE-DEVHE.EFI`, `SLBOUNCE-DEVHE-MARK.EFI` and `SLBOUNCE-DRYRUN.EFI`, and the
+applications `Q1N1.EFI` (no argument, or exactly `--el2`), `TESTS.EFI`,
+`TESTS-DECL.EFI` and `PROBE.EFI` (no argument). `--boot`, `--uart-proxy`, `--uart`,
+`--fault-test` and `SLBOUNCE-OLD-NOSWEEP.EFI` are refused by name, and the script
+contains no command the generator does not write. `verify` accepts the one
+`startup.nsh` that the plan in `PLAN.TXT` generates and still fails any other. Copy
+the tree to the stick and check it from the volume's root as in step 5.
+
+A boot with an autorun stick:
+
+1. The Shell prints "Press ESC in 5 seconds to skip startup.nsh or any other key
+   to continue." (5 seconds under QEMU; the unit's start value was not recorded).
+   **ESC** gives the normal `Shell>` prompt and runs nothing
+   (`type SP11\PLAN.TXT` shows the plan). Any other key continues at once; with no
+   key the script starts after the countdown.
+2. The script selects the Shell's own volume (the `homefilesystem` variable, so the
+   stick may be any `FSn:`), prints the plan, the step and the exact two commands,
+   and checks that both files exist; a missing one prints `AUTORUN REFUSED: ... is
+   missing, nothing was run` and writes no marker.
+3. It waits 5 seconds ("Power off now to cancel"; Ctrl-C in that wait also
+   cancelled the step in QEMU, unverified on the unit), writes the marker, then runs
+   `load` and the application with the Shell echoing both commands.
+4. If the unit hangs, hold the power button and boot the stick again: the next
+   step runs. After the last step the script prints `ALL STEPS DONE, run --clear to
+   repeat` and runs nothing.
+
+Starting again or switching it off. In a staged directory, `autorun --dest <dir>
+--clear` deletes the `SP11\DONE<k>.TXT` markers and `--remove` deletes
+`startup.nsh`, `PLAN.TXT`, the markers and the files the plan added, and
+restores `README.TXT` and the manifest, so the tree is byte for byte what it
+was. A directory that holds markers (for example a copy of a used stick) fails
+`verify` until they are cleared. The tool never writes the mounted stick, and
+the Shell wrote the markers there, so on the stick you do it by hand (copying a
+staged tree over a used stick does not delete its markers):
+
+```sh
+rm -f /Volumes/SP11BOOT/SP11/DONE*.TXT          # start the plan again at step 1
+rm -f /Volumes/SP11BOOT/EFI/BOOT/startup.nsh    # autorun off: the stick is in its manual state
+```
+
+Limits. The script cannot tell that a `load` failed: `%lasterror%` stays `0x0` after a
+failed `load` under this Shell (OBSERVED in QEMU), so the application still runs; the
+Shell prints the error on the screen. `SLTEST.EFI` is not in the table (it needs a
+path argument and the procedure above runs it without a `load`). On a stick that
+cannot be written the marker cannot be written first, and the Shell stops the script at
+that redirect (`Unable to redirect file.`, `Script Error Status: Invalid Parameter`)
+before anything runs (OBSERVED in QEMU with a write-protected stick).
+
 ## Running the EFI probe and the X2 tests
 
 Operator only, after step 7 above; hardware status NOT RUN. Everything these
@@ -536,8 +626,9 @@ page, header and footer included, type the rows into a file and check them with
 `python3 probes/uefi/verify-lines.py`. The operator procedure is in
 [probes/uefi/README.md](../probes/uefi/README.md). Start the probe from the UEFI
 Shell the stick boots, by typing `SP11\PROBE.EFI` after `load SP11\SLBOUNCE.EFI`
-(the stick has no `startup.nsh`). The Shell replaces the console output handle
-for the programs it starts, so the probe chooses its framebuffer by a second
+(a stick staged without autorun has no `startup.nsh`). The Shell replaces the
+console output handle for the programs it starts, so the probe chooses its
+framebuffer by a second
 rule there: the one framebuffer that every usable GOP describes; two different
 framebuffers are refused as `AMBIGUOUS GOP` (see "Framebuffer selection" in the
 probe README). The `GOP <w>X<h> SEL=...` row in the `== PRE-EBS FACTS ==`
@@ -581,7 +672,7 @@ one you ran: the pages show `MAP MMIO=n UNLISTED=n REFUSED=n` (default) or
 
 **3. The X2 test image.** `sp11-el2-tests.efi` is run once, with the same stick
 preparation; read [SP11-X2-TESTS.md](SP11-X2-TESTS.md) first, and never run the
-`model`, `model-fatal` or `model-fatal-pre` builds on the unit. It writes the NV2
+`model`, `model-fatal`, `model-fatal-pre` or `model-declared` builds on the unit. It writes the NV2
 record next to the probe's dump; `python3 tools/nv2_record.py ingest` turns it
 into the record the SP11 monitor embeds. One hardware client at a time, and AC
 power. Say whether the internal SSD was installed: T06 and T07 are meant to read

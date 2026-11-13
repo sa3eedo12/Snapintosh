@@ -265,6 +265,10 @@ python3 tools/test-snapmac-partition-plan-hardening.py  # the planner: reader in
 python3 tools/test-gen-a7xx-cp-protect.py       # a7xx CP_PROTECT generator; the pinned-source group needs network or build/ref
 python3 tools/test-sp11-boot-media.py           # boot-media staging; SP11_SHELL_EFI, SP11_SLBOUNCE_EFI and SP11_SLTEST_EFI enable the real-artifact test
 python3 tools/test-sp11-boot-media-hardening.py # the stager: destination guard, pins file, validated bytes
+python3 tools/test-sp11-autorun.py              # the opt-in autorun script generator: golden text, bans, line checker, control-flow model
+python3 tools/test-sp11-autorun-tree.py         # the stager's autorun subcommand: default path unchanged, verify, clear, remove, refusals; SP11_SLBOUNCE_EFI and SP11_Q1N1_EFI enable the real-image test
+python3 tools/test-sp11-autorun-mutants.py      # seeds banned arguments and other bugs into the generator and stager; both suites must fail
+python3 tools/test-sp11-autorun-qemu.py         # the stick's startup.nsh under the pinned Shell in QEMU (clang, lld-link, qemu-system-aarch64, EDK2 and SP11_UEFI_SHELL; SKIPs without)
 python3 tools/test-uefi-probe.py                # EFI state probe: build, native checks, QEMU; UEFI_PROBE_SKIP_QEMU=1 skips the emulator
 python3 tools/test-uefi-tests.py                # X2 test image: build, native checks, instruction audit, QEMU; UEFI_PROBE_SKIP_QEMU=1 skips the emulator
 python3 tools/test-el2-entry-transition.py      # EL2 entry model, oracle, broken sequences, seeded bugs
@@ -385,18 +389,25 @@ The X2 test image is the probe plus nine functional tests (T01 to T09). It is
 built only on request and is never part of the default probe build. The
 hardware image needs the SoC named explicitly, because the NV2 record it writes
 carries it and the monitor's gate refuses a record for another SoC. Its
-`model`, `model-fatal` and `model-fatal-pre` variants are for QEMU only: never
+`model`, `model-fatal`, `model-fatal-pre` and `model-declared` variants are for QEMU only: never
 run them on hardware (`model-fatal-pre` makes its unguarded bad access before
-ExitBootServices, to prove that the fatal page does not depend on the console).
+ExitBootServices, to prove that the fatal page does not depend on the console;
+`model-declared` runs the declaration of the `declared` variant under EDK2).
 The operator guide is [SP11-X2-TESTS.md](SP11-X2-TESTS.md); the
 developer notes are [probes/uefi/tests/README.md](../probes/uefi/tests/README.md).
 
 ```sh
 python3 tools/build-uefi-tests.py --soc x1e80100      # build/uefi/sp11-el2-tests.efi (the hardware image)
+python3 tools/build-uefi-tests.py --soc x1e80100 --variant declared   # opt-in, see below
 python3 tools/build-uefi-tests.py --soc x1e80100 --require-mmio-map   # strict device windows, see below
 python3 tools/build-uefi-tests.py --variant all --soc x1e80100 --verify-reproducible
 python3 -B tools/test-uefi-tests.py                   # every host test of the image, one command
 ```
+
+The opt-in `declared` variant (`build/uefi/sp11-el2-tests-declared.efi`) is the hardware image
+plus the declared-ranges table that the reviewed scoped-sweep slbounce requires before it lets
+ExitBootServices proceed. It is never built by default, the hardware image is unchanged by it, and
+its hardware status is NOT RUN ([SP11-X2-TESTS.md](SP11-X2-TESTS.md) section 10).
 
 The default image refuses a device window (T05 to T07) that the UEFI memory map
 calls RAM, firmware, ACPI or anything but MMIO, and reads a window the map does
@@ -442,6 +453,20 @@ then says `shell_pin: unchecked`: do not use it for media that will boot the
 unit. `verify` re-checks the staged shell against the pin (`shell_pin: match`,
 `mismatch` or `unchecked`) and exits 1 on a mismatch, even when the manifest is
 satisfied.
+
+The opt-in `autorun` subcommand (default off; `stage` and `verify` are unchanged
+without it, as digests taken before it existed show) adds a one-step-per-boot
+`EFI/BOOT/startup.nsh`, `SP11/PLAN.TXT` and the named experiment files to a
+directory that `stage` made and `verify` accepts, under the same destination
+refusals, so it never touches a mounted stick; `--clear` and `--remove` undo it
+in that directory. The plan rules, the allow-lists and the generator are in
+`tools/sp11_autorun.py`; the operator procedure and the evidence labels are in
+[RUNNING.md](RUNNING.md#optional-run-planned-experiments-from-the-stick-autorun).
+`tools/test-sp11-autorun-qemu.py` needs `clang`, `lld-link`, `qemu-system-aarch64`,
+an EDK2 AArch64 firmware pair and the pinned Shell (`SP11_UEFI_SHELL`, or
+`build/sp11-inputs/shellaa64.efi`; a file that is not the pinned one fails); it
+builds stand-in images from `tools/sp11-autorun-dummy.c`, so no reviewed binary is
+needed.
 
 Putting the staged tree on a stick is the operator's step, with the procedure in
 [RUNNING.md](RUNNING.md#preparing-the-x0x1-boot-stick).
