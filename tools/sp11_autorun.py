@@ -31,10 +31,14 @@ PAUSE_MICROSECONDS = 5000000
 # The reviewed slbounce builds, all from the slbounce fork. `load` of one of these is the first half of a step.
 SLBOUNCE_BUILDS = ('SLBOUNCE.EFI', 'SLBOUNCE-DEVHE.EFI', 'SLBOUNCE-DEVHE-MARK.EFI', 'SLBOUNCE-DRYRUN.EFI')
 # Applications and the only argument vectors each may be given. q1n1 takes exactly `--el2` or nothing (the no-argument
-# run is its preflight, which never leaves boot services). SLTEST.EFI is not listed: it needs an explicit path
-# argument and the operator procedure runs it without a preceding `load`.
+# run is its preflight, which never leaves boot services). Q1N1-STK.EFI is the second q1n1 image, the read-only USB
+# survey that the q1n1 fork builds from the same tree behind a compile-time gate (docs/SP11-STK-SURVEY.md there). It
+# runs only in the `--el2` flow and has no preflight-only use, so it takes exactly `--el2` and the no-argument form is
+# refused. SLTEST.EFI is not listed: it needs an explicit path argument and the operator procedure runs it without a
+# preceding `load`.
 APP_ARGUMENTS = {
     'Q1N1.EFI': ((), ('--el2',)),
+    'Q1N1-STK.EFI': (('--el2',),),
     'TESTS.EFI': ((),),
     'TESTS-DECL.EFI': ((),),
     'PROBE.EFI': ((),),

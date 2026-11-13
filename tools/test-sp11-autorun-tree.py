@@ -49,6 +49,7 @@ GOLDEN_TREE = {
     'TCBLAUNCH.EXE': '7f8c88fc53aec343352e5a80865cccf51deeb7b24418516f3a499dcf6a627a98',
 }
 FILES = {'SLBOUNCE-DEVHE-MARK.EFI': 'mark.efi', 'SLBOUNCE-DEVHE.EFI': 'devhe.efi', 'Q1N1.EFI': 'q1n1.efi'}
+STK_FILES = {'SLBOUNCE-DEVHE-MARK.EFI': 'mark.efi', 'Q1N1-STK.EFI': 'stk.efi'}
 SCRIPT, PLAN, README, MANIFEST = 'EFI/BOOT/startup.nsh', 'SP11/PLAN.TXT', 'SP11/README.TXT', 'SP11/MANIFEST.SHA256'
 
 
@@ -60,7 +61,7 @@ class Tree(fixtures.TempTreeTestCase):
         'sltest.efi': make_pe(subsystem=10, body=b'T' * 64), 'probe.efi': make_pe(subsystem=10, body=b'P' * 64),
         'tcblaunch.exe': make_pe(subsystem=16, body=b'C' * 64),
         'mark.efi': make_pe(subsystem=12, body=b'M' * 64), 'devhe.efi': make_pe(subsystem=12, body=b'D' * 64),
-        'q1n1.efi': make_pe(subsystem=10, body=b'Q' * 64),
+        'q1n1.efi': make_pe(subsystem=10, body=b'Q' * 64), 'stk.efi': make_pe(subsystem=10, body=b'K' * 64),
     }
 
     def setUp(self):
@@ -549,6 +550,83 @@ class ClearAndRemove(Tree):
         self.assertEqual(self.snapshot(tree), before)
 
 
+class SurveyImage(Tree):
+    """Q1N1-STK.EFI, the read-only USB survey build of q1n1: an allow-listed application that takes exactly `--el2`."""
+
+    def survey_argv(self, steps=None, files=None):
+        return self.autorun_argv(steps=G.STK if steps is None else steps, files=STK_FILES if files is None else files,
+                                 name='stk-survey')
+
+    def test_a_plan_with_the_survey_image_is_staged_verified_and_removed(self):
+        tree = self.default_tree()
+        before, (_, verified) = self.snapshot(tree), self.verify(tree)
+        code, result = self.run_main(self.survey_argv())
+        self.assertEqual((code, result['status']), (0, 'AUTORUN_STAGED'), result)
+        self.assertEqual(result['plan'], 'stk-survey')
+        self.assertEqual([(s['load'], s['run']) for s in result['steps']], [('SLBOUNCE-DEVHE-MARK.EFI', 'Q1N1-STK.EFI --el2')])
+        self.assertEqual(result['files_written'], sorted([SCRIPT, MANIFEST, PLAN, README, 'SP11/Q1N1-STK.EFI',
+                                                          'SP11/SLBOUNCE-DEVHE-MARK.EFI']))
+        self.assertEqual((tree / 'SP11' / 'Q1N1-STK.EFI').read_bytes(), self.BLOBS['stk.efi'])
+        self.assertEqual((tree / SCRIPT).read_bytes(), G.GOLDEN_STK.encode('ascii'))
+        plan = autorun.build_plan('stk-survey', G.STK, {'SLBOUNCE-DEVHE-MARK.EFI': self.digest('mark.efi'),
+                                                        'Q1N1-STK.EFI': self.digest('stk.efi')})
+        self.assertEqual((tree / PLAN).read_bytes(), autorun.render_plan_text(plan))
+        self.assertEqual(stage.parse_manifest((tree / MANIFEST).read_text())['SP11/Q1N1-STK.EFI'], self.digest('stk.efi'))
+        code, result = self.verify(tree)
+        self.assertEqual((code, result['status'], result['startup_nsh_found']), (0, 'COMPLETE', []))
+        self.assertEqual(result['autorun'], {'plan': 'stk-survey', 'steps': 1, 'script': 'present', 'problems': []})
+        code, removed = self.run_main(['autorun', '--dest', tree, '--remove'])
+        self.assertEqual((code, removed['status']), (0, 'AUTORUN_REMOVED'))
+        self.assertEqual(removed['files_removed'], [SCRIPT, PLAN, 'SP11/Q1N1-STK.EFI', 'SP11/SLBOUNCE-DEVHE-MARK.EFI'])
+        self.assertEqual(self.snapshot(tree), before)
+        self.assertEqual(self.verify(tree)[1], verified)
+
+    def test_the_no_argument_form_and_every_banned_argument_are_refused_and_the_tree_is_untouched(self):
+        self.default_tree()
+        for args, reason in (('', 'step_arguments_not_allowed'), (' --boot', 'step_argument_banned'),
+                             (' --uart', 'step_argument_banned'), (' --uart-proxy', 'step_argument_banned'),
+                             (' --fault-test', 'step_argument_banned'), (' --el2 --boot', 'step_argument_banned'),
+                             (' --boot --el2', 'step_argument_banned'), (' --el3', 'step_arguments_not_allowed')):
+            with self.subTest(args=args):
+                self.refused(self.survey_argv([f'SLBOUNCE-DEVHE-MARK.EFI Q1N1-STK.EFI{args}']), reason)
+
+    def test_its_source_is_checked_like_any_other_application(self):
+        self.default_tree()
+        self.write('in/driver.efi', make_pe(subsystem=12))
+        self.refused(self.survey_argv(files={**STK_FILES, 'Q1N1-STK.EFI': 'driver.efi'}), 'input_wrong_subsystem')
+        self.write('in/x86.efi', make_pe(machine=0x8664, subsystem=10))
+        self.refused(self.survey_argv(files={**STK_FILES, 'Q1N1-STK.EFI': 'x86.efi'}), 'input_wrong_machine')
+        wrong = self.survey_argv()
+        wrong[[str(word) for word in wrong].index(self.digest('stk.efi'))] = '0' * 64
+        self.assertIn('Q1N1-STK.EFI', self.refused(wrong, 'file_hash_mismatch')['detail'])
+        self.refused(self.survey_argv(files={'SLBOUNCE-DEVHE-MARK.EFI': 'mark.efi'}), 'file_hash_missing')
+        self.refused(self.survey_argv(files={**STK_FILES, 'Q1N1.EFI': 'q1n1.efi'}), 'file_unused')
+
+    def test_a_replaced_survey_image_is_a_verify_failure_even_with_the_manifest_regenerated(self):
+        tree, _ = self.staged(steps=G.STK, files=STK_FILES, name='stk-survey')
+        (tree / 'SP11' / 'Q1N1-STK.EFI').write_bytes(make_pe(subsystem=10, body=b'another survey'))
+        self.regenerate_manifest(tree)
+        code, result = self.verify(tree)
+        self.assertEqual((code, result['status']), (1, 'FAIL'))
+        self.assertIn('SP11/Q1N1-STK.EFI: sha256 differs from SP11/PLAN.TXT', result['autorun']['problems'])
+
+    def test_both_q1n1_images_can_be_one_plan_and_swapping_their_bytes_is_refused(self):
+        files = {**STK_FILES, 'SLBOUNCE-DEVHE.EFI': 'devhe.efi', 'Q1N1.EFI': 'q1n1.efi'}
+        tree, _ = self.staged(steps=G.STK + ['SLBOUNCE-DEVHE.EFI Q1N1.EFI --el2'], files=files, name='both')
+        for name, blob in (('Q1N1-STK.EFI', 'stk.efi'), ('Q1N1.EFI', 'q1n1.efi')):
+            self.assertEqual((tree / 'SP11' / name).read_bytes(), self.BLOBS[blob], name)
+        self.assertEqual(self.verify(tree)[1]['autorun'], {'plan': 'both', 'steps': 2, 'script': 'present', 'problems': []})
+        survey, plain = tree / 'SP11' / 'Q1N1-STK.EFI', tree / 'SP11' / 'Q1N1.EFI'
+        survey_bytes, plain_bytes = survey.read_bytes(), plain.read_bytes()
+        survey.write_bytes(plain_bytes)
+        plain.write_bytes(survey_bytes)
+        self.regenerate_manifest(tree)
+        code, result = self.verify(tree)
+        self.assertEqual((code, result['status']), (1, 'FAIL'))
+        self.assertEqual(sorted(result['autorun']['problems']), ['SP11/Q1N1-STK.EFI: sha256 differs from SP11/PLAN.TXT',
+                                                                 'SP11/Q1N1.EFI: sha256 differs from SP11/PLAN.TXT'])
+
+
 def first_existing(*candidates):
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
@@ -584,6 +662,33 @@ class RealArtifacts(Tree):
         for name, path in files.items():
             argv += ['--file', name, path, stage.sha256_file(path)]
         code, result = self.run_main(argv + ['--step', 'SLBOUNCE-DRYRUN.EFI Q1N1.EFI --el2', '--step', 'SLBOUNCE-DRYRUN.EFI TESTS.EFI'])
+        self.assertEqual((code, result['status']), (0, 'AUTORUN_STAGED'), result)
+        code, result = self.run_main(['verify', '--dest', self.dest, '--pins', stage.DEFAULT_PINS])
+        self.assertEqual((code, result['status'], result['shell_pin'], result['autorun']['problems']), (0, 'COMPLETE', 'match', []))
+        self.assertEqual(self.run_main(['autorun', '--dest', self.dest, '--remove'])[1]['status'], 'AUTORUN_REMOVED')
+
+    def test_the_real_survey_image_passes_the_role_checks_and_the_round_trip(self):
+        root = G.ROOT
+        real = {
+            'shell': first_existing(os.environ.get('SP11_SHELL_EFI'), root / 'build' / 'sp11-inputs' / 'shellaa64.efi',
+                                    root / 'downloads' / 'sp11' / 'boot-media' / 'shellaa64.efi'),
+            'slbounce': first_existing(os.environ.get('SP11_SLBOUNCE_EFI')),
+            'survey': first_existing(os.environ.get('SP11_Q1N1_STK_EFI')),
+        }
+        if not all(real.values()):
+            print('SKIP: real images not found (set SP11_SHELL_EFI, SP11_SLBOUNCE_EFI and SP11_Q1N1_STK_EFI)')
+            self.skipTest('real images not found')
+        self.trees += 1
+        self.dest = self.scratch / 'real-survey'
+        code, result = self.run_main(['stage', '--shell', real['shell'], '--slbounce', real['slbounce'],
+                                      '--sltest', self.src / 'sltest.efi', '--tcblaunch', self.src / 'tcblaunch.exe',
+                                      '--dest', self.dest, '--pins', stage.DEFAULT_PINS])
+        self.assertEqual((code, result['shell_pin']), (0, 'match'), result)
+        files = {'SLBOUNCE-DRYRUN.EFI': real['slbounce'], 'Q1N1-STK.EFI': real['survey']}
+        argv = ['autorun', '--dest', self.dest, '--pins', stage.DEFAULT_PINS, '--name', 'real-survey']
+        for name, path in files.items():
+            argv += ['--file', name, path, stage.sha256_file(path)]
+        code, result = self.run_main(argv + ['--step', 'SLBOUNCE-DRYRUN.EFI Q1N1-STK.EFI --el2'])
         self.assertEqual((code, result['status']), (0, 'AUTORUN_STAGED'), result)
         code, result = self.run_main(['verify', '--dest', self.dest, '--pins', stage.DEFAULT_PINS])
         self.assertEqual((code, result['status'], result['shell_pin'], result['autorun']['problems']), (0, 'COMPLETE', 'match', []))

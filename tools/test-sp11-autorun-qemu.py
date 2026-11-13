@@ -25,6 +25,8 @@ lld-link) that print one line and return. No reviewed binary runs. The staged di
   bad-load    the slbounce stand-in fails to start: the Shell says so but the script cannot tell (a documented limit)
   read-only   the stick is write-protected, so the marker cannot be written first: the Shell stops the script at the
               failed redirect and nothing runs
+  survey      a plan whose application is named Q1N1-STK.EFI (the read-only USB survey build of q1n1, run with
+              --el2): the first command name with a hyphen, and an exact 8.3 name where the others are long ones
 
 Evidence: EXPERIMENTAL (QEMU only), hardware NOT RUN. QEMU's firmware is edk2-stable202408 and the Shell is the pinned
 release binary (edk2-stable202608), not necessarily the firmware or even the file of the unit; what the unit's
@@ -66,6 +68,8 @@ import sp11_autorun_qemu as q  # noqa: E402
 
 STEP_ONE, STEP_TWO = 'SLBOUNCE-DEVHE-MARK.EFI Q1N1.EFI --el2', 'SLBOUNCE-DEVHE.EFI Q1N1.EFI --el2'
 APP_LINE = r'AUTORUN-DUMMY APP Q1N1.EFI OPTIONS=[SP11\Q1N1.EFI --el2]'
+STEP_SURVEY = 'SLBOUNCE-DEVHE-MARK.EFI Q1N1-STK.EFI --el2'
+SURVEY_LINE = r'AUTORUN-DUMMY APP Q1N1-STK.EFI OPTIONS=[SP11\Q1N1-STK.EFI --el2]'
 EFI_LOAD_ERROR = 0x8000000000000001
 
 
@@ -195,6 +199,7 @@ class AutorunUnderTheShell(unittest.TestCase):
             'esc': lab.stick(lab.tree('esc', [STEP_ONE, STEP_TWO])),
             'ctrl-c': lab.stick(lab.tree('ctrl-c', [STEP_ONE, STEP_TWO])),
             'decoy': lab.stick(lab.tree('decoy', [STEP_ONE, STEP_TWO])),
+            'survey': lab.stick(lab.tree('survey', [STEP_SURVEY])),
         }
         removed = lab.tree('removed', [STEP_ONE, STEP_TWO])
         code, result = run_tool('autorun', '--dest', removed, '--remove')
@@ -219,6 +224,7 @@ class AutorunUnderTheShell(unittest.TestCase):
             'decoy': lambda: [lab.boot(cls.images['decoy'], 'decoy', decoy=cls.decoy_image)],
             'removed': lambda: [lab.boot(cls.images['removed'], 'removed')],
             'no-volume': lambda: [lab.boot(cls.images['no-volume'], 'no-volume')],
+            'survey': lambda: [lab.boot(cls.images['survey'], 'survey')],
         }
         with ThreadPoolExecutor(max_workers=max(1, min(4, (os.cpu_count() or 2) // 2))) as pool:
             futures = {name: pool.submit(job) for name, job in jobs.items()}
@@ -368,6 +374,24 @@ class AutorunUnderTheShell(unittest.TestCase):
         self.assertEqual(markers(boot), [])
         self.assertEqual(boot.ended, 'idle')
 
+    def test_the_survey_image_is_run_with_el2_after_the_load_like_q1n1(self):
+        # Q1N1-STK.EFI is the first command name with a hyphen that the Shell runs from the script, and an exact 8.3
+        # name (a short directory entry), where the other names on the stick are long ones.
+        (boot,) = self.run_of('survey')
+        text = boot.serial
+        self.assertIn('AUTORUN devhe-mark: 1 step, one per boot.', text)
+        self.assertIn('CMD1: load SP11\\SLBOUNCE-DEVHE-MARK.EFI', text)
+        self.assertIn('CMD2: SP11\\Q1N1-STK.EFI --el2', text)
+        self.assertIn('FS0:\\> load SP11\\SLBOUNCE-DEVHE-MARK.EFI', text)
+        self.assertIn('FS0:\\> SP11\\Q1N1-STK.EFI --el2', text)
+        self.assertIn(SURVEY_LINE, text)
+        self.assertEqual(text.count('AUTORUN-DUMMY DRIVER'), 1, 'slbounce is loaded once per boot')
+        self.assertEqual(text.count('AUTORUN-DUMMY APP'), 1)
+        self.assertLess(text.index('AUTORUN-DUMMY DRIVER'), text.index('AUTORUN-DUMMY APP'), 'load, then run')
+        self.assertEqual(markers(boot), ['SP11/DONE1.TXT'])
+        self.assertEqual(boot.stick.files['SP11/DONE1.TXT'], b'AUTORUN devhe-mark STEP 1 STARTED\r\n')
+        self.assertEqual(boot.ended, 'idle')
+
     def test_after_remove_the_stick_starts_the_shell_with_no_script(self):
         (boot,) = self.run_of('removed')
         self.assertIn('Press ESC in 5 seconds to skip startup.nsh', boot.serial)
@@ -419,6 +443,7 @@ class LongNameImageTests(unittest.TestCase):
         'SP11/SLBOUNCE-DEVHE-MARK.EFI': b'a' * 4097, 'SP11/SLBOUNCE-DEVHE.EFI': b'b' * 10, 'SP11/SLBOUNCE-DRYRUN.EFI': b'c',
         'SP11/SLBOUNCE.EFI': b'd' * 2048, 'SP11/MANIFEST.SHA256': b'e' * 70, 'SP11/README.TXT': b'f' * 3000,
         'SP11/Mixed Case Name With Spaces.txt': b'g', 'TCBLAUNCH.EXE': b'h' * 5000, 'EMPTY.TXT': b'',
+        'SP11/Q1N1-STK.EFI': b'j' * 33,
         'SP11/' + 'long-' * 40 + '.bin': b'i' * 20,
     }
 

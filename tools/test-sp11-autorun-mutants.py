@@ -5,9 +5,10 @@
 Each mutant seeds one plausible bug into a copy of tools/sp11_autorun.py or tools/stage-sp11-boot-media.py (under
 build/) and runs the two host suites against that copy, through SP11_AUTORUN_DIR and SP11_STAGE_DIR. A mutant the
 suites do not fail on is a hole in the suites, so this run fails. The first mutants put a banned argument or the
-scratch build into the tables or the template, which is the check that the tests notice a banned argument seeded
-into the generator. A control run with no mutation must pass, and every replaced text must occur exactly once and
-leave a module that still compiles, so that a failure means a bug was caught and not that the copy was broken.
+scratch build into the tables or the template, for q1n1 and for the survey image Q1N1-STK.EFI, which is the check that
+the tests notice a banned argument seeded into the generator. A control run with no mutation must pass, and every
+replaced text must occur exactly once and leave a module that still compiles, so that a failure means a bug was caught
+and not that the copy was broken.
 Results go to build/test-sp11-autorun-mutants/mutants.tsv.
 
     python3 tools/test-sp11-autorun-mutants.py
@@ -24,13 +25,22 @@ TOOLS = Path(__file__).resolve().parent
 ROOT = TOOLS.parent
 BUILD = ROOT / 'build' / 'test-sp11-autorun-mutants'
 SUITES = ('test-sp11-autorun.py', 'test-sp11-autorun-tree.py')
+REAL_IMAGE_VARIABLES = ('SP11_SHELL_EFI', 'SP11_SLBOUNCE_EFI', 'SP11_Q1N1_EFI', 'SP11_Q1N1_STK_EFI', 'SP11_TESTS_EFI')
 GENERATOR, STAGER = 'sp11_autorun.py', 'stage-sp11-boot-media.py'
+SURVEY = "'Q1N1-STK.EFI': (('--el2',),),"   # the table entry of the survey image, which takes exactly --el2
 
 # (module, what the bug is, [(old text, new text), ...]). Each old text occurs exactly once in its module.
 MUTANTS = (
     (GENERATOR, 'q1n1 may take --boot', [("'Q1N1.EFI': ((), ('--el2',)),", "'Q1N1.EFI': ((), ('--el2',), ('--boot',)),")]),
     (GENERATOR, 'q1n1 may take --uart-proxy', [("'Q1N1.EFI': ((), ('--el2',)),", "'Q1N1.EFI': ((), ('--el2',), ('--uart-proxy',)),")]),
     (GENERATOR, 'q1n1 may take --el2 --uart', [("'Q1N1.EFI': ((), ('--el2',)),", "'Q1N1.EFI': ((), ('--el2',), ('--el2', '--uart')),")]),
+    (GENERATOR, 'the survey image may take --boot', [(SURVEY, "'Q1N1-STK.EFI': (('--el2',), ('--boot',)),")]),
+    (GENERATOR, 'the survey image may take --uart', [(SURVEY, "'Q1N1-STK.EFI': (('--el2',), ('--uart',)),")]),
+    (GENERATOR, 'the survey image may take --uart-proxy', [(SURVEY, "'Q1N1-STK.EFI': (('--el2',), ('--uart-proxy',)),")]),
+    (GENERATOR, 'the survey image may take --fault-test', [(SURVEY, "'Q1N1-STK.EFI': (('--el2',), ('--fault-test',)),")]),
+    (GENERATOR, 'the survey image may run with no argument', [(SURVEY, "'Q1N1-STK.EFI': ((), ('--el2',)),")]),
+    (GENERATOR, 'the survey image may take --boot and the ban check is gone',
+     [(SURVEY, "'Q1N1-STK.EFI': (('--el2',), ('--boot',)),"), ("if arg.lower().split('=')[0] in BANNED_ARGUMENTS:", 'if False:')]),
     (GENERATOR, 'the tests image may take --fault-test', [("'TESTS.EFI': ((),),", "'TESTS.EFI': ((), ('--fault-test',)),")]),
     (GENERATOR, 'the scratch build is an allowed slbounce build and no longer banned',
      [("'SLBOUNCE-DRYRUN.EFI')\n# Applications", "'SLBOUNCE-DRYRUN.EFI', 'SLBOUNCE-OLD-NOSWEEP.EFI')\n# Applications"),
@@ -81,10 +91,14 @@ def mutate(text, replacements):
 
 
 def run_suites(directory, tag):
-    """0 when both host suites pass against the modules in `directory`; the first failing return code otherwise."""
+    """0 when both host suites pass against the modules in `directory`; the first failing return code otherwise.
+
+    The real-image tests of the tree suite look for the pins file beside the stager, which a mutant's two-module copy does
+    not have, so the child runs get no real image and those tests skip; the mutants are checked on the synthetic fixtures."""
+    inherited = {k: v for k, v in os.environ.items() if k not in REAL_IMAGE_VARIABLES}
     for suite in SUITES:
         done = subprocess.run([sys.executable, '-B', str(TOOLS / suite)], capture_output=True, text=True, timeout=900,
-                              env={**os.environ, 'SP11_AUTORUN_DIR': str(directory), 'SP11_STAGE_DIR': str(directory),
+                              env={**inherited, 'SP11_AUTORUN_DIR': str(directory), 'SP11_STAGE_DIR': str(directory),
                                    'PYTHONDONTWRITEBYTECODE': '1'})
         if done.returncode:
             return done.returncode, f'{suite}: {done.stderr.strip().splitlines()[-1] if done.stderr.strip() else ""}'
