@@ -18,6 +18,16 @@ explicit `--no-pins` skips the check (the result then says `shell_pin:
 unchecked`). `tcblaunch.exe` is the sole exception to hash pinning: which build
 actually works on SP11 is UNKNOWN until hardware bring-up (X1), so this tool only
 records its hash, never checks it against an expectation.
+
+`autorun` is an opt-in addition and changes nothing for a tree that never uses it.
+It works on a directory `stage` made and `verify` accepts, under the same destination
+refusals, and never on a mounted stick: it copies the named experiment files into
+SP11/, writes EFI/BOOT/startup.nsh (one plan step per boot, markers written first)
+and SP11/PLAN.TXT, and lists them in the manifest. `verify` then accepts that one
+startup.nsh, and only if it is exactly the script the plan in PLAN.TXT generates;
+any other startup.nsh is still a finding. `autorun --clear` and `--remove` undo it in
+a staged directory (on a stick the markers and the script are deleted by hand).
+Plan rules and the script generator are in sp11_autorun.py.
 """
 from pathlib import Path
 import argparse
@@ -28,6 +38,11 @@ import re
 import stat
 import struct
 import sys
+
+_TOOLS = Path(__file__).resolve().parent
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+import sp11_autorun as autorun  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PINS = ROOT / 'tools' / 'sp11-boot-media-pins.json'
@@ -91,6 +106,8 @@ ROLE_SUBSYSTEMS = {
     'sltest': frozenset({10}),
     'slbounce': frozenset({12}),
     'probe': frozenset({10, 11, 12}),
+    # An application an autorun plan runs. OBSERVED: the q1n1, X2 tests and probe images built today are subsystem 10.
+    'app': frozenset({10}),
 }
 
 # Generous headroom over observed sizes (shell ~1.1 MiB, slbounce ~103 KiB,
@@ -598,6 +615,11 @@ def cmd_verify(args) -> dict:
 
     startup_hits = [str(p.relative_to(dest)) for p in dest.rglob('*')
                     if p.is_file() and p.name.lower() == 'startup.nsh']
+    # The one startup.nsh an autorun-staged tree may hold is the script its own PLAN.TXT generates; autorun_findings
+    # says whether this is it. A tree with no autorun files gets no new key in the result.
+    autorun_report = autorun_findings(dest)
+    if autorun_report is not None and not autorun_report['problems'] and autorun_report['script'] == 'present':
+        startup_hits = [hit for hit in startup_hits if hit != autorun.SCRIPT_REL]
 
     manifest_path = dest / MANIFEST_REL
     manifest_ok = False
@@ -654,9 +676,10 @@ def cmd_verify(args) -> dict:
             shell_pin = 'mismatch'
             pin_mismatches.append(f'shell_pin_mismatch: got {present["shell"]["sha256"]}, pinned {pinned}')
 
-    status = 'FAIL' if (startup_hits or manifest_mismatches or pin_mismatches) else (
+    autorun_problems = autorun_report['problems'] if autorun_report is not None else []
+    status = 'FAIL' if (startup_hits or manifest_mismatches or pin_mismatches or autorun_problems) else (
         'INCOMPLETE' if missing else 'COMPLETE')
-    return {
+    result = {
         'status': status,
         'dest': str(dest),
         'missing': missing,
@@ -667,6 +690,244 @@ def cmd_verify(args) -> dict:
         'shell_pin': shell_pin,
         'pin_mismatches': pin_mismatches,
     }
+    if autorun_report is not None:
+        result['autorun'] = autorun_report
+    return result
+
+
+# ---------------------------------------------------------------------------------------------------------- autorun
+
+BASE_RELS = frozenset(LAYOUT.values()) | {TCBLAUNCH_ROOT_REL, README_REL, MANIFEST_REL}
+AUTORUN_TEXT_MAX = 1 << 16
+
+
+def read_staged_bytes(path: Path, cap: int):
+    """The bytes of a regular file inside a staged tree, read like an input (no symlink, bounded); None when absent."""
+    symlinked = find_symlink_component(path)
+    if symlinked is not None:
+        raise Refusal('staged_path_has_symlink_component', str(symlinked))
+    if not path.exists():
+        return None
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode):
+        raise Refusal('staged_not_regular_file', str(path))
+    if info.st_size > cap:
+        raise Refusal('staged_file_too_large', f'{path}: {info.st_size} > {cap}')
+    return read_regular_bytes(path, info, cap)
+
+
+def parse_manifest(text: str) -> dict:
+    """{relative path: sha256} from a manifest, read as strictly as verify reads it."""
+    entries = {}
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        found = SHA256_LINE_RE.match(line)
+        if not found or not is_safe_relative_path(found.group(2)) or found.group(2) in entries:
+            raise Refusal('manifest_unusable', f'line {lineno}')
+        entries[found.group(2)] = found.group(1)
+    return entries
+
+
+def render_manifest(entries: dict) -> str:
+    """The text build_manifest writes for the same entries."""
+    return ''.join(f'{digest}  {rel}\n' for rel, digest in sorted(entries.items()))
+
+
+def autorun_findings(dest: Path):
+    """What autorun left in the staged tree `dest`: None when it has neither SP11/PLAN.TXT nor EFI/BOOT/startup.nsh (a
+    default tree), else {'plan', 'steps', 'script', 'problems'}. Reads only, and returns its problems rather than raising.
+
+    The script is accepted only if it is byte for byte what the plan in PLAN.TXT generates, PLAN.TXT is byte for byte
+    what the tool writes, every file the plan names is staged with the planned hash, and README.TXT says autorun is on.
+    """
+    try:
+        plan_bytes = read_staged_bytes(dest / autorun.PLAN_REL, AUTORUN_TEXT_MAX)
+        script_bytes = read_staged_bytes(dest / autorun.SCRIPT_REL, AUTORUN_TEXT_MAX)
+    except Refusal as refusal:
+        return {'plan': None, 'steps': 0, 'script': 'unreadable', 'problems': [f'{refusal.reason}: {refusal.detail}']}
+    if plan_bytes is None and script_bytes is None:
+        return None
+    problems = []
+    report = {'plan': None, 'steps': 0, 'script': 'present' if script_bytes is not None else 'absent',
+              'problems': problems}
+    if plan_bytes is None:
+        problems.append('autorun_plan_missing: a startup.nsh without SP11/PLAN.TXT cannot be checked against a plan')
+        return report
+    try:
+        plan = autorun.parse_plan_text(plan_bytes)
+        expected_script = autorun.render_script(plan)
+        expected_readme = autorun.readme_for_plan(build_readme_text(), plan).encode('ascii')
+    except autorun.PlanError as error:
+        problems.append(f'{error.reason}: {error.detail}')
+        return report
+    report['plan'], report['steps'] = plan.name, len(plan.steps)
+    for name, digest in sorted(plan.files().items()):
+        role = 'slbounce' if name in autorun.SLBOUNCE_BUILDS else 'app'
+        try:
+            found = validate_input_file(dest / 'SP11' / name, role)
+        except Refusal as refusal:
+            problems.append(f'SP11/{name}: {refusal.reason}')
+            continue
+        if found['sha256'] != digest:
+            problems.append(f'SP11/{name}: sha256 differs from SP11/PLAN.TXT')
+    if script_bytes is not None:
+        if script_bytes != expected_script:
+            problems.append('EFI/BOOT/startup.nsh differs from the script SP11/PLAN.TXT generates')
+        try:
+            if read_staged_bytes(dest / README_REL, AUTORUN_TEXT_MAX) != expected_readme:
+                problems.append('SP11/README.TXT does not say that autorun is enabled')
+        except Refusal as refusal:
+            problems.append(f'SP11/README.TXT: {refusal.reason}')
+    return report
+
+
+class Journal:
+    """Undo log for the edits autorun makes to a staged tree, so a failure part-way leaves the tree as it was."""
+
+    def __init__(self):
+        self.undo = []
+
+    def write(self, path: Path, data: bytes) -> None:
+        self.undo.append((path, path.read_bytes() if path.exists() else None))
+        write_file_deterministic(path, data, FILE_MODE)
+        if sha256_file(path) != sha256_bytes(data):
+            raise Refusal('copy_hash_mismatch', f'{path} does not read back as the bytes written')
+
+    def delete(self, path: Path) -> None:
+        self.undo.append((path, path.read_bytes()))
+        path.unlink()
+
+    def rollback(self) -> None:
+        """Puts every touched file back. Modes and times are normalized afterwards by finalize_permissions."""
+        for path, previous in reversed(self.undo):
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(previous)
+
+
+def marker_paths(dest: Path) -> list:
+    """The run-time markers (SP11/DONE<k>.TXT) in a staged tree. A real stick gets them from the Shell, not from here."""
+    directory = dest / 'SP11'
+    if find_symlink_component(directory) is not None or not directory.is_dir():
+        return []
+    return [path for path in sorted(directory.iterdir())
+            if autorun.MARKER_RE.fullmatch(path.name) and path.is_file() and not path.is_symlink()]
+
+
+def autorun_stage(dest: Path, args) -> dict:
+    hashes, sources = {}, {}
+    for name, path, digest in args.file:
+        if name in sources:
+            raise autorun.PlanError('file_given_twice', name)
+        sources[name], hashes[name] = Path(path), digest
+    plan = autorun.build_plan(args.name, args.step, hashes)
+    for name, path in sources.items():
+        if path.name.upper() in autorun.BANNED_NAMES:
+            raise autorun.PlanError('source_banned', f'{name}: {path}')
+    if autorun_findings(dest) is not None:
+        raise Refusal('autorun_already_present', 'the tree has a PLAN.TXT or a startup.nsh: run autorun --remove first')
+    base = cmd_verify(args)
+    if base['status'] != 'COMPLETE':
+        raise Refusal('autorun_base_not_complete', json.dumps({k: base[k] for k in (
+            'status', 'missing', 'manifest_mismatches', 'startup_nsh_found', 'pin_mismatches')}))
+    fresh = {}
+    for name in sorted(plan.files()):
+        facts, data = read_validated_input(sources[name], 'slbounce' if name in autorun.SLBOUNCE_BUILDS else 'app')
+        if facts['sha256'] != hashes[name]:
+            raise Refusal('file_hash_mismatch', f'{name}: {sources[name]} is {facts["sha256"]}, expected {hashes[name]}')
+        rel = f'SP11/{name}'
+        if (dest / rel).exists():
+            if sha256_file(dest / rel) != facts['sha256']:
+                raise Refusal('autorun_would_replace_staged_file', f'{rel} is already staged with other bytes')
+        else:
+            fresh[rel] = data
+    readme = read_staged_bytes(dest / README_REL, AUTORUN_TEXT_MAX)
+    if readme != build_readme_text().encode('ascii'):
+        raise Refusal('autorun_readme_unexpected', 'SP11/README.TXT is not the text this tool stages')
+    script = autorun.render_script(plan)
+    writes = dict(fresh)
+    writes[autorun.PLAN_REL] = autorun.render_plan_text(plan)
+    writes[README_REL] = autorun.readme_for_plan(readme.decode('ascii'), plan).encode('ascii')
+    entries = parse_manifest(read_staged_bytes(dest / MANIFEST_REL, AUTORUN_TEXT_MAX).decode('utf-8'))
+    entries.update({rel: sha256_bytes(data) for rel, data in writes.items()})
+    entries[autorun.SCRIPT_REL] = sha256_bytes(script)
+    writes[MANIFEST_REL] = render_manifest(entries).encode('utf-8')
+    writes[autorun.SCRIPT_REL] = script          # last: a script never exists without its plan and its files
+    journal = Journal()
+    try:
+        for rel, data in writes.items():
+            journal.write(dest / rel, data)
+        finalize_permissions(dest)
+        after = cmd_verify(args)
+        if after['status'] != 'COMPLETE':
+            raise Refusal('autorun_result_not_verified', json.dumps(after.get('autorun') or after['manifest_mismatches']))
+    except BaseException:
+        journal.rollback()
+        finalize_permissions(dest)
+        raise
+    return {
+        'status': 'AUTORUN_STAGED',
+        'dest': str(dest),
+        'plan': plan.name,
+        'steps': [{'step': k, 'load': step.slbounce, 'run': step.run_line} for k, step in enumerate(plan.steps, 1)],
+        'files': dict(sorted(plan.files().items())),
+        'files_written': sorted(writes),
+        'files_already_staged': sorted(f'SP11/{name}' for name in plan.files() if f'SP11/{name}' not in fresh),
+        'shell_pin': base['shell_pin'],
+    }
+
+
+def autorun_clear(dest: Path) -> dict:
+    removed = []
+    for path in marker_paths(dest):
+        path.unlink()
+        removed.append(f'SP11/{path.name}')
+    return {'status': 'AUTORUN_CLEARED', 'dest': str(dest), 'markers_removed': removed}
+
+
+def autorun_remove(dest: Path) -> dict:
+    report = autorun_findings(dest)
+    if report is None:
+        return {'status': 'AUTORUN_NOT_PRESENT', 'dest': str(dest)}
+    if report['problems']:
+        raise Refusal('autorun_tree_not_valid', '; '.join(report['problems']))
+    plan = autorun.parse_plan_text(read_staged_bytes(dest / autorun.PLAN_REL, AUTORUN_TEXT_MAX))
+    owned = ({autorun.PLAN_REL, autorun.SCRIPT_REL} | {f'SP11/{name}' for name in plan.files()}) - BASE_RELS
+    entries = parse_manifest(read_staged_bytes(dest / MANIFEST_REL, AUTORUN_TEXT_MAX).decode('utf-8'))
+    base_readme = build_readme_text().encode('ascii')
+    for rel in owned:
+        entries.pop(rel, None)
+    entries[README_REL] = sha256_bytes(base_readme)
+    doomed = [dest / rel for rel in sorted(owned, key=lambda rel: rel != autorun.SCRIPT_REL) if (dest / rel).exists()]
+    doomed += marker_paths(dest)
+    journal = Journal()
+    try:
+        for path in doomed:
+            journal.delete(path)
+        journal.write(dest / README_REL, base_readme)
+        journal.write(dest / MANIFEST_REL, render_manifest(entries).encode('utf-8'))
+        finalize_permissions(dest)
+        after = cmd_verify(argparse.Namespace(dest=dest, pins=None, no_pins=True))
+        if after['status'] == 'FAIL':
+            raise Refusal('autorun_remove_not_verified', json.dumps(after['manifest_mismatches']))
+    except BaseException:
+        journal.rollback()
+        finalize_permissions(dest)
+        raise
+    return {'status': 'AUTORUN_REMOVED', 'dest': str(dest),
+            'files_removed': sorted(path.relative_to(dest).as_posix() for path in doomed)}
+
+
+def cmd_autorun(args) -> dict:
+    dest = check_destination_safety(args.dest, must_exist=True)
+    try:
+        if args.clear or args.remove:
+            if args.name or args.file:
+                raise Refusal('autorun_options_conflict', '--name and --file describe a plan, not --clear or --remove')
+            return autorun_clear(dest) if args.clear else autorun_remove(dest)
+        return autorun_stage(dest, args)
+    except autorun.PlanError as error:
+        raise Refusal(error.reason, error.detail) from error
 
 
 def add_pin_options(parser: argparse.ArgumentParser) -> None:
@@ -699,6 +960,25 @@ def build_argparser() -> argparse.ArgumentParser:
                          help='exit 0 even if required items (e.g. tcblaunch) are missing')
     add_pin_options(verify)
 
+    auto = sub.add_parser('autorun', help='Opt in: make a staged tree run one plan step per boot from startup.nsh.')
+    auto.add_argument('--dest', type=Path, required=True,
+                      help='a directory `stage` made and `verify` accepts (never a mounted stick)')
+    action = auto.add_mutually_exclusive_group(required=True)
+    action.add_argument('--step', action='append', metavar='"SLBOUNCE.EFI APP.EFI [ARG]"',
+                        help='one plan step, in run order: an slbounce build to `load` once, then one application '
+                             'and its arguments (only the names and arguments sp11_autorun.py lists are accepted); '
+                             'repeat for each step')
+    action.add_argument('--clear', action='store_true',
+                        help='delete the SP11/DONE<k>.TXT markers, so the plan starts again at step 1')
+    action.add_argument('--remove', action='store_true',
+                        help='delete startup.nsh, PLAN.TXT, the markers and the files the plan added, and restore '
+                             'the default README.TXT and manifest')
+    auto.add_argument('--name', help='plan name, shown by the script and in PLAN.TXT (with --step)')
+    auto.add_argument('--file', nargs=3, action='append', default=[], metavar=('NAME', 'PATH', 'SHA256'),
+                      help='the file SP11/NAME comes from PATH, which must hash to SHA256; one per file the steps '
+                           'use (with --step)')
+    add_pin_options(auto)
+
     return ap
 
 
@@ -707,6 +987,8 @@ def main(argv=None) -> int:
     try:
         if args.command == 'stage':
             result = cmd_stage(args)
+        elif args.command == 'autorun':
+            result = cmd_autorun(args)
         else:
             result = cmd_verify(args)
     except Refusal as r:
@@ -714,7 +996,7 @@ def main(argv=None) -> int:
         return 1
 
     print(json.dumps(result, indent=2))
-    if args.command == 'stage':
+    if args.command in ('stage', 'autorun'):
         return 0
     if result['status'] == 'FAIL':
         return 1
