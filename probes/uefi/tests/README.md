@@ -11,15 +11,19 @@ standard virtual machine, not that the Surface Pro 11 behaves the same way.
 
 ```sh
 python3 tools/build-uefi-tests.py --soc x1e80100        # build/uefi/sp11-el2-tests.efi (hardware)
+python3 tools/build-uefi-tests.py --soc x1e80100 --variant declared   # build/uefi/sp11-el2-tests-declared.efi
 python3 tools/build-uefi-tests.py --variant all --soc x1e80100 --verify-reproducible
 python3 -B tools/test-uefi-tests.py                     # every host test, one command
 python3 -B tools/test-uefi-tests.py XNativeTests        # one class (or Class.test_name)
 ```
 
-The default probe build is untouched: `probe_main.c` has three additive hooks
-under `#if PROBE_TESTS_IMAGE` and preprocesses to the same text without the flag
-(its build ids change only because they hash the source). The tests image is
-produced only by `tools/build-uefi-tests.py`.
+The default probe build is untouched: `probe_main.c` has additive hooks under
+`#if PROBE_TESTS_IMAGE` and preprocesses to the same text without the flag (its build ids change
+only because they hash the source). The tests image is produced only by
+`tools/build-uefi-tests.py`. The `declared` variant adds one more block, under
+`PROBE_TESTS_IMAGE && TESTS_DECLARE_EBS_RANGES`; with that gate off, which is every other
+variant, `probe_main.c` and `hook.c` preprocess to exactly the text they had before the gate
+existed (see "The `declared` variant" below).
 
 ## Layout
 
@@ -37,7 +41,8 @@ produced only by `tools/build-uefi-tests.py`.
 | Privileged instructions (the only place) | `sys_aarch64.c`, `vectors_aarch64.c`, `sys.h` |
 | Entry hooks | `hook.c`, `tests_hook.h` |
 | Board descriptor cross-check | `desc.h`, `desc_none.c` (generated `desc_data.c` for hardware) |
-| Host tests | `test/test_x_*.c`, `test/suite_x.py`, `host/audit.py`, `host/nv2screen.py`, `../../../tools/test-uefi-tests-logic.c` |
+| Declared-ranges table and its check (`declared` variant only) | `ebs_ranges.[ch]` |
+| Host tests | `test/test_x_*.c`, `test/suite_x.py`, `test/suite_x_ebs.py`, `host/audit.py`, `host/nv2screen.py`, `../../../tools/test-uefi-tests-logic.c` |
 
 ## Safety design
 
@@ -135,6 +140,55 @@ produced only by `tools/build-uefi-tests.py`.
 * **A model result can never be mistaken for a measurement.** The label shows as
   `OBS-MODEL`, the record's evidence is EXPERIMENTAL and its tool is
   `SP11-X2-MODEL`; the monitor's gate refuses it on its evidence (tested).
+
+## The `declared` variant (opt-in)
+
+`-DTESTS_DECLARE_EBS_RANGES=1`, built only by `--variant declared` (`model-declared` is its
+emulator twin): the hardware image plus a declaration of the memory the image dirtied, for the
+reviewed slbounce fork built with `SLBOUNCE_SCOPED_SWEEP=1`. That build flushes only the ranges an
+application declares in a volatile UEFI variable and returns `EFI_ABORTED` from its
+ExitBootServices hook, printing nothing, when the variable is absent or names a range it cannot
+justify; q1n1 declares the same way. The default image declares nothing, so that build would
+refuse it. The hardware runs so far used a test-only slbounce with its sweep compiled out, which is
+not in the reviewed set. The default `sp11-el2-tests.efi` is unchanged: the gate is off in it.
+
+* **One range:** this image's whole PE image, `ImageBase` and `ImageSize` of its
+  `EFI_LOADED_IMAGE_PROTOCOL`, chunk cap 1 MiB. Every buffer the image reads after the bounce is
+  static storage inside it (`g_memmap_buf`, `g_ebs_map_buf`, `g_bounce`, `g_text`, the tests'
+  state, the EL1 stub, the VNCR page), so one range covers them. The stack and the framebuffer are
+  not declared (the framebuffer is a RESERVED descriptor on the unit, which the fork refuses by
+  design).
+* **The variable:** `Q1N1Sp11EbsRanges`, GUID `1a3c9e02-7b6f-4d81-9c2e-535031314552`, attributes
+  `EFI_VARIABLE_BOOTSERVICE_ACCESS` only, a 160-byte version-1 table. `ebs_ranges.h` is an
+  independently written copy of the layout q1n1 and the fork share; tests keep them in agreement.
+  It is written in `probe_main.c` after `tests_hook_pre_ebs` and the existing refusals and before
+  the ExitBootServices loop, which fetches a fresh memory map on every attempt, so nothing is
+  allocated between the final `GetMemoryMap` and ExitBootServices.
+* **Refusal before writing:** the range is checked against the image's own parsed map by the
+  fork's rule (inside exactly one descriptor, of type 1 to 6 or 9, with `EFI_MEMORY_WB`), plus a
+  page-aligned base, no wrap, and at most 512 descriptors (the fork's limit). A failure, a failed
+  `SetVariable` or a missing loaded-image protocol prints
+  `SP11PROBE EBS STATE=SKIPPED REASON=<why> BASE=... SIZE=...` (and `STATUS=...` for
+  `SetVariable`), waits 10 s and returns `EFI_ABORTED` without calling ExitBootServices. Success
+  prints `SP11PROBE EBSRANGES STATE=DECLARED RANGES=1 BASE=... SIZE=... STATUS=...`.
+* **Limits.** INFERRED: nothing the image reads after the bounce depends on lines that are not
+  declared (the firmware's stack, with the hook's context on it, among them); the earlier runs had
+  no sweep at all and worked, so declaring the image is at least as protective, which is inference
+  and not a test. The variable is volatile and is not deleted if ExitBootServices then fails; a
+  reset clears it. UNKNOWN until a run: that this firmware's map holds the image in one
+  descriptor that passes the rule (the X1 probe dumps, OBSERVED, have 226 to 227 descriptors and
+  `EFI_MEMORY_WB` set on every descriptor of the swept types, but do not say which holds this image).
+* **Tests:** `XEbsRangesTests`, `XDeclaredBuildTests`, `XDeclaredAuditTests` and
+  `XDeclaredQemuTests` in `test/suite_x_ebs.py` (the last also runs three test-only builds that
+  each make one step of the declaration fail, and checks the refusal line and that
+  ExitBootServices is never reached), and the native sections `ebs *` of
+  `test/test_x_ebs.c`: exact bytes, a differential run against `tools/sp11_ebs_sweep_model.py`,
+  seeded builder bugs, the gate-off text against the baseline revision (`HEAD`, or
+  `UEFI_TESTS_BASELINE_REV`; a baseline that already has the gate is a SKIP, never a pass), and
+  the audit's pin on the one `set_variable` (`host/audit.py`). `SLBOUNCE_SP11_DIR` additionally
+  compiles the fork's own validator and range rule against the builder (SKIP when unset).
+
+**Hardware status of this variant: NOT RUN.**
 
 ## Public facts used
 

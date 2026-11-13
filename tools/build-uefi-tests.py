@@ -11,8 +11,14 @@ and nothing ever starts it by itself. The operator copies it to the USB stick
 and starts it after the X1 probe has shown that the machine is at EL2; see
 docs/SP11-X2-TESTS.md.
 
-Images (the hardware image is the only one that is shipped):
-  hardware     build/uefi/sp11-el2-tests.efi                 for the Surface Pro 11
+Images for the Surface Pro 11 (build/uefi/, --soc required):
+  hardware     build/uefi/sp11-el2-tests.efi                 the default: declares nothing to slbounce
+  declared     build/uefi/sp11-el2-tests-declared.efi        as hardware, plus a declared-ranges table
+                                                             for the reviewed scoped-sweep slbounce
+                                                             (-DTESTS_DECLARE_EBS_RANGES=1); built only
+                                                             on request, see docs/SP11-X2-TESTS.md
+
+Emulator images (build/uefi/test/, never for hardware):
   model        build/uefi/test/sp11-el2-tests-model.efi      emulator runs: labels say MODEL,
                                                              short timers, holds the final screen,
                                                              adds the machinery self-tests
@@ -23,8 +29,12 @@ Images (the hardware image is the only one that is shipped):
                                                              is made before ExitBootServices, to
                                                              prove the fatal page does not depend
                                                              on the console
+  model-declared  build/uefi/test/sp11-el2-tests-model-declared.efi
+                                                             as model, plus the declared-ranges
+                                                             table, to run the declaration under
+                                                             EDK2
 
---soc is required for the hardware image: the NV2 record carries it, and the
+--soc is required for the hardware images: the NV2 record carries it, and the
 monitor's gate refuses a record for another SoC, so it is an explicit choice and
 never a default. The descriptor (config/boards/sp11.json by default) supplies
 the values the tests cross-check ACPI against; the emulator images use none.
@@ -93,24 +103,33 @@ class Variant:
     name: str
     image: str
     defines: tuple
-    shipped: bool
+    shipped: bool          # for the machine: written next to the hardware image, needs --soc
     uses_descriptor: bool
+    extra_sources: tuple = ()   # compiled into this variant only, relative to probes/uefi/tests
+    default: bool = False       # built when no --variant is given
 
 
 _BASE = ("PROBE_TESTS_IMAGE=1",)
 _MODEL = _BASE + ("TESTS_MODEL_BUILD=1", "PROBE_FAST_TEST=1", "TESTS_NO_RESET=1", "TESTS_SELFTEST=1")
+_DECLARE = ("TESTS_DECLARE_EBS_RANGES=1",)
+_DECLARE_SOURCES = ("ebs_ranges.c",)
 VARIANTS = {
     v.name: v
     for v in (
-        Variant("hardware", "sp11-el2-tests.efi", _BASE, True, True),
+        Variant("hardware", "sp11-el2-tests.efi", _BASE, True, True, default=True),
+        Variant("declared", "sp11-el2-tests-declared.efi", _BASE + _DECLARE, True, True,
+                _DECLARE_SOURCES),
         Variant("model", "sp11-el2-tests-model.efi", _MODEL, False, False),
         Variant("model-fatal", "sp11-el2-tests-model-fatal.efi", _MODEL + ("TESTS_SELFTEST_FATAL=1",),
                 False, False),
         Variant("model-fatal-pre", "sp11-el2-tests-model-fatal-pre.efi",
                 _MODEL + ("TESTS_SELFTEST_FATAL_PRE=1",), False, False),
+        Variant("model-declared", "sp11-el2-tests-model-declared.efi", _MODEL + _DECLARE, False, False,
+                _DECLARE_SOURCES),
     )
 }
 SHIPPED = tuple(v.name for v in VARIANTS.values() if v.shipped)
+DEFAULT = tuple(v.name for v in VARIANTS.values() if v.default)
 
 
 class DescriptorError(Exception):
@@ -170,6 +189,7 @@ def sources_of(variant: Variant) -> list:
     """(repo-relative path, kind) for every compiled file, descriptor source aside."""
     files = [f"probes/uefi/{n}" for n in bup.BASE_SOURCES]
     files += [f"probes/uefi/tests/{n}" for n in TESTS_SOURCES]
+    files += [f"probes/uefi/tests/{n}" for n in variant.extra_sources]
     if not variant.uses_descriptor:
         files.append("probes/uefi/tests/desc_none.c")
     return files
@@ -280,9 +300,9 @@ def main(argv=None) -> int:
     ap.add_argument("--variant", action="append", choices=[*VARIANTS, "all"],
                     help="variant to build (repeatable); default: the hardware image")
     ap.add_argument("--soc", choices=sorted(SOC_CODES),
-                    help="SoC recorded in the NV2 record; required for the hardware image")
+                    help="SoC recorded in the NV2 record; required for the hardware images")
     ap.add_argument("--descriptor", type=Path, default=DEFAULT_DESCRIPTOR,
-                    help="board descriptor for the hardware image (default: %(default)s)")
+                    help="board descriptor for the hardware images (default: %(default)s)")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT, help="output directory")
     ap.add_argument("--keep-objects", action="store_true", help="keep the per-variant .obj files")
     ap.add_argument("--require-mmio-map", action="store_true",
@@ -295,14 +315,14 @@ def main(argv=None) -> int:
     ap.add_argument("--json", action="store_true", help="print results as JSON")
     args = ap.parse_args(argv)
 
-    names = list(SHIPPED) if not args.variant else args.variant
+    names = list(DEFAULT) if not args.variant else args.variant
     if "all" in names:
         names = list(VARIANTS)
     variants = [VARIANTS[n] for n in dict.fromkeys(names)]
     if args.require_mmio_map:
         variants = [replace(v, defines=v.defines + ("TESTS_REQUIRE_MMIO_IN_MAP=1",)) for v in variants]
     if any(v.shipped for v in variants) and args.soc is None:
-        print("REFUSED: --soc is required for the hardware image (x1e80100 for the Surface Pro 11); "
+        print("REFUSED: --soc is required for the hardware images (x1e80100 for the Surface Pro 11); "
               "the NV2 record carries it and the monitor's gate refuses a record for another SoC",
               file=sys.stderr)
         return 2

@@ -217,9 +217,69 @@ def audit_verified_writes(root: Path) -> list:
     return problems
 
 
+def _code_only(text: str) -> str:
+    """The text with comments and string literals blanked and every newline kept."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        two = text[i:i + 2]
+        if two == "/*":
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append(re.sub(r"[^\n]", " ", text[i:j]))
+            i = j
+        elif two == "//":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i))
+            i = j
+        elif text[i] == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(re.sub(r"[^\n]", " ", text[i:j + 1]))
+            i = j + 1
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+# The one place a UEFI variable is written: the declared-ranges step of the `declared` variant
+# (probe_main.c, tests/ebs_ranges.h). Any other mention of SetVariable is a new write path that
+# must be reviewed, so the audit refuses it.
+VARIABLE_WRITE_FILE = "probe_main.c"
+VARIABLE_WRITE_GATE = "PROBE_TESTS_IMAGE && TESTS_DECLARE_EBS_RANGES"
+_SET_VARIABLE = re.compile(r"\bset_variable\b")
+
+
+def audit_variable_writes(root: Path) -> list:
+    """`set_variable` appears only in probe_main.c, only inside the declared-ranges gate."""
+    problems = []
+    base = root / "probes" / "uefi"
+    for path in sorted([*base.glob("*.c"), *(base / "tests").glob("*.c")]):
+        gates = []  # one entry per open conditional: its #if condition, or None (#ifdef, #ifndef, #else)
+        for n, line in enumerate(_code_only(path.read_text(encoding="utf-8")).splitlines(), 1):
+            m = re.match(r"\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)", line)
+            if m:
+                kind, rest = m.group(1), " ".join(m.group(2).split())
+                if kind in ("if", "ifdef", "ifndef"):
+                    gates.append(rest if kind == "if" else None)
+                elif kind in ("elif", "else") and gates:
+                    gates[-1] = None
+                elif kind == "endif" and gates:
+                    gates.pop()
+                continue
+            if _SET_VARIABLE.search(line):
+                if path.name != VARIABLE_WRITE_FILE or path.parent != base:
+                    problems.append(f"{path.name}:{n}: set_variable outside probe_main.c")
+                elif VARIABLE_WRITE_GATE not in gates:
+                    problems.append(f"{path.name}:{n}: set_variable outside `#if {VARIABLE_WRITE_GATE}`")
+    return problems
+
+
 def audit_sources(root: Path) -> list:
     """No store through a volatile device pointer, no write member on the bus interface."""
-    problems = audit_state_model(root) + audit_verified_writes(root)
+    problems = audit_state_model(root) + audit_verified_writes(root) + audit_variable_writes(root)
     tests = root / "probes" / "uefi" / "tests"
     for path in sorted(tests.glob("*.[ch]")):
         text = path.read_text(encoding="utf-8")

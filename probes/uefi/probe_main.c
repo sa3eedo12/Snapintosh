@@ -43,9 +43,19 @@
 #ifndef PROBE_TESTS_IMAGE
 #define PROBE_TESTS_IMAGE 0
 #endif
+#ifndef TESTS_DECLARE_EBS_RANGES
+#define TESTS_DECLARE_EBS_RANGES 0
+#endif
+
+#if TESTS_DECLARE_EBS_RANGES && !PROBE_TESTS_IMAGE
+#error "TESTS_DECLARE_EBS_RANGES belongs to the X2 tests image (PROBE_TESTS_IMAGE=1)"
+#endif
 
 #if PROBE_TESTS_IMAGE
 #include "tests/tests_hook.h"
+#endif
+#if PROBE_TESTS_IMAGE && TESTS_DECLARE_EBS_RANGES
+#include "tests/ebs_ranges.h"
 #endif
 
 _Static_assert(sizeof(PROBE_BUILD_ID) == PROBE_BUILD_ID_LEN + 1,
@@ -564,6 +574,94 @@ static void print_pre_ebs_summary(const probe_facts *f, unsigned gop_candidates,
 
 /* ---- ExitBootServices ---- */
 
+#if PROBE_TESTS_IMAGE && TESTS_DECLARE_EBS_RANGES
+/* In .rdata, like g_build_tag: `strings` on a stick's image says whether it declares a range. */
+static const char g_ebs_tag[] __attribute__((used)) = "SP11X2-EBS=DECLARED-IMAGE-RANGE";
+
+/* efi_types.h leaves SetVariable an untyped placeholder, like every slot the probe itself never
+ * calls, and that shared header is left alone: it is part of every image's preprocessed text, which
+ * the images without this gate must keep. The one call is typed here instead. */
+typedef efi_status (*ebs_set_variable_fn)(const efi_char16 *name, const efi_guid *guid,
+                                          uint32_t attributes, efi_uintn size, const void *data);
+_Static_assert(offsetof(efi_runtime_services, set_variable) == 88, "SetVariable slot");
+_Static_assert(offsetof(efi_loaded_image, image_size) == 72, "ImageSize slot");
+
+/* The `declared` variant of the X2 image. The reviewed slbounce (SLBOUNCE_SCOPED_SWEEP=1) flushes
+ * through the data cache only what the application declared in a volatile UEFI variable
+ * (tests/ebs_ranges.h), and refuses ExitBootServices otherwise. The one range this image can name
+ * is its own whole PE image, ImageBase and ImageSize from EFI_LOADED_IMAGE_PROTOCOL: every working
+ * buffer it reads after the bounce is static storage inside it (g_memmap_buf, g_ebs_map_buf,
+ * g_bounce, g_text, the tests' static state, the EL1 stub and the VNCR page), and a loaded image
+ * is a loader allocation, a type the fork sweeps.
+ *
+ * Not declared, on purpose: the stack, which the firmware provides and which is not part of the
+ * image, and the framebuffer, which on the unit is a RESERVED descriptor (OBSERVED in the X1 probe
+ * dumps), a type the fork refuses by design. INFERRED, not tested: that nothing read after the
+ * bounce depends on those lines. The runs made before this variant existed used a slbounce build
+ * with no sweep at all, so declaring the image is at least as protective as that build.
+ *
+ * The range is checked against this image's own map by the rule the fork applies before anything
+ * is written: the fork's refusal is silent, so a refusal here, which names its reason and never
+ * reaches ExitBootServices, is the only readable one. This runs before exit_boot_services_loop,
+ * which fetches a fresh map on every attempt, so whatever SetVariable allocates cannot make that
+ * map stale. Returns 0 once the table is written, otherwise prints why and returns -1. */
+static int declare_ebs_ranges(efi_handle image, efi_system_table *st)
+{
+    static const efi_guid loaded_image_guid = EFI_GUID_LOADED_IMAGE;
+    static const efi_guid variable_guid = TESTS_EBS_GUID_INIT;
+    static const efi_char16 variable_name[] = TESTS_EBS_VARIABLE_NAME_U16;
+    ebs_set_variable_fn set_variable = (ebs_set_variable_fn)st->runtime_services->set_variable;
+    efi_loaded_image *li = NULL;
+    tests_ebs_table table;
+    const char *reason = NULL;
+    efi_status status = EFI_SUCCESS;
+    uint64_t base = 0;
+    uint64_t size = 0;
+    con_line l;
+
+    if (EFI_IS_ERROR(st->boot_services->handle_protocol(image, &loaded_image_guid, (void **)&li)) ||
+        li == NULL) {
+        reason = "NO LOADED IMAGE";
+    } else {
+        int why;
+
+        base = (uint64_t)(uintptr_t)li->image_base;
+        size = li->image_size;
+        why = tests_ebs_build(&table, &g_memmap, base, size);
+        if (why != TESTS_EBS_OK) {
+            reason = tests_ebs_status_name(why);
+        } else {
+            status = set_variable != NULL
+                         ? set_variable(variable_name, &variable_guid, TESTS_EBS_VARIABLE_ATTRIBUTES,
+                                        sizeof table, &table)
+                         : EFI_UNSUPPORTED;
+            if (EFI_IS_ERROR(status))
+                reason = "SET VARIABLE FAILED";
+        }
+    }
+
+    if (reason != NULL) {
+        line_begin(&l, "EBS");
+        line_str(&l, "STATE", "SKIPPED");
+        line_str(&l, "REASON", reason);
+        line_hex(&l, "BASE", base, 16);
+        line_hex(&l, "SIZE", size, 16);
+        if (EFI_IS_ERROR(status))
+            line_hex(&l, "STATUS", status, 16);
+        line_end(&l);
+        return -1;
+    }
+    line_begin(&l, "EBSRANGES");
+    line_str(&l, "STATE", "DECLARED");
+    line_dec(&l, "RANGES", table.count);
+    line_hex(&l, "BASE", base, 16);
+    line_hex(&l, "SIZE", size, 16);
+    line_hex(&l, "STATUS", status, 16);
+    line_end(&l);
+    return 0;
+}
+#endif
+
 static efi_status exit_boot_services_loop(efi_handle image, efi_system_table *st, probe_facts *f)
 {
     efi_boot_services *bs = st->boot_services;
@@ -822,6 +920,13 @@ efi_status efi_main(efi_handle image, efi_system_table *st)
         (void)bs->stall(10u * 1000000u);
         return EFI_ABORTED;
     }
+
+#if PROBE_TESTS_IMAGE && TESTS_DECLARE_EBS_RANGES
+    if (declare_ebs_ranges(image, st) != 0) {
+        (void)bs->stall(10u * 1000000u);
+        return EFI_ABORTED;
+    }
+#endif
 
     if (PROBE_PRE_EBS_STALL_S != 0) {
         line_begin(&l, "EBS");

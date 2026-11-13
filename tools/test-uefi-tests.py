@@ -17,12 +17,28 @@ how the machine behaves. What it does say, per suite (probes/uefi/tests/test/sui
     XQemuTests     the model image under QEMU with EDK2, booted directly and, when the
                    pinned UEFI Shell is available, started from it as the stick does
 
+and, for the `declared` variant (probes/uefi/tests/test/suite_x_ebs.py):
+
+    XEbsRangesTests      the declared-ranges table builder against the Python model of the
+                         reviewed slbounce's sweep, against that fork's own validator and sweep
+                         when SLBOUNCE_SP11_DIR names it, and against seeded bugs
+    XDeclaredBuildTests  the variants, the images' contents and, with the gate off, the proof
+                         that the text of probe_main.c and hook.c is the baseline revision's
+    XDeclaredAuditTests  the source audit's pin on the one place a UEFI variable is written
+    XDeclaredQemuTests   the model image of the variant under QEMU with EDK2, and three test-only
+                         builds of it that each make one step of the declaration fail on purpose
+
 It reuses the probe's test kit (probes/uefi/test/uefi_testkit.py) with its own
 work directory, build/uefi/tests-work.
 
 Environment (the probe's switches apply):
     SP11_UEFI_SHELL=<file>       the pinned UEFI Shell (checked against tools/sp11-boot-media-pins.json
                                  before it is booted); unset or no file: the Shell run SKIPs
+    SLBOUNCE_SP11_DIR=<dir>      a checkout of the reviewed slbounce fork (needs src/sp11-ebs-ranges.h and
+                                 src/sp11_scoped_sweep.[ch]); unset: the test that compiles its
+                                 validator and sweep against the builder's bytes SKIPs
+    UEFI_TESTS_BASELINE_REV=<rev>  the revision whose text probe_main.c and hook.c must keep with the
+                                 gate off (default HEAD; a revision that already has the gate SKIPs)
     UEFI_PROBE_SKIP_QEMU=1       skip the QEMU scenarios
     UEFI_PROBE_KEEP=1            keep build/uefi/tests-work for inspection
     UEFI_PROBE_QEMU, UEFI_PROBE_EDK2_CODE, UEFI_PROBE_EDK2_VARS
@@ -51,6 +67,9 @@ import uefi_testkit as kit  # noqa: E402
 kit.WORK = ROOT / "build" / "uefi" / "tests-work"
 
 import suite_x  # noqa: E402
+import suite_x_ebs  # noqa: E402
+
+SUITE_MODULES = (suite_x, suite_x_ebs)
 
 
 def iter_tests(suite):
@@ -64,11 +83,17 @@ def iter_tests(suite):
 def load(names):
     loader = unittest.defaultTestLoader
     if not names:
-        return unittest.TestSuite(loader.loadTestsFromModule(suite_x))
+        return unittest.TestSuite(loader.loadTestsFromModule(m) for m in SUITE_MODULES)
     chosen = []
     for name in names:
+        owner = name.split(".")[0]
+        home = [m for m in SUITE_MODULES if isinstance(getattr(m, owner, None), type)
+                and issubclass(getattr(m, owner), kit.Base) and getattr(m, owner).__module__ == m.__name__]
+        if not home:
+            print(f"ERROR: no test class named {owner!r} in {', '.join(m.__name__ for m in SUITE_MODULES)}")
+            sys.exit(2)
         try:
-            chosen.append(loader.loadTestsFromName(name, suite_x))
+            chosen.append(loader.loadTestsFromName(name, home[0]))
         except (AttributeError, ImportError) as exc:
             print(f"ERROR: cannot load {name!r}: {exc}")
             sys.exit(2)

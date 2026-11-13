@@ -13,6 +13,9 @@
                    through the monitor's own gate logic, the retyped screen, a guest at
                    EL1, the fatal page
 
+The `declared` variant (the declared-ranges table for the reviewed slbounce) has its own
+module, suite_x_ebs.py, which tools/test-uefi-tests.py runs with this one.
+
 QEMU is a model. A PASS there says the image's control flow, record and screen
 work against a standard firmware and a standard virtual machine; it says nothing
 about the Surface Pro 11. The record such a run writes is EXPERIMENTAL and is
@@ -47,7 +50,8 @@ X_SECTIONS = ("ids and nv classes", "faulty id images", "syndrome and hcr", "gua
               "pcie and nvme", "smmu timer zva misc", "device windows", "report and layout",
               "stick writer",
               "hook: clean run", "hook: cleanup failures", "hook: console deferral",
-              "hook: fatal page", "hook: phase b fallback")
+              "hook: fatal page", "hook: phase b fallback",
+              "ebs table layout", "ebs table bytes", "ebs range check", "ebs range model")
 # Sources of the image that are not part of the host build: the entry hook and
 # the two files made of privileged instructions (audited as built, not run).
 NOT_NATIVE = {"hook.c", "sys_aarch64.c", "vectors_aarch64.c"}
@@ -338,9 +342,11 @@ class XBuildTests(Base):
         for name, m in manifests.items():
             if any(d.startswith("TESTS_REQUIRE_MMIO_IN_MAP") for d in m["defines"]):
                 problems.append(f"{name} turns the strict window policy on by default")
-        if images["hardware"].image.parent.name != "ximages" or \
-                images["model"].image.parent.name != "test":
-            problems.append("only the hardware image belongs in the shipped output directory")
+        for name, built in images.items():
+            want = "ximages" if build_tool().VARIANTS[name].shipped else "test"
+            if built.image.parent.name != want:
+                problems.append(f"{name} is in {built.image.parent.name}/, expected {want}/: only the images "
+                                f"for the machine belong next to the hardware image")
         ids = {r.build_id for r in images.values()}
         if len(ids) != len(images):
             problems.append("two variants share a build id")
@@ -589,14 +595,15 @@ def machine(spec):
 
 
 def scenario(name, variant, spec, capture, el2=True, until=None, capture_when=None, shell=False):
-    """`shell`: boot the pinned UEFI Shell; a test-only STARTUP.NSH types the operator's command."""
+    """`variant` is a key of the build tool's VARIANTS or the path of an image built elsewhere.
+    `shell`: boot the pinned UEFI Shell; a test-only STARTUP.NSH types the operator's command."""
     def build():
         launcher = kit.pinned_shell() if shell else None  # skips before anything is booted
         try:
             assets = qemu_probe.find_assets()
         except qemu_probe.Unavailable as exc:
             raise unittest.SkipTest(str(exc))
-        image = x_images()[variant].image
+        image = x_images()[variant].image if isinstance(variant, str) else variant
         cfg = qemu_probe.RunConfig(name=f"x-{name}", efi=launcher or image,
                                    extra_files=kit.shell_launch_files(image) if launcher else {},
                                    workdir=kit.work_dir(f"xq-{name}") / "run", capture_seconds=capture,

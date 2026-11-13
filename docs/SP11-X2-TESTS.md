@@ -112,9 +112,10 @@ actual monitor build is separate, later work.
   python3 -B tools/test-uefi-tests.py                       # host tests, one command
   ```
 
-  Only `sp11-el2-tests.efi` is for the machine. The `test/` directory holds
-  emulator builds (`model`, `model-fatal`, `model-fatal-pre`): never run those on
-  hardware, they shorten the timers and skip the reset.
+  Only `sp11-el2-tests.efi` is for the machine, and `sp11-el2-tests-declared.efi` only under
+  the reviewed scoped-sweep slbounce (section 10). The `test/` directory holds
+  emulator builds (`model`, `model-fatal`, `model-fatal-pre`, `model-declared`): never run those
+  on hardware, they shorten the timers and skip the reset.
 * The device tests (T05 to T07) refuse a window whose base is zero, misaligned,
   wrapping or in memory the UEFI map calls RAM, firmware or reserved. A window the
   map does not mention at all is read by default (the map of the QEMU machine lists
@@ -292,8 +293,8 @@ EXPERIMENTAL under the tool name `SP11-X2-MODEL`, and the gate refuses it.
   nothing to the stick and did not call ExitBootServices. The page is drawn on the
   framebuffer only, before ExitBootServices as well as after, and nothing is
   written to the console after it.
-* Do not run the `model`, `model-fatal` or `model-fatal-pre` images, and do not edit
-  tracked sources between building the image and running it.
+* Do not run the `model`, `model-fatal`, `model-fatal-pre` or `model-declared` images, and do not
+  edit tracked sources between building the image and running it.
 * Do not run it on another machine than the one you are reporting about: the
   NV2 record names the SoC, MIDR and REVIDR, and the monitor's gate compares them.
 
@@ -364,3 +365,60 @@ not only T05 to T09.
   that no `FATAL: CLEANUP FAILED` page appears, and whether an asynchronous SError
   ever arrives during a guarded read (T05 to T07 `FAULTS=` rows; the continuation
   masks it and gives up on that register, but no run has ever taken one).
+
+## 10. The `declared` image, for the reviewed scoped-sweep slbounce
+
+**Hardware status of this step: NOT RUN.** The host tests and the QEMU run below are models; they
+say nothing about the unit's firmware or about slbounce running on it.
+
+The image above never tells slbounce which memory it dirtied. The reviewed slbounce fork
+(`SLBOUNCE_SCOPED_SWEEP=1`) flushes only the physical ranges an application declares in a volatile
+UEFI variable before its Secure-Launch bounce, and returns `EFI_ABORTED` from its ExitBootServices
+hook, printing nothing, when the variable is absent or names a range it cannot justify (q1n1
+declares its ranges this way; see [SP11-Q1N1-BOOT-STUDY.md](SP11-Q1N1-BOOT-STUDY.md) section 4.4).
+Under that build `sp11-el2-tests.efi` would simply be refused at ExitBootServices (read from the
+fork's source, `src/bounce_main.c`; not run). Runs 1 to 4
+above used a test-only slbounce build with its cache sweep compiled out, which is not part of the
+reviewed set. The `declared` image is the same image plus that declaration, so the NV2 test can be
+run under the reviewed build. It is separate and opt-in; the image above is unchanged (a host test
+compares the text of `probe_main.c` and `hook.c` with the gate off against the revision from
+before this variant existed).
+
+```sh
+python3 tools/build-uefi-tests.py --soc x1e80100 --variant declared    # build/uefi/sp11-el2-tests-declared.efi
+```
+
+It is never built by default and needs `--soc` like the hardware image. `strings` on the image
+shows `SP11X2-EBS=DECLARED-IMAGE-RANGE`; the hardware image has no such string.
+
+* **What it declares:** exactly one range, this image's whole PE image (`ImageBase` and
+  `ImageSize` of its loaded-image protocol), with a 1 MiB chunk cap. Every buffer the image reads
+  after the bounce (the memory-map buffers, the dump and result text, the tests' state, the EL1
+  stub and the VNCR page) is static storage inside it, so one range covers them. The stack and the
+  framebuffer are not declared: the stack is the firmware's, and the framebuffer is a RESERVED
+  descriptor on the unit, which the fork refuses by design.
+* **What it checks first:** the range against the image's own memory map by the fork's rule
+  (inside exactly one descriptor, of type 1 to 6 or 9, with write-back), plus a page-aligned
+  base, no wrap and at most 512 descriptors. The fork refuses silently, so a refusal here is the
+  readable one: a firmware console line `SP11PROBE EBS STATE=SKIPPED REASON=...` with `BASE` and
+  `SIZE` (whether that console is visible on this machine is UNKNOWN, as for the `SP11X2` lines of
+  section 2), after which the image waits 10 s and returns to the Shell without calling
+  ExitBootServices. The reasons are `RANGE NOT IN ONE DESCRIPTOR`, `DESCRIPTOR TYPE NOT SWEPT`,
+  `DESCRIPTOR NOT WRITE-BACK`, `RANGE BASE UNALIGNED`, `RANGE SIZE ZERO`, `RANGE WRAPS`,
+  `MAP EMPTY`, `MAP OVER 512 DESCRIPTORS`, `MAP BAD DESCRIPTOR`, `NO LOADED IMAGE` and
+  `SET VARIABLE FAILED` (with `STATUS=`). Record the line and report it.
+* **What success looks like:** `SP11PROBE EBSRANGES STATE=DECLARED RANGES=1 BASE=0x... SIZE=0x...
+  STATUS=0x0000000000000000` before the usual `EBS STATE=CALLING`.
+* **Limits.** INFERRED, not tested: nothing the image reads after the bounce depends on the lines
+  that are not declared, the firmware's stack among them. The runs without any sweep worked, so
+  declaring the image is at least as protective as them. UNKNOWN until a run: that this
+  firmware's memory map holds the image in one descriptor that passes the rule. The X1 probe
+  dumps (OBSERVED) list 226 to 227 descriptors, under the fork's limit of 512, and every
+  descriptor of the swept types has write-back set, but they do not say which descriptor holds
+  this image. The variable is volatile and the image does not delete it if ExitBootServices then
+  fails; a reset clears it. A slbounce build that does not read the variable ignores it (INFERRED).
+
+Tests: `python3 -B tools/test-uefi-tests.py XEbsRangesTests XDeclaredBuildTests XDeclaredAuditTests
+XDeclaredQemuTests`. Setting `SLBOUNCE_SP11_DIR` to a checkout of the fork also compiles the
+fork's own validator and range rule against the bytes the image builds; without it that test is
+reported as SKIP.

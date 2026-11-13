@@ -38,6 +38,17 @@ void test_x_hook_cleanup_failures(void);
 void test_x_hook_console(void);
 void test_x_hook_fatal_page(void);
 void test_x_hook_phase_b_fallback(void);
+void test_x_ebs_layout(void);
+void test_x_ebs_bytes(void);
+void test_x_ebs_check(void);
+void test_x_ebs_model(void);
+#ifdef X_SLBOUNCE
+void test_x_ebs_slbounce(void);
+#endif
+
+/* `--ebs-cases`: reads declared-range cases from standard input and prints what the table
+ * builder made of each, for the differential run against tools/sp11_ebs_sweep_model.py. */
+int x_ebs_cases(void);
 
 /* `--emit-records`: one block per fixture record, for the Python round trip
  * through tools/nv2_record.py. */
