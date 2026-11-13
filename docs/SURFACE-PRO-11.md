@@ -1166,6 +1166,22 @@ none of it today), the DRAM-retention test and the D5 exercise on a real link
 failure (NOT RUN), and hub support (q1n1's xHCI host addresses root-port
 devices only).
 
+**Fewer boots: autorun, the declared X2 image and stage S0 (host side only; EXPERIMENTAL; hardware NOT RUN).**
+Typing `fsN:`, `load` and the image names by hand cost boots, so
+`tools/stage-sp11-boot-media.py autorun` can stage a `startup.nsh` that runs one allow-listed step per boot
+([RUNNING.md](RUNNING.md)). The X2 test image has an opt-in `declared` variant that declares its own image as the one
+range of the scoped sweep, so the reviewed slbounce no longer refuses it and M8 (FEAT_NV2 with `E2H` clear) does not need
+the test-only no-sweep build. [SP11-STICK-LOG.md](SP11-STICK-LOG.md) designs an EL2 writer that puts results on the stick
+(B3, the first step of B2) with stop criteria and two authorizations that nobody has granted: A1, the first write to an
+xHCI register at EL2, and A2, the first sector written to the stick. Its stage S0 is built in the q1n1 fork as an opt-in,
+read-only survey (`Q1N1_SP11_STK_SURVEY`, branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`; its own image
+`q1n1-stk.efi`, run with `--el2`). Before ExitBootServices it prints the stick's device path and the firmware's USB facts;
+after the bounce it reads, with loads only through the recoverable-fault guard, the clock controller, the two Denali
+controllers (only when powered and clocked) and the SMMU stream mappings. The operator answered the study's Q1: the stick
+sits behind an adapter or hub, which agrees with the two USB nodes in its path (INFERRED); q1n1's xHCI driver cannot address
+a device behind a hub, so the study's S1.5 or the survey's firmware-slot walk is needed. The default q1n1 builds are
+byte-identical to the commit before the survey (`tools/test-q1n1-sp11-entry.py` in the fork).
+
 ### WS-C: monitor core on Oryon v1
 
 | Item | Acceptance criteria |
@@ -1710,6 +1726,9 @@ maintainer's acceptance ([section 11.2](#112-decisions-for-the-project-owner)).
   image),
   [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) (USB, the D5 ladder and the
   persistent log: B2, B3),
+  [SP11-STICK-LOG.md](SP11-STICK-LOG.md) (an EL2 writer to the boot stick, its
+  safety analysis and stages; its S0 survey is built in the q1n1 fork: B3, the
+  first step of B2),
   [SP11-Q1N1-BOOT-STUDY.md](SP11-Q1N1-BOOT-STUDY.md) (q1n1's entry, chainload
   and console path on Hamoa: B1),
   [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md) (the NVMe window contract and

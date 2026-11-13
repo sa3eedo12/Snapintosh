@@ -1,7 +1,9 @@
 # Surface Pro 11 stick log: reaching the boot stick from EL2 (B3, and the first step of B2)
 
 **Design study with host-side groundwork. UNIMPLEMENTED on hardware. Hardware status: NOT RUN.** Nothing here ran on a
-Surface Pro 11, and nothing in q1n1 or slbounce was changed. It answers plan item B3 (a persistent log sink) and the
+Surface Pro 11. When the study was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as
+an opt-in, read-only survey in the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits
+`8ed0c4f` and `8235433`), EXPERIMENTAL and hardware NOT RUN. Stages S1 and later do not exist. It answers plan item B3 (a persistent log sink) and the
 first deliverable of B2 (EL2 USB host bring-up) of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) and
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) as far as public sources and a host can: which controller the boot stick
 most likely sits on, what firmware and the slbounce bounce leave behind, how a log can reach the stick from EL2 without a
@@ -29,10 +31,12 @@ guarded log writer, and their tests (section 8).
    not only a header, and the writer refuses to overwrite a sector that does not still hold its own tag. A wrong, stale or
    hostile map then cannot damage the stick's file system, which is the failure that matters most. The per-sector tag is also
    what makes a later q1n1 FAT walker (workflow W2) self-verifying.
-3. **The stick probably sits behind a USB hub (INFERRED).** The UEFI path has two USB nodes; in EDK2's code each USB node is
+3. **The stick probably sits behind a USB hub (INFERRED; the operator confirmed an adapter or hub, Q1 in section 11).** The
+   UEFI path has two USB nodes; in EDK2's code each USB node is
    one device on the way down, so the second node is a device behind the first, a hub (section 3.1). q1n1's xHCI driver
-   cannot address a device behind a hub (G03 of the host-link study). The cheapest fix is an operator answer (Q1, section 11):
-   plug the stick straight into the unit. If that is impossible, hub support is stage S1.5 (about 250 to 350 lines, 2 to 4
+   cannot address a device behind a hub (G03 of the host-link study). The cheapest fix was an operator answer (Q1, section 11):
+   plug the stick straight into the unit. Whether that is possible is still open: the operator's answer was only that the
+   stick goes through the adapter. Hub support is stage S1.5 (about 250 to 350 lines, 2 to 4
    more boots), or the survey shows that adopting the firmware's own slot state (S1a) avoids it.
 4. **Which of the two Denali-enabled controllers the stick uses is UNKNOWN** (`usb_1_ss0` at `0x0a600000` or `usb_1_ss1` at
    `0x0a800000`). Neither the path nor any pinned fact says. The firmware's PCI I/O interface on the controller handle (if it
@@ -637,7 +641,8 @@ The first two need the operator.
 
 1. **Q1. Hub.** Is the stick plugged straight into the unit's USB-C port, or through an adapter, dock or hub? If it is
    direct, the two-node path of 3.1 is a surprise worth a photograph of the setup. If it is behind a hub, may the next sessions
-   plug it straight in? (If not: S1a or S1.5.)
+   plug it straight in? (If not: S1a or S1.5.) **Answered 2026-11-14 (operator): through an adapter or hub.** Whether the
+   stick may be plugged in directly is not yet asked; S1a or S1.5 stay on the table.
 2. **Q2. Which port.** Which of the unit's USB-C ports is the stick in, so that D3 of 3.2 has a starting point?
 3. **Q3. Imaging.** Can the operator write a disk image to the stick (W1b), or must the log region be created by copying files
    (W2, which needs a q1n1 FAT walker)? Will the operator keep the stick on an MBR disk (GPT is refused)?
@@ -648,7 +653,10 @@ The first two need the operator.
 6. **Q6. Camera.** Is a fixed camera, with a Mac-side decoder, worth setting up in parallel (alternative (v))?
 7. **Q7. Retention.** Is the M10 experiment to run now, since it is cheap and independent?
 
-## Appendix A. The page lines of the first survey boot (S0; UNIMPLEMENTED)
+## Appendix A. The page lines of the first survey boot (S0; EXPERIMENTAL in the q1n1 fork, hardware NOT RUN)
+
+The survey as built differs from this table in a few named places (extra verdict names, extra fields and lines, the baseline
+read through the firmware's PCI I/O instead of raw MMIO); the fork's `docs/SP11-STK-SURVEY.md` lists them.
 
 q1n1's page font has capital letters, digits and `: - . / = ? ( ) _` only (lower case is folded to upper case), and its
 `hex()` prints `0X` and 16 digits. The survey lines are `key=value` text, numbers as `0X` and the fewest digits (decimal where
