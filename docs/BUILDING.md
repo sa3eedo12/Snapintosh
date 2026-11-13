@@ -266,7 +266,7 @@ python3 tools/test-gen-a7xx-cp-protect.py       # a7xx CP_PROTECT generator; the
 python3 tools/test-sp11-boot-media.py           # boot-media staging; SP11_SHELL_EFI, SP11_SLBOUNCE_EFI and SP11_SLTEST_EFI enable the real-artifact test
 python3 tools/test-sp11-boot-media-hardening.py # the stager: destination guard, pins file, validated bytes
 python3 tools/test-sp11-autorun.py              # the opt-in autorun script generator: golden text, bans, line checker, control-flow model
-python3 tools/test-sp11-autorun-tree.py         # the stager's autorun subcommand: default path unchanged, verify, clear, remove, refusals; SP11_SLBOUNCE_EFI and SP11_Q1N1_EFI enable the real-image test
+python3 tools/test-sp11-autorun-tree.py         # the stager's autorun subcommand: default path unchanged, verify, clear, remove, refusals; SP11_SLBOUNCE_EFI with SP11_Q1N1_EFI (or SP11_Q1N1_STK_EFI for the survey image) enable the real-image tests
 python3 tools/test-sp11-autorun-mutants.py      # seeds banned arguments and other bugs into the generator and stager; both suites must fail
 python3 tools/test-sp11-autorun-qemu.py         # the stick's startup.nsh under the pinned Shell in QEMU (clang, lld-link, qemu-system-aarch64, EDK2 and SP11_UEFI_SHELL; SKIPs without)
 python3 tools/test-uefi-probe.py                # EFI state probe: build, native checks, QEMU; UEFI_PROBE_SKIP_QEMU=1 skips the emulator

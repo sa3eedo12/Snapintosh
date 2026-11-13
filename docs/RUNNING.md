@@ -565,12 +565,31 @@ autorun paragraph of `SP11\README.TXT` and lists all of it in the manifest. It
 refuses a base tree that is not `COMPLETE`, a missing or mismatching source, and
 anything outside a short table: the slbounce builds `SLBOUNCE.EFI`,
 `SLBOUNCE-DEVHE.EFI`, `SLBOUNCE-DEVHE-MARK.EFI` and `SLBOUNCE-DRYRUN.EFI`, and the
-applications `Q1N1.EFI` (no argument, or exactly `--el2`), `TESTS.EFI`,
-`TESTS-DECL.EFI` and `PROBE.EFI` (no argument). `--boot`, `--uart-proxy`, `--uart`,
-`--fault-test` and `SLBOUNCE-OLD-NOSWEEP.EFI` are refused by name, and the script
-contains no command the generator does not write. `verify` accepts the one
-`startup.nsh` that the plan in `PLAN.TXT` generates and still fails any other. Copy
-the tree to the stick and check it from the volume's root as in step 5.
+applications `Q1N1.EFI` (no argument, or exactly `--el2`), `Q1N1-STK.EFI` (exactly
+`--el2`, see below), `TESTS.EFI`, `TESTS-DECL.EFI` and `PROBE.EFI` (no argument).
+`--boot`, `--uart-proxy`, `--uart`, `--fault-test` and `SLBOUNCE-OLD-NOSWEEP.EFI` are
+refused by name, and the script contains no command the generator does not write.
+`verify` accepts the one `startup.nsh` that the plan in `PLAN.TXT` generates and still
+fails any other. Copy the tree to the stick and check it from the volume's root as in
+step 5.
+
+`Q1N1-STK.EFI` is the second q1n1 image, the read-only USB survey that the q1n1 fork
+builds from the same tree behind a compile-time gate (`docs/SP11-STK-SURVEY.md` in that
+repository). It runs as `Q1N1-STK.EFI --el2` after the same `load`, so it gets its own
+`--file` entry and a step reads `"SLBOUNCE-DEVHE-MARK.EFI Q1N1-STK.EFI --el2"`:
+
+```sh
+python3 tools/stage-sp11-boot-media.py autorun --dest <staged-directory> --name stk-survey \
+    --file SLBOUNCE-DEVHE-MARK.EFI <slbounce-build> <sha256> --file Q1N1-STK.EFI <q1n1-stk.efi> <sha256> \
+    --step "SLBOUNCE-DEVHE-MARK.EFI Q1N1-STK.EFI --el2"
+```
+
+It takes exactly `--el2`: the no-argument form, which is `Q1N1.EFI`'s preflight, is
+refused for it, and so is every banned argument. A stand-in with that name runs under
+the pinned Shell in QEMU like the others (the `survey` scenario of
+`tools/test-sp11-autorun-qemu.py`, EXPERIMENTAL). A built survey image passed the
+tool's image checks (arm64, EFI application) when staged and verified, but it has not
+been booted: hardware NOT RUN.
 
 A boot with an autorun stick:
 
