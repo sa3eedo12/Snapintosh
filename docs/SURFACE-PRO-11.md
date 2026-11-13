@@ -344,7 +344,7 @@ row 23).
 | E26 | A third-party CPU profile, generated under Windows on Arm for an X1E80100 machine that is not this unit, records at EL1: `MIDR_EL1` `0x511f0011` and `0x512f0011` (implementer `0x51`, part `0x001`), `CNTFRQ_EL0` 19.2 MHz (`0x0124f800`), `ID_AA64MMFR0_EL1.ECV` 2, `TGran16` 0, `PARange` 4 (44 bits), `VMIDBits` 8, `ID_AA64ISAR1_EL1` APA 5 and GPA 1, `ID_AA64ISAR2_EL1` APA3 and GPA3 0, and `DCZID_EL0` 4. It also shows `VH`, `NV` and `FGT` as 0, which is inconclusive (E12). | OBSERVED (other unit; hypervisor-filtered view) | VirtualBox `src/VBox/VMM/VMMR3/cpus/ARM_Qualcomm_Snapdragon_X.h` (§12) |
 | E27 | The A16's recorded `ID_AA64MMFR0_EL1` (`0x2100122100001024`, [FEASIBILITY.md](FEASIBILITY.md)) agrees with the profile in E26 on ECV, TGran4, TGran64, TGran16, ASIDBits and PARange. It differs only in the virtualization-related fields FGT and TGran4_2/TGran64_2, which the profile reports as unsupported. That is consistent with a hypervisor hiding virtualization from its guest. | VERIFIED (A16 value, read); INFERRED (the explanation) | `docs/FEASIBILITY.md`; E26 |
 | E28 | slbounce's `tb_entry` clears `SCTLR_EL2.M` and masks interrupts, then `tb_longjmp` invalidates the TLB, writes `HCR_EL2` = TGE and E2H, copies the saved EL1 `TCR`, `TTBR0` and `MAIR` into the EL2 registers and turns the MMU back on. The boot CPU therefore passes through an MMU-off window inside slbounce. | VERIFIED | slbounce `src/trans.s` 23-43 and 126-182 at `c090a8cdafa25e4c99df90f8d6f73f3805d9b397` |
-| E29 | A Linux code comment says the Oryon X1 implements both FEAT_VHE and FEAT_E2H0, so E2H can be cleared (the de-VHE option of C1). That this unit does is INFERRED until `ID_AA64MMFR4_EL1.E2H0` is read (M1 of [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md)). | VERIFIED (read); INFERRED for this unit | Linux `arch/arm64/kvm/arch_timer.c` 1426-1429 |
+| E29 | A Linux code comment says the Oryon X1 implements both FEAT_VHE and FEAT_E2H0, so E2H can be cleared (the de-VHE option of C1). That this unit does is OBSERVED: X2's run 4 (T01) read `ID_AA64MMFR4_EL1` as 0, so `E2H0` is 0, and B1 attempt 7 read `HCR_EL2.E2H` back as 0 after clearing it (one boot, boot CPU only). | VERIFIED (read) for the comment; OBSERVED for this unit | Linux `arch/arm64/kvm/arch_timer.c` 1426-1429; the local X2 run 4 record; Status of B1, attempt 7 |
 | E30 | `DCZID_EL0` = 0x14 is `DZP` = 1 with `BS` = 4 (a 64-byte block). Only `BS` is implementation defined; `DZP` follows `HCR_EL2.TDZ` and `SCTLR_ELx.DZE`. | VERIFIED | Arm DDI 0601, DCZID_EL0 |
 | E31 | XNU's `bzero` and `bzero_phys_page` execute `dc zva` at a hard-coded 64-byte stride and do not read `DCZID_EL0`; XNU sets `SCTLR_EL1.DZE` itself. | VERIFIED at the public tag; INFERRED for build 26A428 | XNU `xnu-12377.121.6`, `osfmk/arm64/bzero.s`, `loose_ends.c`, `proc_reg.h` |
 | E32 | A third-party Linux patch disables `DC ZVA` on the Oryon X1 ("X1 CL5 erratum") without stating a symptom. Upstream Linux has no such workaround at the pinned commit. | OBSERVED (one unit), mechanism UNKNOWN | Community SP11 EL2 report, `01-oryon-dc-zva-erratum.patch` (R20) |
@@ -896,13 +896,13 @@ Snapintosh fork of slbounce ([sa3eedo12/slbounce](https://github.com/sa3eedo12/s
 reordered console-first boot, the ported GOP selection, and a chainload candidate table). One real bug was found
 and fixed during implementation (a missing second `TLBI`-with-barriers in the de-VHE sequence, caught by
 disassembling the built object against `compat/el2-entry-model.c`'s canonical sequence, now a permanent regression
-test). Neither repository's branch is merged upstream. **Not done:** the de-VHE gate on hardware (untried: its
-register writes run with the MMU off and no console until they finish, the highest-risk single step this plan has
-proposed so far); why the blanket sweep hung (UNKNOWN, the faulting address was never captured, so the scoped
+test). Neither repository's branch is merged upstream. **Not done when this was written:** the de-VHE gate on hardware
+(its register writes run with the MMU off and no console until they finish, the highest-risk single step this plan has
+proposed so far; it has since run once, attempt 7 below); why the blanket sweep hung (UNKNOWN, the faulting address was never captured, so the scoped
 sweep's one success is not an explanation of it); a real chainload stage-address table (no generator exists; the
 real DRAM map is still unmeasured). What the first hardware run showed is in the next paragraph.
 
-**B1 on the unit (2026-11-12 and 2026-11-13, six attempts; the fourth to sixth reached EL2).** *Attempts 1 to 3* (OBSERVED, earlier builds).
+**B1 on the unit (2026-11-12 and 2026-11-13, seven attempts; the fourth to seventh reached EL2).** *Attempts 1 to 3* (OBSERVED, earlier builds).
 Attempts 1 and 2 (no-argument preflight, then `--boot`) found no GOP at all: that build enumerated handles with
 `LocateHandleBuffer`, which returned none for the GOP protocol GUID in a session where the probe's `LocateHandle` finds
 them (unexplained, so the probe's proven call is now used). Attempt 3, with `LocateHandle`, found the handles and
@@ -1042,7 +1042,50 @@ Those stores were INFERRED safe before; they are now OBSERVED to work once. What
 configuration write (the dry run skips every one of them, by construction), the `SCTLR_EL2` write that turns the MMU
 back on, the return to q1n1, slot 4's own barrier, or repeatability.
 
-**The de-VHE gate and its progress markers (EXPERIMENTAL; run A OBSERVED, runs B and C NOT RUN).** The slbounce fork's
+*Attempt 7* (OBSERVED, one fresh boot of the Shell, 2026-11-13, morning; run B of the de-VHE plan: the slbounce fork's
+commit `380f25a` built with the scoped sweep, `SLBOUNCE_SP11_DEVHE` and `SLBOUNCE_SP11_MARKERS`, `SLBOUNCE-DEVHE-MARK.EFI`,
+SHA-256 `4107c28c194e...`; q1n1 `91748c0`; the same `tcblaunch.exe`; the evidence is two photographs, the Shell and q1n1's
+page, and every digit below was checked against zoomed crops of them). At `FS3:\>` two commands were mistyped
+(`SLBOUNCE-CEVHE-MARK.EFI` and `Q1N!.EFI`) and the Shell refused both with no effect. The Shell's startup countdown ("Press
+ESC in 1 seconds to skip startup.nsh or any other key to continue.") shows on this stick's Shell although the stick has no
+`startup.nsh`. Then `load SP11\SLBOUNCE-DEVHE-MARK.EFI` (loaded at `D5094000`, "Success", the same TB entry `0xD5098DC4`
+inside the image at `0xD5098000`) and `SP11\Q1N1.EFI --el2`: "GOP framebuffer captured." (a 232-descriptor, 11,136-byte
+map, select OK by rule SAME), the two declared ranges (image `0xCE38E000` and `0x15D000` bytes, map buffer `0xCE565000` and
+`0x40000` bytes, types 1 and 2, attribute `0x100F`, both contained in one descriptor; 233 descriptors at the final map) and
+"Leaving firmware now.". The panel then showed q1n1's page with the same build stamp `91748C0E4CD8`, `UPTIME 4 S`,
+`ENTRY EL` 1 and `CURRENT EL` 2, and this EL2 state, read by q1n1 right after the bounce:
+
+| Register | Value | Decoded |
+| --- | --- | --- |
+| `HCR_EL2` | `0x0000000088000010` | E2H **0**, TGE and RW set, VM clear, IMO set: exactly the value the trampoline writes (`SP11_DEVHE_HCR_A16`) |
+| `SCTLR_EL2` | `0x0000100030C5183D` | M, C and I set; WXN and EE clear (the same image as attempt 5's) |
+| `TCR_EL2` | `0x0000000080843514` | the converted image (attempt 5's `0x480803514` through the shipped converter): non-VHE layout, T0SZ 20, 4 KiB, inner-shareable write-back, PS 44 bits, RES1 bits 31 and 23; the page has no TTBR1 line |
+| `TTBR0_EL2` | `0xA7F2E000` | unchanged by the flip (attempt 5's value) |
+| `MAIR_EL2` | `0xFFBB4400` | unchanged |
+| `VBAR_EL2` | `0xCE399800` | q1n1's own vectors: its image base `0xCE38E000` plus `0xB800`, as in attempt 5 |
+| `CPTR_EL2` | `0x22FF` | the value the trampoline writes (`SP11_DEVHE_CPTR_NOTRAP`), non-VHE layout |
+| `CNTHCTL_EL2` | `0x3` | EL1 counter and timer passthrough (non-VHE layout) |
+| `CNTFRQ_EL0`, `MPIDR_EL1` | `0x124F800`, `0x80000000` | 19.2 MHz; core 0 |
+| `DAIF`, `SPSEL` | `0x3C0`, `1` | all four masked; SP_EL2 selected |
+
+What attempt 7 establishes, for this unit and one boot. (a) The de-VHE sequence ran to its end and q1n1 ran afterwards:
+`HCR_EL2.E2H` was cleared with the MMU off, the non-VHE `TCR_EL2`, `TTBR0_EL2` and `MAIR_EL2` images were installed, the
+second TLBI group ran, the `SCTLR_EL2` write turned the MMU back on, and the rest of the bounce, ExitBootServices' return
+and q1n1's page code all executed under the new regime. `HCR_EL2`, `CPTR_EL2` and `TCR_EL2` read back the values the
+trampoline wrote. (b) The `E2H` read-back is conclusive: X2's run 4 (T01) read `ID_AA64MMFR4_EL1` as 0 on this unit, so
+`E2H0` is 0 (E2H is programmable), and the architecture makes E2H read 1 on a part without it
+([SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2.9). (c) The risk named after attempt 5, that the firmware's EL1-format
+stage 1 descriptors might fault under the non-VHE regime (bit 54 is a single XN bit there), did not show on the pages
+q1n1 executed: the code kept running after the MMU came back on. That is OBSERVED; that bit 54 is clear on those pages is
+INFERRED from it; pages q1n1 did not run are still unmeasured. (d) The progress squares, drawn before the flip and
+replaced by q1n1's page, were not photographed, so nothing is claimed about them.
+
+What it does not show: repeatability (one boot, one unit); that the page stays up (one photograph, at 4 s; attempt 4's
+heartbeat ran for about 40 minutes, in the VHE state); the other CPUs (PSCI `CPU_ON` arrival, M4); FEAT_NV2 in this regime
+(M8: X2's functional test kept the firmware's `E2H`, which was 1, in the stub's `HCR_EL2`, so NV2 has never been exercised on
+this unit with `E2H` clear); the functional probe M5 (no `CNTKCTL_EL1` redirection); timers and `DC ZVA` here.
+
+**The de-VHE gate and its progress markers (EXPERIMENTAL; runs A and B OBSERVED once each, run C not needed).** The slbounce fork's
 `SLBOUNCE_SP11_DEVHE` build converts the saved EL1 images to the non-VHE layouts and enters EL2 with `E2H` clear. It is
 untried on the unit, and its register writes run with the MMU off and no console. `SLBOUNCE_SP11_MARKERS` (it needs the
 de-VHE gate; fork commit `380f25a`) makes a hang in it readable: small white squares in a strip at the top right of the
@@ -1063,8 +1106,8 @@ on a framebuffer with the MMU off) until run A measured them (attempt 6: OBSERVE
 power-cycle apart. **(A)** `SLBOUNCE_SP11_MARKERS_DRYRUN` draws slots 0 to 4 and halts before any de-VHE configuration
 write, to qualify the stores by themselves: five squares mean the stores landed and the barriers of slots 1 to 3
 returned. **Run A showed five squares (attempt 6, above).** **(B)** The markers build: success is q1n1's page with `HCR_EL2` `0x88000010` and `TCR_EL2` `0x80843514`; a
-hang shows how far it got (NOT RUN). **(C)** The same de-VHE build without markers, after any hang in B, to separate the markers
-from the sequence (NOT RUN); it is byte-identical to the build tested before the markers existed (pinned by hash in the fork's
+hang shows how far it got. **Run B showed that success page (attempt 7, above).** **(C)** The same de-VHE build without markers, after any hang in B, to separate the markers
+from the sequence: not run, because B did not hang. It is byte-identical to the build tested before the markers existed (pinned by hash in the fork's
 `tools/test-sp11-defaultoff.py`). Builds staged for A to C (SHA-256 prefixes): dry run `bf322f899461`, markers
 `4107c28c194e`, no markers `3032fda349f1`. Host side (68 tests across the fork's four suites, none skipped): the planner against an independent
 oracle, the unit's three recorded memory maps and ten seeded bugs; the assembled trampoline in every gate combination
@@ -1091,9 +1134,9 @@ not tried on hardware. (5) The de-VHE converter that `tb_longjmp` calls was link
 page); found by reading the link map while replaying attempt 5's registers, and fixed in the fork (it is now linked
 straight after `trans.o`, inside the window, with a link-map test and a far-placement mutant that must fail it).
 VERIFIED on the host; it removes one assumption from the first de-VHE hardware run and does not make that run safe.
-Still UNKNOWN after attempt 6: the X2 image's post-bounce reset (what it does that q1n1's page does not), the de-VHE
-gate on hardware (runs B and C), why the blanket sweep hung, and why `LocateHandleBuffer` found no GOP handle in
-attempts 1 and 2.
+Still UNKNOWN after attempt 7: the X2 image's post-bounce reset (what it does that q1n1's page does not), whether the
+de-VHE entry repeats and what the other CPUs do in it, FEAT_NV2 with `E2H` clear (M8), why the blanket sweep hung, and why
+`LocateHandleBuffer` found no GOP handle in attempts 1 and 2.
 
 **Status of B2 and B3 (host only; EXPERIMENTAL; hardware NOT RUN).**
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) holds the A16 USB inventory
@@ -1127,7 +1170,7 @@ devices only).
 
 | Item | Acceptance criteria |
 | --- | --- |
-| C1 | A VHE-host versus de-VHE decision from the X1/X2 evidence. The de-VHE sequence is: MMU off, clear E2H, reprogram TCR, TTBR0 and MAIR in non-VHE format, `tlbi alle2`, barriers, MMU on. A host model covers it with negative cases (E2H cleared with the MMU on is rejected). Secondaries arrive by PSCI in a different incoming state than the boot CPU; both paths are covered. **Host groundwork (EXPERIMENTAL):** decision record and host model in [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2 (`python3 tools/test-el2-entry-transition.py`; linked into no build). Recommended default: de-VHE on every CPU, inside slbounce's restore where the MMU is already off (placement A1 of that document), else as the first code after its return (A2); a VHE-native monitor only if X2 reads `ID_AA64MMFR4_EL1.E2H0` other than 0 or the functional de-VHE test fails. The X1/X2 measurements M1 to M5 of that document settle it. |
+| C1 | A VHE-host versus de-VHE decision from the X1/X2 evidence. The de-VHE sequence is: MMU off, clear E2H, reprogram TCR, TTBR0 and MAIR in non-VHE format, `tlbi alle2`, barriers, MMU on. A host model covers it with negative cases (E2H cleared with the MMU on is rejected). Secondaries arrive by PSCI in a different incoming state than the boot CPU; both paths are covered. **Host groundwork (EXPERIMENTAL):** decision record and host model in [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2 (`python3 tools/test-el2-entry-transition.py`; linked into no build). Recommended default: de-VHE on every CPU, inside slbounce's restore where the MMU is already off (placement A1 of that document), else as the first code after its return (A2); a VHE-native monitor only if X2 reads `ID_AA64MMFR4_EL1.E2H0` other than 0 or the functional de-VHE test fails. The X1/X2 measurements M1 to M5 of that document settle it. **Hardware (B1 attempt 7, OBSERVED once on one unit):** placement A1 ran on the boot CPU and left `E2H` clear with the MMU on, `E2H0` is 0 here, and q1n1 ran afterwards; the secondaries (M4), the functional probe (M5) and NV2 with `E2H` clear (M8) are not measured. |
 | C2 | `GUEST_CPU_COUNT` becomes a profile parameter, default 6 and A16-identical. Placement on 12 cores in 3x4; redistributors discovered, not hard-coded; the cross-cluster starvation lessons (`SNAP_FAIR_TOKEN`) applied. The smallest vCPU count the J700 profile tolerates is evaluated first. **Host groundwork (EXPERIMENTAL):** `compat/topology.{h,c}` and `tools/test-guest-topology.py`. Nothing calls the model yet, but the monitor enforces the same rule at launch: a build without the token is refused with prepare status -146 (`GUEST_CPU_NEEDS_FAIR_LOCK` in `compat/cpu.h`), and `tools/test-monitor-hardening.py` holds the rule equal to the model for every count from 1 to 12. The SP11 default of six vCPUs needs `-DSNAP_FAIR_TOKEN=1`, because the model refuses six vCPUs across two clusters without a fair lock. SP11 values are INFERRED until X2, X3 and X4. |
 | C3 | Functional ECV use, and the `compat/boot-relocate.h` assumptions re-derived given the Oryon X1 `CNTVOFF_EL2` erratum, if X2 confirms the MIDR. A test with injected mismatched offsets. **Host groundwork (EXPERIMENTAL):** policy and model in [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 3 (`python3 tools/test-timer-offset-model.py`; linked into no build). A `CNTVOFF_EL2` that does not read back what was written fails the boot closed; the recommended monitor time base is `CNTPCT_EL0` minus a monitor-owned epoch, which needs no per-CPU register. |
 | C4 | ISAR1-versus-ISAR2 PAuth normalization in `probes/xnuboot/pauth.c` and `prepare.c`. Unknown ID registers stay RAZ per `probes/idregs.h`. Tests with synthesized registers. **Host groundwork (EXPERIMENTAL):** Oryon v1 PAuth ID normalization is in `compat/oryon-idregs.{h,c}`, hooked into `id_forge` in `probes/idregs.h` behind `SNAP_PLATFORM_SP11`. The guest sees the J700 shape (`ID_AA64ISAR1_EL1` APA and GPA cleared, `ID_AA64ISAR2_EL1` APA3 = 5 and GPA3 = 1) for the recorded Oryon MIDRs; an unrecorded MIDR or an unrecognised PAuth shape refuses the launch (prepare statuses -94 and -95). `probes/xnuboot/pauth.c` is unchanged: the monitor implements no PAC cipher, so normalization changes what the guest reads and never what the hardware computes. Tests: `tools/test-oryon-idregs.py`. The QARMA5-versus-QARMA3 consequences are INFERRED only. |
@@ -1523,6 +1566,11 @@ NOT RUN.
 18. `ID_AA64MMFR4_EL1.E2H0`, the hand-off registers, the identity map and TTBR1
     use, the arrival registers of a PSCI secondary, and the functional de-VHE
     test (X1, X2; M1 to M5 and M8 of [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md)).
+    Answered for the boot CPU of one unit: `E2H0` is 0 (X2 run 4), the
+    hand-off registers (B1 attempt 5), TTBR1 walks are off (attempt 5), and the
+    non-VHE state after the sequence (attempt 7). Open: the identity map per
+    address (M3's `AT`), a PSCI secondary's arrival registers (M4), the
+    functional probe (M5) and NV2 with `E2H` clear (M8).
 19. Per-core `CNTVOFF_EL2` read-back and effect, and `DCZID_EL0` with the
     registers that configure it plus a functional `dc zva` test (X2; M6 and M7
     of the same document).

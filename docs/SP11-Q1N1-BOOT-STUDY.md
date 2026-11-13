@@ -824,4 +824,21 @@ questions closed, one opened.
   one unmeasured assumption the review had flagged in the markers themselves. It says nothing about the de-VHE
   configuration writes, which the dry run skips by construction.
 - *Open: the de-VHE run.* Run B (markers) and, after any hang, run C (no markers) are the next hardware steps.
-  Hardware: B and C NOT RUN.
+  Hardware: B and C NOT RUN. (Closed by attempt 7, below.)
+
+**Update, 2026-11-13 (attempt 7, OBSERVED, one boot; the numbers are in SURFACE-PRO-11.md, Status of B1).** The de-VHE
+entry works on this unit's boot CPU, once.
+
+- *Run B succeeded.* With the marker build of the de-VHE gate loaded, `--el2` reached q1n1's page and q1n1 read `HCR_EL2`
+  `0x88000010` (E2H clear), `TCR_EL2` `0x80843514` (the converted image), `TTBR0_EL2` and `MAIR_EL2` unchanged, `CPTR_EL2`
+  `0x22FF`, `CNTHCTL_EL2` `0x3` and `SCTLR_EL2` with M, C and I set: the values the trampoline writes, with the MMU on and
+  q1n1 executing. Section 6's sequence, accepted by the host model, therefore also ran on the hardware, so q1n1 and the
+  monitor can keep the non-VHE EL2 state they have on the A16 on the boot CPU. Run C (the unmarked control) was not needed.
+- *The firmware-descriptor risk did not show.* The one assumption the replay in attempt 5 could not check, that the
+  firmware's EL1-format stage 1 descriptors stay valid under the non-VHE regime, held for the pages q1n1 ran (OBSERVED);
+  untouched pages are unmeasured.
+- *Still open.* Whether it repeats; the other CPUs (a PSCI secondary's arrival, M4); and NV2 with E2H clear (M8), which is
+  the measurement the whole mediation model leans on: X2's functional test kept the firmware's E2H (1) in the stub's
+  `HCR_EL2`, so it ran in the VHE regime. A re-run of that test in this regime needs the X2 image to declare its sweep
+  range, because the reviewed scoped-sweep slbounce refuses an application that does not (X2's runs used a test-only build
+  with the sweep removed). Hardware: M8 NOT RUN.

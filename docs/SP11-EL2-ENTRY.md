@@ -7,7 +7,7 @@ nothing is linked into any build: the A16 monitor is unchanged. The three models
 
 | Plan todo | Decision recorded here | Label |
 | --- | --- | --- |
-| C1, VHE host or de-VHE entry | Recommended default: a de-VHE trampoline on every CPU, run before anything else at EL2, so q1n1 and the monitor keep the non-VHE state they have on the A16. A VHE-native monitor only if X2 reads `ID_AA64MMFR4_EL1.E2H0` other than 0, or the functional de-VHE test fails. | INFERRED decision on VERIFIED architectural rules; X1 and X2 settle it |
+| C1, VHE host or de-VHE entry | Recommended default: a de-VHE trampoline on every CPU, run before anything else at EL2, so q1n1 and the monitor keep the non-VHE state they have on the A16. A VHE-native monitor only if X2 reads `ID_AA64MMFR4_EL1.E2H0` other than 0, or the functional de-VHE test fails. | INFERRED decision on VERIFIED architectural rules. OBSERVED once on the boot CPU of one unit: `E2H0` is 0 and the fork's trampoline left `E2H` clear (B1 attempt 7); the secondaries and the functional probe M5 are not measured |
 | C3, timer offset and ECV | The monitor must not rely on `CNTVOFF_EL2`: write it, read it back, and fail closed on a difference. Take the guest time base from `CNTPCT_EL0` minus a monitor-owned epoch. | Policy proved on a model; whether the Oryon X1 erratum applies to this unit is UNKNOWN until `MIDR_EL1` is read at X2 |
 | C6, DC ZVA | Not confirmed. Close as not applicable until X2 measures it. `DCZID_EL0` = 0x14 is DZP set with a 64-byte block: a configuration state, not evidence of broken silicon. The A16 admission test `dczid != 4` conflates the two. | VERIFIED decoding; OBSERVED (one third-party patch, no symptom stated); mechanism UNKNOWN |
 
@@ -175,7 +175,7 @@ its sequence's declared precondition is refused instead of run.
 | slbounce `tb_entry` and `tb_longjmp`, VHE direction (`el2m_ref_slbounce_vhe`) | Accepted only with `strict_tlbi_after_config` = 0; refused `MMU_ON_STALE_TLB` under the strict policy | It does its `TLBI` before it rewrites `TCR`, `TTBR0` and `MAIR` with the MMU off. It runs on real hardware (OBSERVED, one community unit), so the strict reading "a configuration write at M = 0 dirties the TLB" is stricter than the machine. Public text says TLB contents have no effect on translation while the MMU is off (D8.16.1 HXRSY) but not that none can be created. INFERRED |
 | A16 `probes/secondary.S` `secondary_entry` (`el2m_ref_a16_secondary`) | Accepted only with `strict_isb_before_tlbi` = 0; refused `TLBI_UNSYNC_HCR` when strict | It writes `HCR_EL2` and runs `TLBI` with a DSB but no ISB between. Harmless on the A16, where the write does not change E2H. On the SP11 the write may change E2H, and the missing ISB then matters (INFERRED) |
 | `secondary_entry` on a CPU that arrives with E2H set | Refused `LAYOUT` even when relaxed | It never writes `CNTHCTL_EL2` or `CPTR_EL2`; `cpu_boot.c` does later. On the SP11 anything that reads them before that sees the wrong layout. A finding, not a model artifact |
-| The SP11 fork of slbounce's restore (`el2m_seq_slbounce_devhe`) | Accepted under the strict policy from five arrival states. With its second `TLBI` deleted it reverts to slbounce's own order: refused when strict, accepted when relaxed. With slbounce's `HCR_EL2` value left in, refused `LAYOUT`; on a CPU without FEAT_E2H0, refused `E2H_NOT_PROGRAMMABLE` | What the fork has to do: convert, and add a `TLBI` with its barriers after the register writes. Its end state equals a PSCI secondary's |
+| The SP11 fork of slbounce's restore (`el2m_seq_slbounce_devhe`) | Accepted under the strict policy from five arrival states. With its second `TLBI` deleted it reverts to slbounce's own order: refused when strict, accepted when relaxed. With slbounce's `HCR_EL2` value left in, refused `LAYOUT`; on a CPU without FEAT_E2H0, refused `E2H_NOT_PROGRAMMABLE` | What the fork has to do: convert, and add a `TLBI` with its barriers after the register writes. Its end state equals a PSCI secondary's. **Ran on the unit once** (B1 attempt 7, OBSERVED, boot CPU): `HCR_EL2` `0x88000010` and `TCR_EL2` `0x80843514` with the MMU on. It says nothing about the secondaries or about how strict the model is |
 
 Mutating a reference (dropping the `TLBI`, the DSB or an ISB) breaks it again, so the relaxed replays prove the
 reference is understood and not that the model accepts anything.
@@ -271,7 +271,7 @@ first code after its return (A2, `boot-devhe`, or `universal-devhe` if the arriv
 and the monitor see the state they see on the A16. Each PSCI secondary runs `secondary-devhe` as the first thing it does.
 Linux's own
 comment says the affected Oryon X1 hardware implements both FEAT_VHE and FEAT_E2H0 (VERIFIED, read: `arch_timer.c`
-1426-1429; whether this unit does is INFERRED until M1), which makes the clear architecturally available. Arm deprecates
+1426-1429; this unit does: OBSERVED, M1 read `E2H0` = 0 in X2's run 4), which makes the clear architecturally available. Arm deprecates
 clearing E2H and makes it RES1 on a part without FEAT_E2H0 (VERIFIED: D8.13.1 CDMXB), so A may not outlive this
 silicon generation; that is a reason to keep B's survey on file, not a reason to start B now.
 
@@ -285,10 +285,13 @@ Decision rule, for the X2 report:
 
 A read-back of `HCR_EL2.E2H` = 0 is conclusive only when `E2H0` is 0 (D8.13.1 CDMXB); M5 is conclusive either way.
 
+**Status, 2026-11-13.** Boot CPU of one unit: `E2H0` is 0 (X2 run 4) and `HCR_EL2.E2H` read back 0 after the trampoline, MMU
+on, q1n1 running (B1 attempt 7). Rule 1 stays open for M5 and the secondaries (M4); nothing contradicts A.
+
 ### 2.10 The X1 and X2 evidence that settles it
 
-Only M2 and M3 have been measured, in part and once (the paragraph after the table), and the marker stores once more
-(the paragraph after that); nothing else below has been run.
+Only M1 (`E2H0` on the boot CPU, X2 run 4), M2 and M3 in part, the marker stores and the de-VHE sequence itself have been
+measured, each once (the paragraphs after the table); nothing else below has been run.
 Gates are those of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6; every row that writes
 a register is a hardware step that needs its own authorization.
 
@@ -318,7 +321,14 @@ checks this model against one unit's inputs; it is not a hardware result for the
 ran `tb_longjmp` as far as its markers and halted before any de-VHE configuration write. All five squares appeared on
 the panel, so data stores to the GOP framebuffer with the MMU off, each closed by `dsb sy`, land on this unit. That is
 the one thing 2.11 said was unqualified about the markers; it says nothing about the register writes, the second TLBI
-group or the `SCTLR_EL2` write, none of which have run.
+group or the `SCTLR_EL2` write, none of which the dry run ran (the next paragraph does).
+
+**The de-VHE sequence (OBSERVED, one run, 2026-11-13).** With the marker build loaded, q1n1's page read on the boot CPU
+`HCR_EL2` 0x88000010 (E2H 0), `TCR_EL2` 0x80843514, `TTBR0_EL2` and `MAIR_EL2` unchanged, `CPTR_EL2` 0x22FF, `CNTHCTL_EL2` 0x3
+and `SCTLR_EL2` with M, C and I set: the values the trampoline writes, MMU on, q1n1 executing (M1, and M2 after the flip). The
+firmware-descriptor question that `test_observed_sp11` could not model did not show either: q1n1's pages kept executing under
+the non-VHE regime (OBSERVED for those pages; the XN-bit-54 reading is INFERRED). Not measured: M4, M5, M8, the other EL2
+registers, repeatability, uptime (one photograph, at 4 s).
 
 ### 2.11 What the model does not prove
 
