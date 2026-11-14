@@ -1166,7 +1166,7 @@ none of it today), the DRAM-retention test and the D5 exercise on a real link
 failure (NOT RUN), and hub support (q1n1's xHCI host addresses root-port
 devices only).
 
-**Fewer boots: autorun, the declared X2 image and stage S0 (autorun and the declared X2 variant OBSERVED once on the unit, 2026-11-14; S0 and the rest host side only, EXPERIMENTAL, hardware NOT RUN).**
+**Fewer boots: autorun, the declared X2 image and stage S0 (autorun, the declared X2 variant and the S0 survey each OBSERVED once on the unit, 2026-11-14; the rest host side only, EXPERIMENTAL, hardware NOT RUN).**
 Typing `fsN:`, `load` and the image names by hand cost boots, so
 `tools/stage-sp11-boot-media.py autorun` can stage a `startup.nsh` that runs one allow-listed step per boot
 ([RUNNING.md](RUNNING.md)). **On the unit (2026-11-14, one boot, photographs): the Shell ran the script with nothing typed**
@@ -1183,9 +1183,16 @@ xHCI register at EL2, and A2, the first sector written to the stick. Its stage S
 read-only survey (`Q1N1_SP11_STK_SURVEY`, branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`; its own image
 `q1n1-stk.efi`, run with `--el2`). Before ExitBootServices it prints the stick's device path and the firmware's USB facts;
 after the bounce it reads, with loads only through the recoverable-fault guard, the clock controller, the two Denali
-controllers (only when powered and clocked) and the SMMU stream mappings. The operator answered the study's Q1: the stick
-sits behind an adapter or hub, which agrees with the two USB nodes in its path (INFERRED); q1n1's xHCI driver cannot address
-a device behind a hub, so the study's S1.5 or the survey's firmware-slot walk is needed. The default q1n1 builds are
+controllers (only when powered and clocked) and the SMMU stream mappings. **S0 ran on the unit (2026-11-14, one boot,
+photographs, OBSERVED): the stick is on `usb_1_ss0` behind an active hub (a hub function on each root port, the stick on hub
+port 3, route string 3); both controllers are powered, clocked and readable at EL2 with no fault and no hang; the xHC is halted
+with its host controller error flag (HCE) set, which appeared between ExitBootServices and the survey and whose cause is
+UNKNOWN, so a reset and a full enumeration are needed and adopting the firmware's slot state is unlikely to work (INFERRED);
+the firmware's rings and slot contexts are intact in RAM; both USB streams translate through SMMU context bank 3, whose
+contents nobody has read, so whether the xHC can DMA into an EL2 arena is open.** The next step is a read-only follow-up (S0b)
+as a payload, not a write; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 12 has the table. The operator answered the study's
+Q1: the stick sits behind an adapter or hub, which S0 confirmed. q1n1's xHCI driver cannot address a device behind a hub, so
+the study's S1.5 is needed unless the stick can be plugged in directly (not yet asked). The default q1n1 builds are
 byte-identical to the commit before the survey (`tools/test-q1n1-sp11-entry.py` in the fork).
 
 **Stick payload runner (EXPERIMENTAL; hardware NOT RUN).** The fork's third image, `Q1N1-PAYLOAD.EFI` (gate

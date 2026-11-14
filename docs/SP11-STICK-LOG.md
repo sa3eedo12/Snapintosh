@@ -1,9 +1,11 @@
 # Surface Pro 11 stick log: reaching the boot stick from EL2 (B3, and the first step of B2)
 
-**Design study with host-side groundwork. UNIMPLEMENTED on hardware. Hardware status: NOT RUN.** Nothing here ran on a
-Surface Pro 11. When the study was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as
-an opt-in, read-only survey in the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits
-`8ed0c4f` and `8235433`), EXPERIMENTAL and hardware NOT RUN. Stages S1 and later do not exist. It answers plan item B3 (a persistent log sink) and the
+**Design study with host-side groundwork. The writer (S1 to S6) is UNIMPLEMENTED. Hardware status: NOT RUN for the writer;
+the read-only survey S0 ran once on the unit (section 12).** Nothing of the writer ran on a Surface Pro 11. When the study
+was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as an opt-in, read-only survey in
+the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`) and has run
+once on the unit: its results are OBSERVED (one unit, one boot) and are recorded in section 12. Stages S1 and later do not
+exist. It answers plan item B3 (a persistent log sink) and the
 first deliverable of B2 (EL2 USB host bring-up) of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) and
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) as far as public sources and a host can: which controller the boot stick
 most likely sits on, what firmware and the slbounce bounce leave behind, how a log can reach the stick from EL2 without a
@@ -31,16 +33,19 @@ guarded log writer, and their tests (section 8).
    not only a header, and the writer refuses to overwrite a sector that does not still hold its own tag. A wrong, stale or
    hostile map then cannot damage the stick's file system, which is the failure that matters most. The per-sector tag is also
    what makes a later q1n1 FAT walker (workflow W2) self-verifying.
-3. **The stick probably sits behind a USB hub (INFERRED; the operator confirmed an adapter or hub, Q1 in section 11).** The
-   UEFI path has two USB nodes; in EDK2's code each USB node is
+3. **The stick sits behind a USB hub (OBSERVED by S0, section 12: two USB nodes in the path, a hub function on each of the
+   controller's two root ports, and the stick on hub port 3 with route string 3; the operator confirmed an adapter or hub,
+   Q1 in section 11).** The UEFI path has two USB nodes; in EDK2's code each USB node is
    one device on the way down, so the second node is a device behind the first, a hub (section 3.1). q1n1's xHCI driver
    cannot address a device behind a hub (G03 of the host-link study). The cheapest fix was an operator answer (Q1, section 11):
    plug the stick straight into the unit. Whether that is possible is still open: the operator's answer was only that the
    stick goes through the adapter. Hub support is stage S1.5 (about 250 to 350 lines, 2 to 4
-   more boots), or the survey shows that adopting the firmware's own slot state (S1a) avoids it.
-4. **Which of the two Denali-enabled controllers the stick uses is UNKNOWN** (`usb_1_ss0` at `0x0a600000` or `usb_1_ss1` at
-   `0x0a800000`). Neither the path nor any pinned fact says. The firmware's PCI I/O interface on the controller handle (if it
-   exists) or the S0 port survey settles it, and swapping ports does too.
+   more boots). S0 makes the alternative, adopting the firmware's own slot state (S1a), unlikely: the xHC reports a host
+   controller error and needs a reset, which drops every slot (INFERRED, section 12).
+4. **The stick's controller is `usb_1_ss0` at `0x0a600000` (OBSERVED by S0, section 12).** The survey prints its baseline line
+   only for the host controller whose BAR 0 equals that window, and it printed. `usb_1_ss1` at `0x0a800000` had nothing
+   connected and firmware never started it. Which physical USB-C port `usb_1_ss0` is on the unit is not recorded (Q2,
+   section 11). Before S0 this was UNKNOWN: neither the path nor any pinned fact said.
 5. **One boot can answer M1, M2 and the SMMU half of M6 without a single device write** (sections 3.5 and 3.6, Appendix A),
    plus two sub-measurements this study adds: the walk of the firmware's own slot contexts (M1b) and the xHCI supported
    protocol walk (M1c). M3 stays deferred because no PHY register offset is pinned. M4, M5, M6b, M7, M8 and M10 write.
@@ -54,7 +59,13 @@ guarded log writer, and their tests (section 8).
 8. **The three unknowns only hardware answers:** (a) what the xHC, its GDSC, clocks and PHY look like at EL2 after the
    ExitBootServices handlers and the QHEE teardown (S0 lines GCC, GATE and OP); (b) which controller and port, and whether a
    hub is in the way (lines HUB, XECP, PORT, SLOT); (c) whether DMA from the xHC reaches q1n1's arena coherently through the
-   SMMU (line SMMU, then the S1 No-Op).
+   SMMU (line SMMU, then the S1 No-Op). S0 has answered (a) and (b) apart from the PHY (section 12). (c) is half answered:
+   both streams translate through context bank 3, whose contents S0 did not read.
+9. **S0 ran once on the unit (OBSERVED, one unit, one boot; section 12).** The controller is powered, clocked and readable at
+   EL2, an xHCI 1.10 on a DWC3 in host mode, with no fault and no hang. The xHC is halted with its host controller error flag
+   (HCE) set, which this study did not anticipate. The firmware's rings and slot contexts are intact in RAM. Both USB streams
+   translate through SMMU context bank 3. The conditional GO of section 4.7 is met except its SMMU condition, which needs a
+   read-only follow-up (S0b, section 12) before any write.
 
 ## 2. The problem and the requirements
 
@@ -119,7 +130,8 @@ INFERRED for the unit; [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) sectio
 | SMMU stream (`apps_smmu`) | `0x1420` (`hamoa.dtsi:5307`) | `0x1460` (`hamoa.dtsi:5398`) |
 | Cache coherent DMA | `dma-coherent` (`hamoa.dtsi:5320`) | `dma-coherent` (`hamoa.dtsi:5411`) |
 
-**Which one the stick uses is UNKNOWN.** The path carries no controller identity (3.1). The Denali description says which
+**Before S0, which one the stick uses was UNKNOWN; S0 answered it on the unit: `usb_1_ss0` (section 12).** The path carries
+no controller identity (3.1). The Denali description says which
 connector each controller serves, not which connector the operator used. Hamoa has three more DWC3 controllers that Denali
 leaves disabled, and nothing excludes that firmware uses one of them (UNKNOWN). Three discriminators exist, cheapest first:
 
@@ -344,6 +356,10 @@ All of it uses boot services and writes nothing. Any failure prints a reason and
 - **Conditional GO for S1 to S6**, only if S0 shows at EL2 for the stick's controller: gate ON (GDSC and all required clocks
   running), a block that answers as an xHCI with a sane identity, and an SMMU stream that is bypass or that maps q1n1's DMA
   arena (or no SMMU in the way), with no fault.
+- **S0 outcome (OBSERVED once, section 12).** The gate is ON and the identity is sane, so the first two conditions are met.
+  The SMMU condition is not decided: both streams translate through context bank 3 and S0 did not read it, so neither GO nor
+  SC2 applies yet. S0 also found what this study had not anticipated: the xHC is halted with HCE set. The next step is the
+  read-only S0b of section 12, not S1.
 - **NO-GO** for (iv). (iii) only as the M10 experiment. (v) yes, in parallel.
 
 **Stop criteria.** Each is a point at which work on the stick writer stops and the plan is reviewed, not retried.
@@ -587,23 +603,26 @@ What passing shows (EXPERIMENTAL):
   document against the pinned sources.
 
 What passing does not show: that a real stick answers as the fake does; that q1n1's xHCI driver can carry these bytes; that
-any claim in section 3 about the unit is true. Hardware: NOT RUN.
+any claim in section 3 about the unit is true beyond what section 12 records. Hardware: NOT RUN for the writer.
 
 ## 9. Evidence summary
 
 | Claim | Label | Where |
 | --- | --- | --- |
-| The stick's path has two USB nodes, so a device (a hub) is in front of it | INFERRED (path OBSERVED; EDK2 numbering VERIFIED by reading) | 3.1 |
-| Which of the two Denali controllers the stick uses | UNKNOWN | 3.2 |
-| The xHC is halted at EL2 by firmware's ExitBootServices handler | INFERRED | 3.3 |
-| GDSC, clocks, PHY, repeater, SMMU and coherence state at EL2 | UNKNOWN | 3.3 |
-| M2, M1, M1b, M1c and M6a are read-only at EL2 | VERIFIED as a classification; not run | 3.5 |
+| The stick's path has two USB nodes and a hub is in front of it (slots 1 and 2 are hub-shaped, the stick has route string 3) | OBSERVED (S0; that slots 1 and 2 are hub functions is INFERRED from the endpoint shape) | 3.1, 12 |
+| Which of the two Denali controllers the stick uses | OBSERVED (S0): `usb_1_ss0` | 3.2, 12 |
+| The xHC is halted at EL2 | OBSERVED (S0); that firmware's ExitBootServices handler halted it is INFERRED | 3.3, 12 |
+| The xHC reports HCE (USBSTS bit 12) at EL2, which it did not before ExitBootServices | OBSERVED (S0); cause UNKNOWN | 12 |
+| GDSC and clocks of both controllers at EL2 | OBSERVED (S0): on | 3.3, 12 |
+| SMMU streams `0x1420` and `0x1460` at EL2 | OBSERVED (S0): translate through context bank 3 | 3.3, 12 |
+| PHY, repeater, retimer, context bank 3 contents, DMA coherence at EL2 | UNKNOWN | 3.3, 12 |
+| M2, M1, M1b, M1c and M6a are read-only at EL2 | VERIFIED as a classification; run once (S0) without a fault | 3.5, 12 |
 | `ResetSystem` does not work after the bounce | OBSERVED (X1) | 3.4, 4.6 |
 | Raw writes into a tagged, pre-allocated region are guarded against wrong maps and device faults | EXPERIMENTAL (host tests) | 4.5, 5 |
 | A real stick has a BOT interface and answers like the fake | UNKNOWN / not shown | 4.6, 8 |
 | Effort and boot counts | INFERRED (estimates, no data) | 6 |
 | q1n1 can address a device behind a hub | VERIFIED false (G03) | 7 |
-| Any behaviour of the unit with this design | not established | NOT RUN |
+| Any behaviour of the writer on the unit | not established | NOT RUN |
 
 ## 10. Pinned sources
 
@@ -641,9 +660,12 @@ The first two need the operator.
 
 1. **Q1. Hub.** Is the stick plugged straight into the unit's USB-C port, or through an adapter, dock or hub? If it is
    direct, the two-node path of 3.1 is a surprise worth a photograph of the setup. If it is behind a hub, may the next sessions
-   plug it straight in? (If not: S1a or S1.5.) **Answered 2026-11-14 (operator): through an adapter or hub.** Whether the
-   stick may be plugged in directly is not yet asked; S1a or S1.5 stay on the table.
-2. **Q2. Which port.** Which of the unit's USB-C ports is the stick in, so that D3 of 3.2 has a starting point?
+   plug it straight in? (If not: S1a or S1.5.) **Answered 2026-11-14 (operator): through an adapter or hub.** S0 confirmed an
+   active hub (section 12). Whether the stick may be plugged in directly (a USB-C stick, or a passive adapter with no hub
+   in it) is not yet asked; S1.5 stays on the table and S1a is unlikely (section 12).
+2. **Q2. Which port.** Which of the unit's USB-C ports is the stick in, so that D3 of 3.2 has a starting point? S0 says
+   `usb_1_ss0` carries it now (section 12). The path node was `Pci(0x81,0x0)` in the earlier report of 3.1, which suggests
+   (INFERRED) that the stick was then in the other port. The operator can say which physical port is which.
 3. **Q3. Imaging.** Can the operator write a disk image to the stick (W1b), or must the log region be created by copying files
    (W2, which needs a q1n1 FAT walker)? Will the operator keep the stick on an MBR disk (GPT is refused)?
 4. **Q4. Authorization.** May A1 (the first write to an xHC register at EL2, S1) and A2 (the first sector write to the stick,
@@ -653,7 +675,58 @@ The first two need the operator.
 6. **Q6. Camera.** Is a fixed camera, with a Mac-side decoder, worth setting up in parallel (alternative (v))?
 7. **Q7. Retention.** Is the M10 experiment to run now, since it is cheap and independent?
 
-## Appendix A. The page lines of the first survey boot (S0; EXPERIMENTAL in the q1n1 fork, hardware NOT RUN)
+## 12. Result of the S0 survey on the unit (OBSERVED, one unit, one boot)
+
+**What ran.** Autorun step 2 of the plan `nv2-then-survey` (nothing typed): `SLBOUNCE-DEVHE-MARK.EFI`, then
+`Q1N1-STK.EFI --el2`, q1n1 build `8235433AAD59`. The scoped sweep accepted the two ranges the build declared (its image and
+its memory-map copy, each inside one descriptor), the bounce happened and q1n1 reached EL2 (`HCR_EL2` `0x88000010`: E2H 0,
+TGE 1). The page stayed up for at least 20 s (uptime 4, 12 and 20 s in three photographs). The survey ran to its end
+(`STK AT DONE` and a verdict line) with no fault, no hang and no write: it only loads. Seven photographs; every STK value was
+re-read against enlarged crops. This is one boot of one unit, not a distribution.
+
+| # | Question | Survey lines | What the unit showed | Label | Consequence |
+| --- | --- | --- | --- | --- | --- |
+| 1 | The stick's controller | P2 `U0` | The baseline line, which is printed only for the host controller whose BAR 0 equals the `usb_1_ss0` window `0x0a600000`, appeared. Firmware lists four xHCI handles; the survey shows three (BAR 0 `0x0a000000`, `0x0a400000`, `0x0a200000`) | OBSERVED | S1 targets `usb_1_ss0`. `usb_1_ss1` (`0x0a800000`) was never started by firmware |
+| 2 | The path | `SELF`, `HUB` | `Pci(0x80,0x0)/USB(0x1,0x0)/USB(0x2,0x0)`: two USB nodes (root port index 1, hub port index 2). The report in 3.1 had `Pci(0x81,0x0)` | OBSERVED | The shape is as 3.1 says. INFERRED: the PCI-style node number follows the controller, so the stick was then in the other port (Q2) |
+| 3 | The hub | `SLOT` | Firmware slot 1: high speed, root port 1, interrupt IN with a 1-byte packet. Slot 2: SuperSpeed, root port 2, interrupt IN with a 2-byte packet. Slot 3: SuperSpeed, route string 3, bulk OUT and bulk IN with 1024-byte packets, the stick. The Hub flag reads 0 in all three slot contexts | OBSERVED; that slots 1 and 2 are the two halves of one hub is INFERRED from the endpoint shape | An active hub (a USB 2 and a USB 3 hub function, one per root port) is in front of the stick: the adapter is not passive. q1n1 has no route string or hub code (G03), so S1.5 is needed unless the stick can go in directly (Q1) |
+| 4 | The stick | `BLK`, `USBIO` | 512-byte blocks, removable, not read-only, partition at sector `0x800`; `bcdUSB` `0x310`; interface class 8, subclass 6, protocol `0x50` (mass storage, SCSI, Bulk-Only); bulk IN `0x82`, bulk OUT `0x01`, 1024-byte packets | OBSERVED | Firmware drives it as BOT, not UAS: the UAS clause of SC4 is not triggered, and BOT at SuperSpeed is what S2 to S5 must carry |
+| 5 | Power and clocks | `GCC`, `GATE` | Both controllers: GDSC power bit set and software collapse clear; the five controller clocks read `0x1`; the shared clocks read NoC `0x1`, system `0x1`, north `0x0`, south `0x0` (raw values, bit 31 clear in all of them, which is what the gate tests). Gate ON for both | OBSERVED | SC1 is not triggered: nothing needs a GCC write to be read |
+| 6 | Identity | `ID`, `XECP`, `DWC3` | xHCI 1.10, 64 slots, 2 ports (port 1 USB 2, port 2 USB 3), 64-byte contexts; DWC3 `GSNPSID` `0x33313130`, host mode (`PRTCAPDIR` 1, `CURMOD` 1), no latched bus error; identical on both controllers | OBSERVED | The second condition of the conditional GO is met |
+| 7 | xHC run state | `OP`, P2 `U0` | At EL2: `USBCMD` 0, `USBSTS` `0x1019` = HCH, EINT, PCD and **HCE (bit 12)**; HSE 0, CNR 0; DCBAAP and CONFIG still firmware's. At P2, before ExitBootServices, the same controller ran (`USBCMD` 1, `USBSTS` `0x18`, command ring running) and HCE was clear | OBSERVED | Halted, as 3.3 expected (INFERRED: by firmware's handler). HCE appeared between P2 and P3; its cause is UNKNOWN (firmware's ExitBootServices handler, the hypervisor swap, or a DMA failure; the DWC3 latched no bus error, which weakly argues against the last). The survey decodes HSE but not HCE, so HCE is visible only in the raw value. A controller with HCE set needs a host controller reset, which clears all slots and the root hub: S1a is unlikely to work (INFERRED) and S1 starts with a reset and a full enumeration |
+| 8 | Ports | `PORT` | Port 1 `PORTSC` `0xE03` (connected, enabled, powered, high speed, link state U0). Port 2 `0x81203` (the same at SuperSpeed, warm-reset-change flag set). Both equal the values at P2 | OBSERVED | The links stayed in U0 through the halt and the bounce, so the PHYs and the hub kept their state (INFERRED). No PHY register was read (M3 stays UNIMPLEMENTED) |
+| 9 | Firmware's rings | `FWRINGS`, `SLOT` | `DCBAAP` `0xCF412000`, event ring segment table `0xCF415240`, event dequeue pointer `0xCF414CB8`, all RAM; three slot contexts decode sanely (configured, addresses 1 to 3). `CRCR` reads 0 on a halted controller | OBSERVED | Nothing reused or freed the firmware's xHCI memory by P3, and CPU reads of it after the sweep decode (INFERRED: coherent enough) |
+| 10 | The other controller | `OP`, `PORT` | `USBSTS` `0x1` (halted, no error), `DCBAAP` 0, both ports in RxDetect, nothing connected | OBSERVED | Untouched by firmware |
+| 11 | SMMU | `SMMU` | `ID0` `0x7C017E9A` (154 stream match registers); `sCR0` `0x230406` (unmatched streams fault, client port enabled); no global fault. Stream `0x1420` matches register 3 and stream `0x1460` register 4; both translate into context bank 3 | OBSERVED | Neither bypass nor fault. What context bank 3 maps was not read: this is the SC2 question and it is open |
+
+The verdict line was `VERDICT U0=STICK-PRESENT-HALTED U1=IDLE SMMU=TRANS`.
+
+**Against section 4.7.** The conditional GO needs, for the stick's controller, a gate that is ON (met), a block that answers
+as an xHCI with a sane identity (met) and an SMMU stream that is bypass or maps q1n1's arena without a fault (not decided).
+SC1 is not triggered. SC2 is neither triggered nor cleared. SC3 to SC6 are not reached: S1 has not started. Three risks are
+new: HCE (row 7); the hub (row 3), which is now a fact and no longer a possibility; and a translating context bank whose
+tables may live in memory that the hypervisor teardown or q1n1 reuses (UNKNOWN).
+
+**What S0 does not show.** Any DMA by the xHC; the cause of HCE; PHY, repeater and retimer state; which physical port is
+`usb_1_ss0`; the fourth firmware xHCI handle; whether a reset of this xHC works at EL2; the state of either controller with a
+device attached to `usb_1_ss1`.
+
+**S0b: the read-only follow-up, before any write.** It needs no authorization because it only loads, and it can ride in a boot
+that is happening anyway, as a payload for the payload runner (`docs/SP11-PAYLOAD.md` in the q1n1 fork). It should print, in
+order and bounded:
+
+1. the whole of `USBSTS` and the last few event TRBs before the firmware's event dequeue pointer, to look for the cause of HCE;
+2. SMMU context bank 3: its base register, control and translation-control registers, the translation table base, the memory
+   attributes, the fault status, address and syndrome; the fault status of every context bank (non-zero only); the global
+   fault address and syndrome registers;
+3. a read-only walk of context bank 3's tables (RAM loads only, bounded), printed as coalesced IOVA ranges that say whether
+   each maps to itself. This decides where an EL2 xHCI driver may put its rings: anywhere in DRAM, or only inside the
+   firmware's own xHCI memory.
+
+The S0 build does not decode HCE, lists three of four xHCI handles and cannot read a context bank; S0b covers these without a
+new survey image. S1 follows only if S0b does not trigger SC2, with A1 (section 11, Q4) granted, the hub question (Q1)
+answered and S1.5 (or a direct connection) planned. Until then A1 and A2 stay NOT granted.
+
+## Appendix A. The page lines of the survey boot (S0; EXPERIMENTAL in the q1n1 fork; ran once on the unit, section 12)
 
 The survey as built differs from this table in a few named places (extra verdict names, extra fields and lines, the baseline
 read through the firmware's PCI I/O instead of raw MMIO); the fork's `docs/SP11-STK-SURVEY.md` lists them.
