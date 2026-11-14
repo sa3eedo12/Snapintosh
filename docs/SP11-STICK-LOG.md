@@ -38,9 +38,10 @@ guarded log writer, and their tests (section 8).
    Q1 in section 11).** The UEFI path has two USB nodes; in EDK2's code each USB node is
    one device on the way down, so the second node is a device behind the first, a hub (section 3.1). q1n1's xHCI driver
    cannot address a device behind a hub (G03 of the host-link study). The cheapest fix was an operator answer (Q1, section 11):
-   plug the stick straight into the unit. Whether that is possible is still open: the operator's answer was only that the
-   stick goes through the adapter. Hub support is stage S1.5 (about 250 to 350 lines, 2 to 4
-   more boots). S0 makes the alternative, adopting the firmware's own slot state (S1a), unlikely: the xHC reports a host
+   plug the stick straight into the unit. **The operator answered on 2026-11-14 that a USB-C stick or a passive adapter is
+   available, so the next boots can use a direct connection.** Hub support is stage S1.5 (about 250 to 350 lines, 2 to 4
+   more boots) and is then needed only if a direct connection does not work. S0 makes the alternative, adopting the
+   firmware's own slot state (S1a), unlikely: the xHC reports a host
    controller error and needs a reset, which drops every slot (INFERRED, section 12).
 4. **The stick's controller is `usb_1_ss0` at `0x0a600000` (OBSERVED by S0, section 12).** The survey prints its baseline line
    only for the host controller whose BAR 0 equals that window, and it printed. `usb_1_ss1` at `0x0a800000` had nothing
@@ -661,8 +662,9 @@ The first two need the operator.
 1. **Q1. Hub.** Is the stick plugged straight into the unit's USB-C port, or through an adapter, dock or hub? If it is
    direct, the two-node path of 3.1 is a surprise worth a photograph of the setup. If it is behind a hub, may the next sessions
    plug it straight in? (If not: S1a or S1.5.) **Answered 2026-11-14 (operator): through an adapter or hub.** S0 confirmed an
-   active hub (section 12). Whether the stick may be plugged in directly (a USB-C stick, or a passive adapter with no hub
-   in it) is not yet asked; S1.5 stays on the table and S1a is unlikely (section 12).
+   active hub (section 12). **Asked the same day whether the stick can go in without a hub: yes, the operator has a USB-C
+   stick or a plain passive adapter.** The next boots use a direct connection; S1.5 stays on the table only as the fallback,
+   and S1a is unlikely (section 12).
 2. **Q2. Which port.** Which of the unit's USB-C ports is the stick in, so that D3 of 3.2 has a starting point? S0 says
    `usb_1_ss0` carries it now (section 12). The path node was `Pci(0x81,0x0)` in the earlier report of 3.1, which suggests
    (INFERRED) that the stick was then in the other port. The operator can say which physical port is which.
@@ -720,11 +722,13 @@ order and bounded:
    fault address and syndrome registers;
 3. a read-only walk of context bank 3's tables (RAM loads only, bounded), printed as coalesced IOVA ranges that say whether
    each maps to itself. This decides where an EL2 xHCI driver may put its rings: anywhere in DRAM, or only inside the
-   firmware's own xHCI memory.
+   firmware's own xHCI memory;
+4. the firmware's slot contexts and the port status registers of both controllers again, taken with the stick plugged in
+   directly (no hub): the topology the writer should target, and whether HCE appears without a hub in the path.
 
 The S0 build does not decode HCE, lists three of four xHCI handles and cannot read a context bank; S0b covers these without a
-new survey image. S1 follows only if S0b does not trigger SC2, with A1 (section 11, Q4) granted, the hub question (Q1)
-answered and S1.5 (or a direct connection) planned. Until then A1 and A2 stay NOT granted.
+new survey image. S1 follows only if S0b does not trigger SC2, with A1 (section 11, Q4) granted and a direct connection
+shown to work (otherwise S1.5 is planned). Until then A1 and A2 stay NOT granted.
 
 ## Appendix A. The page lines of the survey boot (S0; EXPERIMENTAL in the q1n1 fork; ran once on the unit, section 12)
 

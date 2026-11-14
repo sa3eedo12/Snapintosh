@@ -1176,7 +1176,9 @@ the test-only no-sweep build. **On the unit that run printed `EBSRANGES STATE=DE
 accepted the range, the bounce happened, and T01 and T02 ran at EL2 under the de-VHE slbounce build: K1 NV2: GO again. The regime
 (`E2H` 0) is INFERRED, not read: the page prints no `HCR_EL2`, and T02's stub keeps the entry `E2H`. T03 froze for the fifth time
 (footer `RUNNING T03 TIMER`, then the board resets), so T04 to T09 did not run again; the cause is independent of `E2H` and of the
-sweep. The leading explanation, INFERRED and untested, is T03's read of `CNTPOFF_EL2` (ECV is 2 on this core) trapping to EL3.**
+sweep. The leading explanation, INFERRED and untested, is T03's read of `CNTPOFF_EL2` (ECV is 2 on this core) trapping to EL3.
+Boot 2 adds weak support (INFERRED): q1n1 itself stayed up for at least 20 s at EL2 without a reset, so the reset about 12 s
+after the T03 freeze is not an unconditional timeout.**
 [SP11-STICK-LOG.md](SP11-STICK-LOG.md) designs an EL2 writer that puts results on the stick
 (B3, the first step of B2) with stop criteria and two authorizations that nobody has granted: A1, the first write to an
 xHCI register at EL2, and A2, the first sector written to the stick. Its stage S0 is built in the q1n1 fork as an opt-in,
@@ -1192,7 +1194,8 @@ the firmware's rings and slot contexts are intact in RAM; both USB streams trans
 contents nobody has read, so whether the xHC can DMA into an EL2 arena is open.** The next step is a read-only follow-up (S0b)
 as a payload, not a write; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 12 has the table. The operator answered the study's
 Q1: the stick sits behind an adapter or hub, which S0 confirmed. q1n1's xHCI driver cannot address a device behind a hub, so
-the study's S1.5 is needed unless the stick can be plugged in directly (not yet asked). The default q1n1 builds are
+the study's S1.5 is needed only if the stick cannot be plugged in directly: the operator has a USB-C stick or a passive adapter
+(2026-11-14). The default q1n1 builds are
 byte-identical to the commit before the survey (`tools/test-q1n1-sp11-entry.py` in the fork).
 
 **Stick payload runner (EXPERIMENTAL; hardware NOT RUN).** The fork's third image, `Q1N1-PAYLOAD.EFI` (gate
