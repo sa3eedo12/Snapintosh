@@ -243,15 +243,25 @@ typedef struct {
     int real_reg_changes;
     int stale_pattern_in_page;
     int prepare_fails, hcr_fails_at, run_fails_at, restore_fails, tpidr_fails;
+    int hcr_read_fails;
     /* recorded */
     int prepared, restored, restores;
     int hcr_nv, hcr_nv2, hcr_map;
     int hcr_calls, run_calls, tpidr_calls, syncs, order_violations;
+    /* HCR_EL2 as the model holds it: what the firmware left until the first set_hcr, the stub's
+     * value after it, the firmware's again once restored. hcr_calls_at_read says how many set_hcr
+     * calls had been made when it was read. */
+    uint64_t hcr, entry_hcr;
+    unsigned hcr_reads;
+    int hcr_calls_at_read;
     int log[16];
     unsigned nlog;
     uint64_t page[TESTS_NV2_PAGE_WORDS] __attribute__((aligned(4096)));
     uint64_t tpidr;
 } mockcore;
+
+/* An entry value with HCR_EL2.TGE set and E2H clear, and a stub value that differs from it. */
+#define MC_ENTRY_HCR 0x0000000088000010ull
 
 static void mc_log(mockcore *m, int what)
 {
@@ -284,6 +294,7 @@ static int mc_set_hcr(void *ctx, int nv, int nv2, int map)
     m->hcr_nv = nv;
     m->hcr_nv2 = nv2;
     m->hcr_map = map;
+    m->hcr = tests_hcr_for(m->entry_hcr, nv, nv2);
     return 0;
 }
 
@@ -362,7 +373,20 @@ static int mc_restore(void *ctx)
     mc_log(m, 'R');
     m->restores++;
     m->restored = 1;
+    m->hcr = m->entry_hcr;
     return m->restore_fails ? -1 : 0;
+}
+
+static int mc_real_hcr(void *ctx, uint64_t *v)
+{
+    mockcore *m = ctx;
+
+    m->hcr_reads++;
+    m->hcr_calls_at_read = m->hcr_calls;
+    if (m->hcr_read_fails)
+        return -1;
+    *v = m->hcr;
+    return 0;
 }
 
 static void mc_init(mockcore *m)
@@ -372,11 +396,13 @@ static void mc_init(mockcore *m)
     m->control_traps = 1;
     m->redirect_offset = TESTS_NV2_TARGET_OFFSET;
     m->tpidr = 0x1111;
+    m->entry_hcr = m->hcr = MC_ENTRY_HCR;
 }
 
 static tests_nv2_ops mc_ops(mockcore *m)
 {
-    tests_nv2_ops ops = {m, mc_prepare, mc_set_hcr, mc_run, mc_tpidr, mc_page, mc_sync, mc_restore};
+    tests_nv2_ops ops = {m,        mc_prepare, mc_set_hcr, mc_run,    mc_tpidr,
+                         mc_page, mc_sync,    mc_restore, mc_real_hcr};
 
     return ops;
 }
@@ -652,6 +678,179 @@ void test_x_nv2_run(void)
         CHECK_EQ(r.fatal, 0);
         CHECK_EQ(r.verdict, TV_INCONCLUSIVE);
     }
+}
+
+/* ---- The REGIME row ---- */
+
+static const char *last_row(const tests_result *r)
+{
+    return r->nrows != 0 ? r->rows[r->nrows - 1] : "";
+}
+
+/* The REGIME row as tests_nv2_fill_regime writes it for an observation. */
+static void regime_row(uint64_t hcr, int have, char out[PROBE_LINE_PAYLOAD_MAX + 1])
+{
+    tests_nv2_obs o;
+    tests_result r;
+
+    memset(&o, 0, sizeof o);
+    o.have_entry_hcr = have;
+    o.entry_hcr = hcr;
+    tests_init_result(&r, T_NV2);
+    tests_nv2_fill_regime(&o, &r);
+    tests_result_seal(&r);
+    CHECK_EQ(r.nrows, 1);
+    CHECK_EQ(r.overflow, 0);
+    memcpy(out, r.rows[0], PROBE_LINE_PAYLOAD_MAX + 1);
+}
+
+void test_x_nv2_regime(void)
+{
+    static const struct {
+        uint64_t hcr;
+        const char *row;
+    } cases[] = {
+        {0x0000000088000010ull, "REGIME 0000000088000010 E2H=0 TGE=1"},
+        {0x0000000488000010ull, "REGIME 0000000488000010 E2H=1 TGE=1"},
+        {0x0000000400000000ull, "REGIME 0000000400000000 E2H=1 TGE=0"},
+        {0x0000000008000000ull, "REGIME 0000000008000000 E2H=0 TGE=1"},
+        {0x0000000000000000ull, "REGIME 0000000000000000 E2H=0 TGE=0"},
+        {0xFFFFFFFFFFFFFFFFull, "REGIME FFFFFFFFFFFFFFFF E2H=1 TGE=1"},
+        {0xFFFFFFFBF7FFFFFFull, "REGIME FFFFFFFBF7FFFFFF E2H=0 TGE=0"},
+    };
+    char row[PROBE_LINE_PAYLOAD_MAX + 1], canon[PROBE_LINE_COLS + 1];
+    mockcore m;
+    tests_nv2_ops ops;
+    tests_ctx c;
+    tests_nv2_record rec, rec2;
+    tests_result r, r2;
+    uint8_t bin[TESTS_NV2_BIN_SIZE], bin2[TESTS_NV2_BIN_SIZE];
+    int have = 0, have2 = 0;
+
+    section("nv2 regime");
+    /* The format, value by value. */
+    for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        regime_row(cases[i].hcr, 1, row);
+        CHECK_STR(row, cases[i].row);
+        CHECK_EQ(strlen(row), 35);
+        CHECK_EQ(probe_line_format(canon, row), 0);
+    }
+    regime_row(0xFFFFFFFFFFFFFFFFull, 0, row);
+    CHECK_STR(row, "REGIME NOT READ"); /* the value is never shown when it was not read */
+    CHECK_EQ(probe_line_format(canon, row), 0);
+    /* Any value: the row fits the page, spells out the bits it names and carries all 64. */
+    for (unsigned i = 0; i < 3000; i++) {
+        unsigned long long value = 0, shown = 0;
+        unsigned e2h = 9, tge = 9;
+        uint64_t hcr = rnd();
+
+        if (i % 3 == 1)
+            hcr &= rnd();
+        regime_row(hcr, 1, row);
+        CHECK_EQ(strlen(row), 35);
+        CHECK_EQ(probe_line_format(canon, row), 0);
+        CHECK_EQ(sscanf(row, "REGIME %16llX E2H=%u TGE=%u", &shown, &e2h, &tge), 3);
+        value = hcr;
+        CHECK(shown == value);
+        CHECK_EQ(e2h, (hcr >> 34) & 1u);
+        CHECK_EQ(tge, (hcr >> 27) & 1u);
+    }
+
+    memset(&c, 0, sizeof c);
+    x_good_ids(&c.ids);
+
+    /* A good run: the row closes T02 and shows what the firmware left, read before the first
+     * write of HCR_EL2 and not the stub's value, which is not the same. */
+    mc_init(&m);
+    ops = mc_ops(&m);
+    tests_run_nv2(&c, &ops, NV2R_SOC_X1E80100, 0x1234, &r, &rec, &have);
+    CHECK_EQ(r.verdict, TV_GO);
+    CHECK_STR(last_row(&r), "REGIME 0000000088000010 E2H=0 TGE=1");
+    CHECK(tests_hcr_for(MC_ENTRY_HCR, 1, 1) != MC_ENTRY_HCR);
+    regime_row(tests_hcr_for(MC_ENTRY_HCR, 1, 1), 1, row);
+    CHECK(strcmp(last_row(&r), row) != 0);
+    CHECK_EQ(m.hcr_reads, 1);
+    CHECK_EQ(m.hcr_calls_at_read, 0);
+    CHECK_EQU(m.hcr, MC_ENTRY_HCR); /* and the model ends where the firmware left it */
+    CHECK_EQ(r.nrows, TESTS_DETAIL_MAX); /* T02's budget is exactly full: 7 + 1 + 15 + 1 */
+    CHECK_EQ(r.overflow, 0);
+    CHECK(x_rows_valid(&r));
+    CHECK(have);
+
+    /* The record does not depend on the regime: another entry value changes the one row, and
+     * the 13 record lines, their screen rows and the binary record not at all. */
+    mc_init(&m);
+    m.entry_hcr = m.hcr = 0x0000000488000030ull;
+    ops = mc_ops(&m);
+    tests_run_nv2(&c, &ops, NV2R_SOC_X1E80100, 0x1234, &r2, &rec2, &have2);
+    CHECK_STR(last_row(&r2), "REGIME 0000000488000030 E2H=1 TGE=1");
+    CHECK_EQ(r2.nrows, r.nrows);
+    for (unsigned i = 0; i + 1 < r.nrows && i < r2.nrows; i++)
+        CHECK_STR(r.rows[i], r2.rows[i]);
+    CHECK(have2);
+    CHECK_EQ(tests_nv2rec_pack(&rec, bin), 0);
+    CHECK_EQ(tests_nv2rec_pack(&rec2, bin2), 0);
+    CHECK_EQ(memcmp(bin, bin2, sizeof bin), 0);
+    CHECK_EQ(r2.verdict, r.verdict);
+
+    /* A register that cannot be read, and an ops table from before the read existed. */
+    mc_init(&m);
+    m.hcr_read_fails = 1;
+    ops = mc_ops(&m);
+    tests_run_nv2(&c, &ops, NV2R_SOC_X1E80100, 0x1234, &r, &rec, &have);
+    CHECK_STR(last_row(&r), "REGIME NOT READ");
+    CHECK_EQ(r.verdict, TV_GO);
+    CHECK_EQ(r.overflow, 0);
+    mc_init(&m);
+    ops = mc_ops(&m);
+    ops.real_hcr = NULL;
+    tests_run_nv2(&c, &ops, NV2R_SOC_X1E80100, 0x1234, &r, &rec, &have);
+    CHECK_STR(last_row(&r), "REGIME NOT READ");
+    CHECK_EQ(m.hcr_reads, 0);
+    CHECK_EQ(r.verdict, TV_GO);
+
+    /* A run that did not start (no FEAT_NV): nothing is touched, not even for this row. */
+    mc_init(&m);
+    ops = mc_ops(&m);
+    x_set_nv(&c.ids, 0, 0);
+    tests_run_nv2(&c, &ops, NV2R_SOC_X1E80100, 0x1234, &r, &rec, &have);
+    CHECK_STR(last_row(&r), "REGIME NOT READ");
+    CHECK_EQ(m.hcr_reads, 0);
+    CHECK_EQ(m.nlog, 0);
+    CHECK_EQ(r.overflow, 0);
+    x_good_ids(&c.ids);
+
+    /* A failed set-up still shows the regime it was attempted in, read before anything was
+     * written; a restore that failed leaves the row in place for whoever reads the result. */
+    mc_init(&m);
+    m.prepare_fails = 1;
+    ops = mc_ops(&m);
+    tests_run_nv2(&c, &ops, NV2R_SOC_X1E80100, 0x1234, &r, &rec, &have);
+    CHECK_STR(last_row(&r), "REGIME 0000000088000010 E2H=0 TGE=1");
+    CHECK_EQ(m.hcr_calls_at_read, 0);
+    mc_init(&m);
+    m.restore_fails = 1;
+    ops = mc_ops(&m);
+    tests_run_nv2(&c, &ops, NV2R_SOC_X1E80100, 0x1234, &r, &rec, &have);
+    CHECK_EQ(r.fatal, 1);
+    CHECK_STR(last_row(&r), "REGIME 0000000088000010 E2H=0 TGE=1");
+    /* A mechanics failure whose record is "not-run" twice has no screen form, and the row is
+     * still there, in a result nowhere near full. */
+    mc_init(&m);
+    m.run_fails_at = 1;
+    ops = mc_ops(&m);
+    tests_run_nv2(&c, &ops, NV2R_SOC_X1E80100, 0x1234, &r, &rec, &have);
+    CHECK_STR(last_row(&r), "REGIME 0000000088000010 E2H=0 TGE=1");
+    CHECK_EQ(r.overflow, 0);
+    CHECK(r.nrows < TESTS_DETAIL_MAX);
+    /* FEAT_NV without NV2: the control only. */
+    mc_init(&m);
+    ops = mc_ops(&m);
+    x_set_nv(&c.ids, 1, 0);
+    tests_run_nv2(&c, &ops, NV2R_SOC_X1E80100, 0x1234, &r, &rec, &have);
+    CHECK_STR(last_row(&r), "REGIME 0000000088000010 E2H=0 TGE=1");
+    CHECK_EQ(r.overflow, 0);
+    CHECK(x_rows_valid(&r));
 }
 
 /* ---- The record a run produces ---- */

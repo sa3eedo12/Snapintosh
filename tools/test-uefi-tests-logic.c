@@ -24,6 +24,7 @@
  *       probes/uefi/tests/test/test_x_windows.c \
  *       probes/uefi/tests/test/test_x_report.c probes/uefi/tests/test/test_x_hook.c \
  *       probes/uefi/tests/test/test_x_ebs.c \
+ *       probes/uefi/tests/test/test_x_v2.c \
  *       probes/uefi/tests/tests_types.c \
  *       probes/uefi/tests/nv2rec.c probes/uefi/tests/regs.c probes/uefi/tests/decode.c \
  *       probes/uefi/tests/nv2.c probes/uefi/tests/sysstate.c probes/uefi/tests/guard.c \
@@ -108,10 +109,13 @@ int main(int argc, char **argv)
     test_x_nv2_classify();
     test_x_nv2_decide();
     test_x_nv2_run();
+    test_x_nv2_regime();
     test_x_record_evidence();
     test_x_record_format();
     test_x_acpi();
     test_x_gic();
+    test_x_t03_cntpoff();
+    test_x_t05_gicc();
     test_x_pcie();
     test_x_smmu_misc();
     test_x_windows();
@@ -122,6 +126,7 @@ int main(int argc, char **argv)
     test_x_hook_console();
     test_x_hook_fatal_page();
     test_x_hook_phase_b_fallback();
+    test_x_hook_post_order();
     test_x_ebs_layout();
     test_x_ebs_bytes();
     test_x_ebs_check();

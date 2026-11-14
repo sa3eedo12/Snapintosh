@@ -32,6 +32,9 @@
 #ifndef TESTS_REQUIRE_MMIO_IN_MAP
 #define TESTS_REQUIRE_MMIO_IN_MAP 0
 #endif
+#ifndef TESTS_READ_CNTPOFF
+#define TESTS_READ_CNTPOFF 0
+#endif
 
 #if PROBE_FAST_TEST
 #define DWELL_S 2u
@@ -53,13 +56,20 @@
 #define WINDOW_POLICY_TEXT "NO-CONFLICT"
 #endif
 
+#if TESTS_READ_CNTPOFF
+#define CNTPOFF_TEXT "READ"
+#else
+#define CNTPOFF_TEXT "NOT-READ"
+#endif
+
 /* The kind of run, as bytes in .rdata: `strings` on the image says whether it is
- * the hardware build or an emulator build, and which device-window policy it
+ * the hardware build or an emulator build, which device-window policy it
  * applies (STRICT: only windows the UEFI memory map lists wholly as MMIO;
  * NO-CONFLICT: also windows the map does not mention, never one it calls RAM or
- * anything else). */
+ * anything else) and whether T03 reads CNTPOFF_EL2 (only an emulator build may). */
 static const char g_kind_tag[] __attribute__((used)) = "SP11X2-KIND=" KIND_TEXT;
 static const char g_policy_tag[] __attribute__((used)) = "SP11X2-WINDOWS=" WINDOW_POLICY_TEXT;
+static const char g_cntpoff_tag[] __attribute__((used)) = "SP11X2-CNTPOFF=" CNTPOFF_TEXT;
 
 static tests_result g_res[TESTS_COUNT + 1];
 static tests_ctx g_tc;
@@ -362,6 +372,7 @@ static void ensure_init(const tests_hook_ctx *c)
     g_tc.zva = tests_sys_zva_ops();
     g_tc.model = TESTS_MODEL_BUILD;
     g_tc.require_mmio_map = TESTS_REQUIRE_MMIO_IN_MAP;
+    g_tc.read_cntpoff = TESTS_READ_CNTPOFF;
     g_tc.acpi_buf = g_acpi_buf;
     g_tc.progress = progress;
     tests_sys_set_fatal(fatal_draw);
@@ -698,37 +709,32 @@ __attribute__((noreturn)) static void halt_not_el2(uint64_t raw)
     probe_cpu_park();
 }
 
+/* The order the tests run in after ExitBootServices, as one list for both flows through phase B.
+ * Where phase A could not run (the Surface Pro 11 reaches EL2 only inside slbounce's
+ * ExitBootServices hook, so tests_hook_pre_ebs takes its NOT_EL2 branch before any test) every
+ * test runs from here. Where phase A did reach EL2 its four tests are already marked run, and are
+ * skipped, so none is repeated or written to the stick twice. Phase A's own order is untouched.
+ *
+ * Why this order. The observations are from the operator's photos of the Surface Pro 11:
+ *   - T01, then T02. T02 is what this image exists to decide (K1), needs only the ID registers
+ *     T01 read, and has completed there (K1 NV2: GO, OBSERVED).
+ *   - T04, T09, T05, T07, T08 next. They sat behind T03, on whose footer the page froze and the
+ *     board reset itself some 12 s later in every run since T01..T04 became the fallback
+ *     (OBSERVED), so none of them has run since. T04 has never run there and no T08 result is
+ *     recorded; T09, T05 and T07 gave results only in the first runs (PASS, a FAIL caused by this
+ *     image's own MADT parsing, UNKNOWN; OBSERVED, docs/SURFACE-PRO-11.md). A test without a
+ *     current result must not wait behind one that hangs the machine.
+ *   - T03 second to last. The default build no longer reads CNTPOFF_EL2 (t_misc.c), but the cause
+ *     of the freeze is INFERRED, not tested, so nothing says that read was the only possible one.
+ *   - T06 last. It is the only other test seen cut off by the reset (once, in its PCIe ECAM read,
+ *     OBSERVED), and a read of an ECAM window can hang the bus (INFERRED).
+ * No test takes another's result except through c->ids, which T01 fills and T01 stays first, so
+ * the order changes no input of any test. The page is redrawn after every test, so a freeze
+ * leaves the verdicts of everything that ran before it on the screen. */
+static const int order_post[] = {T_ID, T_NV2, T_ZVA, T_DRAM, T_GIC, T_SMMU, T_ADSP, T_TIMER, T_PCIE};
+
 __attribute__((noreturn)) void tests_hook_post_ebs(const tests_hook_ctx *c)
 {
-    /* A platform whose only path to EL2 is slbounce's ExitBootServices hook
-     * itself (OBSERVED twice on a Surface Pro 11 X1E80100: preebs_currentel
-     * decoded to EL1 both times, because the Secure-Launch SMC sequence runs
-     * inside that hook, after the firmware's own ExitBootServices has already
-     * returned) never gets to run these four in phase A: tests_hook_pre_ebs's
-     * CurrentEL check takes the SKIP branch there, before its order_a's loop,
-     * so g_res[id].phase is still 0 (never run) for each of them. Phase B has
-     * just proven EL2 itself (the check above), so this is its first chance.
-     * A platform that did reach EL2 before ExitBootServices already ran and
-     * persisted these to the stick in phase A (g_res[id].phase is 1 there);
-     * this loop must not repeat that work.
-     *
-     * Unlike tests_hook_pre_ebs's order_a ("least intrusive first": ID dump,
-     * timer, DC ZVA, then the NV2 mechanics), this fallback runs T_NV2 right
-     * after T_ID instead of last. T_NV2 only reads c->ids (filled by T_ID:
-     * tests_run_nv2 never touches a T_TIMER or T_ZVA result), so the reorder
-     * changes nothing it depends on. It is deliberate: on this same Surface
-     * Pro 11 unit, a video-timed run OBSERVED the screen hold on "RUNNING T03
-     * TIMER" for the entire ~12-15 s it was recorded, with no FATAL page, and
-     * then the board reset before T_TIMER (or anything after it) could finish
-     * or render. T_TIMER's own loop is bounded by a plain software counter
-     * (200000 guarded single-register reads), not by elapsed time, so this
-     * stall's exact cause is NOT YET CONFIRMED; nothing here assumes one. What
-     * is confirmed is that whatever is resetting this board does so on a
-     * budget too tight to reach T_NV2 in the original order. Running T_NV2
-     * immediately after T_ID spends that budget on the one test this image
-     * exists to answer (the K1 NV2 gate) before T_TIMER can put it at risk. */
-    static const int order_a[] = {T_ID, T_NV2, T_TIMER, T_ZVA};
-    static const int order_b[] = {T_DRAM, T_GIC, T_SMMU, T_PCIE, T_ADSP};
     uint64_t el_raw = tests_sys_currentel();
     uint64_t freq;
     unsigned pages, per_page, countdown;
@@ -754,15 +760,10 @@ __attribute__((noreturn)) void tests_hook_post_ebs(const tests_hook_ctx *c)
      * r->rows[] whenever it has a record, in either phase, so rebuild_report()
      * picks them up with no separate wiring and no risk of duplicating a record
      * phase A already wrote to x2-nv2.bin. */
-    for (unsigned i = 0; i < sizeof order_a / sizeof order_a[0]; i++) {
-        if (g_res[order_a[i]].phase != 0)
+    for (unsigned i = 0; i < sizeof order_post / sizeof order_post[0]; i++) {
+        if (g_res[order_post[i]].phase != 0)
             continue;
-        run_test(order_a[i], 2);
-        rebuild_report();
-        draw_page(0, 1, "TEST DONE");
-    }
-    for (unsigned i = 0; i < sizeof order_b / sizeof order_b[0]; i++) {
-        run_test(order_b[i], 2);
+        run_test(order_post[i], 2);
         rebuild_report();
         draw_page(0, 1, "TEST DONE");
     }

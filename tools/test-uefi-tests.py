@@ -28,6 +28,18 @@ and, for the `declared` variant (probes/uefi/tests/test/suite_x_ebs.py):
     XDeclaredQemuTests   the model image of the variant under QEMU with EDK2, and three test-only
                          builds of it that each make one step of the declaration fail on purpose
 
+and, for the second version of the image (probes/uefi/tests/test/suite_x_v2.py: the order of the
+tests after the bounce, T03 without its CNTPOFF_EL2 read, T05's redistributor frames from the GICC
+structures, T02's REGIME row):
+
+    XV2SourceTests       the order list as the source states it, and the source audit's pin on the
+                         one place CNTPOFF_EL2 may be read, against defective sources
+    XV2BuildTests        --cntpoff: refused for every image for the machine, and what the emulator
+                         image that has it says about itself
+    XV2MutantTests       seeded bugs in each of the four changes, which the native C tests must reject
+    XV2QemuTests         the model image under QEMU with EDK2: the console order of phase A, T03's row,
+                         the REGIME row, the redistributor layout of the QEMU machine
+
 It reuses the probe's test kit (probes/uefi/test/uefi_testkit.py) with its own
 work directory, build/uefi/tests-work.
 
@@ -68,8 +80,9 @@ kit.WORK = ROOT / "build" / "uefi" / "tests-work"
 
 import suite_x  # noqa: E402
 import suite_x_ebs  # noqa: E402
+import suite_x_v2  # noqa: E402
 
-SUITE_MODULES = (suite_x, suite_x_ebs)
+SUITE_MODULES = (suite_x, suite_x_ebs, suite_x_v2)
 
 
 def iter_tests(suite):

@@ -43,6 +43,13 @@ typedef struct {
      * lists all of it as MMIO (see tests_window_policy). 0 admits a window the
      * map does not mention, and still refuses one the map says is something else. */
     int require_mmio_map;
+    /* T03 reads CNTPOFF_EL2 only if this is set, and then only when ID_AA64MMFR0_EL1.ECV says the
+     * register exists. EL2 access to it is also gated at EL3 (SCR_EL3.ECVEn): where firmware
+     * leaves that bit clear the access is taken to EL3, and a monitor that does not handle it can
+     * hang the machine. INFERRED from one frozen page on the Surface Pro 11, not tested there, so
+     * the default is never to read it. Zero unless the build asked (TESTS_READ_CNTPOFF, which only
+     * the emulator images may carry). */
+    int read_cntpoff;
     uint8_t *acpi_buf; /* TESTS_ACPI_BUF_BYTES scratch */
     tests_idset ids;   /* filled by T01, read by T02 and T04 */
     /* Called before each device window is read, with a short text naming it, so

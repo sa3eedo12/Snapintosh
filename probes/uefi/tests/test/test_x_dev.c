@@ -51,6 +51,14 @@ void madt_gicc(tbl *t, uint32_t flags, uint64_t gicr, uint64_t mpidr)
     st64(t->b + at + 68, mpidr);
 }
 
+void madt_gicc_uid(tbl *t, uint32_t flags, uint32_t uid, uint64_t gicr, uint64_t mpidr)
+{
+    size_t at = t->len;
+
+    madt_gicc(t, flags, gicr, mpidr);
+    st32(t->b + at + 8, uid);
+}
+
 void madt_gicd(tbl *t, uint64_t base, unsigned version)
 {
     size_t at = t->len;
@@ -331,7 +339,10 @@ static int dm_rd_sys(void *ctx, int id, uint64_t *v)
     devmodel *d = ctx;
 
     *v = ~0ull;
-    if (id < 0 || id >= TR_COUNT || d->sys_fault[id])
+    if (id < 0 || id >= TR_COUNT)
+        return -1;
+    d->sys_reads[id]++;
+    if (d->sys_fault[id])
         return -1;
     if (id == TR_CNTPCT_EL0) {
         if (!d->counter_stuck)
@@ -975,7 +986,8 @@ void test_x_smmu_misc(void)
         CHECK_EQ(r.verdict, TV_UNKNOWN);
         w_free(w);
     }
-    w_init(w); /* ECV >= 2 but CNTPOFF_EL2 faults */
+    w_init(w); /* ECV >= 2 but CNTPOFF_EL2 faults, in a build that reads it */
+    w->ctx.read_cntpoff = 1;
     w->dm.sys[TR_CNTFRQ_EL0] = 1000000000ull;
     w->dm.sys_fault[TR_CNTPOFF_EL2] = 1;
     tests_run_timer(&w->ctx, &r);

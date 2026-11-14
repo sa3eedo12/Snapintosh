@@ -55,6 +55,7 @@ int tests_madt_parse(const uint8_t *t, size_t len, tests_madt *out)
                 if (out->n_cpus < TESTS_MAX_CPUS) {
                     out->mpidr[out->n_cpus] = probe_le64(t + off + 68);
                     out->gicc_gicr[out->n_cpus] = probe_le64(t + off + 60);
+                    out->uid[out->n_cpus] = probe_le32(t + off + 8);
                     out->n_cpus++;
                 } else {
                     out->truncated++;
@@ -75,6 +76,7 @@ int tests_madt_parse(const uint8_t *t, size_t len, tests_madt *out)
         case 0x0E: /* GICR discovery range */
             if (elen < 16u)
                 return -1;
+            out->n_gicr_seen++;
             keep_gicr(out, probe_le64(t + off + 4), probe_le32(t + off + 12));
             break;
         case 0x0F: /* GIC ITS */
@@ -91,6 +93,29 @@ int tests_madt_parse(const uint8_t *t, size_t len, tests_madt *out)
         return -1;
     out->valid = 1;
     return 0;
+}
+
+unsigned tests_madt_gicc_frames(const tests_madt *m, tests_gicc_frame out[TESTS_MAX_CPUS])
+{
+    unsigned n = 0;
+
+    /* A MADT with a discovery range, even one the parser dropped as bad, keeps the discovery
+     * layout: its refusal is reported there, and no second source is guessed in its place. */
+    if (!m->valid || !m->have_gicd || m->gicd_version < 3u || m->n_gicr_seen != 0)
+        return 0;
+    for (unsigned i = 0; i < m->n_cpus && n < TESTS_MAX_CPUS; i++) {
+        unsigned at = n++;
+
+        /* Insertion by ACPI Processor UID; shifting only past a strictly larger UID keeps
+         * equal ones in table order. */
+        while (at > 0 && m->uid[out[at - 1].cpu] > m->uid[i]) {
+            out[at] = out[at - 1];
+            at--;
+        }
+        out[at].base = m->gicc_gicr[i];
+        out[at].cpu = i;
+    }
+    return n;
 }
 
 int tests_mcfg_parse(const uint8_t *t, size_t len, tests_mcfg *out)

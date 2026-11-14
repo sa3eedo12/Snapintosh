@@ -187,6 +187,8 @@ int tests_sys_quiesce(void)
 /* ---- Registers the tests read ---- */
 
 static uint64_t h_sysval[TR_COUNT];
+static unsigned h_sysreads[TR_COUNT]; /* guarded reads made of each register */
+static int h_hang_on_read = -1;       /* a register whose read never returns: the CPU parks in it */
 
 static int h_rd_sys(void *ctx, int id, uint64_t *v)
 {
@@ -200,6 +202,9 @@ static int h_rd_sys(void *ctx, int id, uint64_t *v)
     }
     if (id < 0 || id >= TR_COUNT)
         return -1;
+    h_sysreads[id]++;
+    if (id == h_hang_on_read)
+        probe_cpu_park();
     if (id == TR_CNTPCT_EL0 || id == TR_CNTVCT_EL0) {
         *v = probe_cpu_counter();
         return 0;
@@ -306,6 +311,14 @@ static int h_real_tpidr(void *ctx, uint64_t *v)
     return 0;
 }
 
+/* HCR_EL2 as the register file holds it: the firmware's value until the NV2 core writes it. */
+static int h_real_hcr(void *ctx, uint64_t *v)
+{
+    (void)ctx;
+    *v = hb.reg[W_HCR_EL2];
+    return 0;
+}
+
 static uint64_t *h_page_fn(void *ctx)
 {
     (void)ctx;
@@ -327,7 +340,8 @@ static int h_restore(void *ctx)
 }
 
 static const tests_nv2_ops h_nv2_ops = {NULL,       h_prepare,   h_set_hcr,    h_run,
-                                        h_real_tpidr, h_page_fn, h_page_sync, h_restore};
+                                        h_real_tpidr, h_page_fn, h_page_sync, h_restore,
+                                        h_real_hcr};
 
 const tests_nv2_ops *tests_sys_nv2_ops(void)
 {
@@ -439,6 +453,8 @@ static void h_reset(void)
     /* A plausible core: ID registers of a core with NV2, a counter that advances. */
     x_good_ids(&ids);
     memset(h_sysval, 0, sizeof h_sysval);
+    memset(h_sysreads, 0, sizeof h_sysreads);
+    h_hang_on_read = -1;
     for (int ti = 0; ti < TI_COUNT; ti++)
         h_sysval[tests_ti_sysreg(ti)] = ids.v[ti];
     h_sysval[TR_CNTFRQ_EL0] = 1000000;
@@ -938,16 +954,14 @@ static int report_has_row(const char *needle)
  * here, and QEMU) is unaffected: phase A's own run and stick write stay exactly
  * as they were, and phase B does not repeat them.
  *
- * The fallback's own run order deliberately differs from phase A's order_a: a
- * video-timed run on the same Surface Pro 11 unit OBSERVED the board reset
- * during T_TIMER (T03) before it, or anything after it, could finish or
- * render, so the fallback runs T_NV2 right after T_ID instead of last -
- * order_a_fallback_ids below, not order_a_normal_ids. */
+ * The post-bounce order deliberately differs from phase A's order_a, and from the order this
+ * fallback ran in before: see the comment at order_post in hook.c, and test_x_hook_post_order
+ * below, which pins it. */
 void test_x_hook_phase_b_fallback(void)
 {
     static const int order_a_normal_ids[] = {T_ID, T_TIMER, T_ZVA, T_NV2};
-    static const int order_a_fallback_ids[] = {T_ID, T_NV2, T_TIMER, T_ZVA};
-    static const int order_b_ids[] = {T_DRAM, T_GIC, T_SMMU, T_PCIE, T_ADSP};
+    static const int order_post_ids[] = {T_ID, T_NV2, T_ZVA, T_DRAM, T_GIC, T_SMMU, T_ADSP, T_TIMER, T_PCIE};
+    static const int order_b_ids[] = {T_DRAM, T_GIC, T_SMMU, T_ADSP, T_PCIE};
     int ret;
 
     section("hook: phase b fallback");
@@ -969,13 +983,10 @@ void test_x_hook_phase_b_fallback(void)
     CHECK_EQ(h_resets, 1);
     CHECK_EQ(h_stick_calls, 0); /* still nothing: no phase-B test may reach the stick */
     CHECK_EQ(h_run_seq_n, 9);
-    for (unsigned i = 0; i < 4; i++)
-        CHECK_EQ(h_run_seq[i], order_a_fallback_ids[i]); /* T_NV2 right after T_ID, before order_b */
-    for (unsigned i = 0; i < 5; i++)
-        CHECK_EQ(h_run_seq[4 + i], order_b_ids[i]); /* order_b itself unchanged */
-    for (unsigned i = 0; i < 4; i++) {
-        CHECK_EQ(g_res[order_a_fallback_ids[i]].phase, 2); /* ran in phase B this time */
-        CHECK(g_res[order_a_fallback_ids[i]].verdict != TV_NOT_RUN); /* a real result, not the bug's NOT-RUN */
+    for (unsigned i = 0; i < 9; i++) {
+        CHECK_EQ(h_run_seq[i], order_post_ids[i]);
+        CHECK_EQ(g_res[order_post_ids[i]].phase, 2); /* ran in phase B this time */
+        CHECK(g_res[order_post_ids[i]].verdict != TV_NOT_RUN); /* a real result, not the bug's NOT-RUN */
     }
     CHECK_EQ(g_res[T_NV2].verdict, TV_GO);
     /* tests_run_nv2 (t_misc.c) already appends tests_nv2rec_screen_rows()'s lines
@@ -993,8 +1004,8 @@ void test_x_hook_phase_b_fallback(void)
     CHECK_EQ(h_stick_calls, 0);
     run_post();
     CHECK_EQ(h_parked, 1);
-    for (unsigned i = 0; i < 4; i++)
-        CHECK_EQ(g_res[order_a_fallback_ids[i]].phase, 2);
+    for (unsigned i = 0; i < 9; i++)
+        CHECK_EQ(g_res[order_post_ids[i]].phase, 2);
     CHECK_EQ(g_res[T_NV2].verdict, TV_GO);
     CHECK(report_has_row("K1 NV2: GO"));
 
@@ -1020,4 +1031,123 @@ void test_x_hook_phase_b_fallback(void)
         CHECK_EQ(h_run_seq[4 + i], order_b_ids[i]);
         CHECK_EQ(g_res[order_b_ids[i]].phase, 2);
     }
+}
+
+/* ---- The order after the bounce, and what a freeze leaves on the screen ---- */
+
+static int order_index(int id)
+{
+    for (unsigned i = 0; i < sizeof order_post / sizeof order_post[0]; i++)
+        if (order_post[i] == id)
+            return (int)i;
+    return -1;
+}
+
+/* Where in the sequence of scope entries (the order tests actually started in) a test is, or -1. */
+static int run_position_of(int id)
+{
+    for (unsigned i = 0; i < h_run_seq_n && i < sizeof h_run_seq / sizeof h_run_seq[0]; i++)
+        if (h_run_seq[i] == id)
+            return (int)i;
+    return -1;
+}
+
+/* 1 if the summary rows of the report carry a verdict for the test other than NOT-RUN. */
+static int summary_has_verdict(int id)
+{
+    char head[8];
+
+    snprintf(head, sizeof head, "T0%d ", id);
+    for (unsigned i = 0; i < g_rep.count && i < 12; i++)
+        if (strncmp(g_rep.row[i], head, 4) == 0)
+            return strstr(g_rep.row[i], "NOT-RUN") == NULL;
+    return 0;
+}
+
+void test_x_hook_post_order(void)
+{
+    static const int fallback[] = {T_ID, T_NV2, T_ZVA, T_DRAM, T_GIC, T_SMMU, T_ADSP, T_TIMER, T_PCIE};
+    static const int normal[] = {T_ID, T_TIMER, T_ZVA, T_NV2, T_DRAM, T_GIC, T_SMMU, T_ADSP, T_PCIE};
+    /* Never completed on the unit, so they must not wait behind the test that froze it. */
+    static const int never_completed[] = {T_ZVA, T_DRAM, T_GIC, T_SMMU, T_ADSP};
+    unsigned seen[TESTS_COUNT + 1];
+    const tests_result *nv2;
+    int ret;
+
+    section("hook: post-bounce order");
+    /* The list in hook.c: every test exactly once. */
+    memset(seen, 0, sizeof seen);
+    CHECK_EQ(sizeof order_post / sizeof order_post[0], TESTS_COUNT);
+    for (unsigned i = 0; i < sizeof order_post / sizeof order_post[0]; i++) {
+        CHECK(order_post[i] >= 1 && order_post[i] <= (int)TESTS_COUNT);
+        if (order_post[i] >= 1 && order_post[i] <= (int)TESTS_COUNT)
+            seen[order_post[i]]++;
+    }
+    for (unsigned id = 1; id <= TESTS_COUNT; id++)
+        CHECK_EQ(seen[id], 1);
+    /* The rules it exists for. */
+    CHECK_EQ(order_post[0], T_ID);                  /* T02 and T04 read what T01 read */
+    CHECK_EQ(order_post[1], T_NV2);                 /* the test this image exists for follows */
+    CHECK_EQ(order_index(T_PCIE), (int)TESTS_COUNT - 1); /* T06 last */
+    CHECK_EQ(order_index(T_TIMER), (int)TESTS_COUNT - 2); /* T03 second to last */
+    for (unsigned k = 0; k < sizeof never_completed / sizeof never_completed[0]; k++)
+        CHECK(order_index(never_completed[k]) < order_index(T_TIMER));
+
+    /* Phase A could not run at EL2: every test runs after the bounce, in that order, once. */
+    h_reset();
+    h_facts.preebs_el_raw = 4;
+    CHECK_EQ(run_pre(&ret), 0);
+    run_post();
+    CHECK_EQ(h_parked, 1);
+    CHECK_EQ(h_run_seq_n, 9);
+    for (unsigned i = 0; i < 9 && i < h_run_seq_n; i++)
+        CHECK_EQ(h_run_seq[i], fallback[i]);
+    /* T03 does not touch CNTPOFF_EL2 in this build although the ID registers say ECV is 2, and
+     * says so; its verdict is that of the rest of the test. */
+    CHECK_EQ(TESTS_READ_CNTPOFF, 0);
+    CHECK_EQ(g_tc.read_cntpoff, 0);
+    CHECK_EQ(h_sysreads[TR_CNTPOFF_EL2], 0);
+    CHECK(h_sysreads[TR_CNTFRQ_EL0] != 0); /* the test did run */
+    CHECK(result_has_row(&g_res[T_TIMER], "CNTPOFF_EL2 NOT READ (ECV=2)"));
+    CHECK_EQ(g_res[T_TIMER].verdict, TV_PASS);
+    /* T02's last row is the regime the firmware left in HCR_EL2, which the register file held
+     * when the run began, and the register ends where it began. */
+    nv2 = &g_res[T_NV2];
+    CHECK(nv2->nrows != 0);
+    if (nv2->nrows != 0)
+        CHECK_STR(nv2->rows[nv2->nrows - 1], "REGIME 0000000000001111 E2H=0 TGE=0");
+    CHECK_EQU(hb.reg[W_HCR_EL2], 0x1111);
+
+    /* Phase A ran at EL2: its four keep their own order, and the rest follow, T06 last. */
+    h_reset();
+    CHECK_EQ(run_pre(&ret), 0);
+    run_post();
+    CHECK_EQ(h_parked, 1);
+    CHECK_EQ(h_run_seq_n, 9);
+    for (unsigned i = 0; i < 9 && i < h_run_seq_n; i++)
+        CHECK_EQ(h_run_seq[i], normal[i]);
+    CHECK_EQ(h_stick_calls, 1);
+
+    /* The board resets itself while T03 is running, as it did in every run so far: the page
+     * was redrawn after each test that finished, so the verdicts of all that ran before it are
+     * on the screen, T03 and T06 show NOT-RUN, and nothing after T03 started. */
+    h_reset();
+    h_facts.preebs_el_raw = 4;
+    CHECK_EQ(run_pre(&ret), 0);
+    h_hang_on_read = TR_CNTFRQ_EL0;
+    run_post();
+    CHECK_EQ(h_parked, 1);
+    CHECK_EQ(h_resets, 0); /* it never got as far as the countdown */
+    CHECK_EQ(h_run_seq_n, 8);
+    CHECK_EQ(run_position_of(T_TIMER), 7);
+    CHECK_EQ(run_position_of(T_PCIE), -1);
+    for (unsigned id = 1; id <= TESTS_COUNT; id++) {
+        int ran_before = id != T_TIMER && id != T_PCIE;
+
+        CHECK_EQ(summary_has_verdict((int)id), ran_before);
+        if (ran_before)
+            CHECK(g_res[id].verdict != TV_NOT_RUN);
+    }
+    CHECK_EQ(g_res[T_PCIE].verdict, TV_NOT_RUN);
+    CHECK(fb_lit_bytes() > 1000);
 }

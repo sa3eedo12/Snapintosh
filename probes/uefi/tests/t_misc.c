@@ -7,6 +7,11 @@
 
 /* ---- Static statements ---- */
 
+/* T03 never touches CNTPOFF_EL2 unless the build asked for it, so what it does not prove covers
+ * every access to it; a build that reads it says it only did not write it (tests_run_timer). */
+#define TIMER_NOT_PROVES "N: OTHER CORES OR ANY CNTPOFF ACCESS"
+#define TIMER_NOT_PROVES_READ "N: OTHER CORES OR CNTPOFF WRITES"
+
 static const struct {
     int id;
     const char *name;
@@ -15,7 +20,7 @@ static const struct {
 } statements[TESTS_COUNT] = {
     {T_ID, "ID DUMP", "P: ID REGS AS THIS CORE READS THEM", "N: NOT THAT FEATURES WORK (SEE T02)"},
     {T_NV2, "NV2 FUNC", "P: EL1 ACCESS LANDED IN VNCR PAGE", "N: STABLE OVER TIME OR ON OTHER CORES"},
-    {T_TIMER, "TIMER", "P: CNTFRQ, COUNTER, ECV BITS AS READ", "N: OTHER CORES OR CNTPOFF WRITES"},
+    {T_TIMER, "TIMER", "P: CNTFRQ, COUNTER, ECV BITS AS READ", TIMER_NOT_PROVES},
     {T_ZVA, "DC ZVA", "P: DC ZVA ZEROES ONE BLOCK AT EL2", "N: BEHAVIOUR UNDER EL1 OR STAGE 2"},
     {T_GIC, "GIC MADT", "P: GIC REGS AGREE WITH THE MADT", "N: THAT INTERRUPTS ARE DELIVERED"},
     {T_PCIE, "PCIE NVME", "P: LINK AND NVME BAR STATE AS READ", "N: STATE AFTER ANY LATER FW ACTION"},
@@ -100,6 +105,15 @@ void tests_run_id(tests_ctx *c, tests_result *r)
 
 /* ---- T02 ---- */
 
+/* The REGIME row is the last row of T02 on every path, whether or not there is a record to show:
+ * a run that went wrong is the one whose regime is wanted. With a full record T02 then has
+ * exactly TESTS_DETAIL_MAX rows (7 verdict rows, the record header and 15 record rows). */
+static void seal_nv2(tests_result *r, const tests_nv2_obs *obs)
+{
+    tests_nv2_fill_regime(obs, r);
+    tests_result_seal(r);
+}
+
 void tests_run_nv2(tests_ctx *c, const tests_nv2_ops *ops, uint32_t soc, uint32_t build_id,
                    tests_result *r, tests_nv2_record *rec, int *have_record)
 {
@@ -123,7 +137,7 @@ void tests_run_nv2(tests_ctx *c, const tests_nv2_ops *ops, uint32_t soc, uint32_
     if (!*have_record) {
         tests_row_text(r, r->fatal ? "NV2 RECORD: NONE (NOT RESTORED)"
                                    : "NV2 RECORD: NOT WRITTEN (IDS UNREAD)");
-        tests_result_seal(r);
+        seal_nv2(r, &obs);
         return;
     }
     if (tests_nv2rec_lines(rec, lines) != TESTS_NV2_LINES)
@@ -134,13 +148,13 @@ void tests_run_nv2(tests_ctx *c, const tests_nv2_ops *ops, uint32_t soc, uint32_
     if (n == 0) {
         *have_record = 0;
         tests_row_text(r, "NV2 RECORD: NOT WRITTEN (BAD RECORD)");
-        tests_result_seal(r);
+        seal_nv2(r, &obs);
         return;
     }
     tests_row_text(r, "NV2 RECORD (RETYPE: SEE GUIDE):");
     for (unsigned i = 0; i < n; i++)
         tests_row_text(r, screen[i]);
-    tests_result_seal(r);
+    seal_nv2(r, &obs);
 }
 
 /* ---- T03 ---- */
@@ -157,11 +171,14 @@ void tests_run_timer(tests_ctx *c, tests_result *r)
 {
     uint64_t frq = 0, hctl = 0, voff = 0, poff = 0, p0 = 0, vct = 0, p1 = 0;
     int ecv = tests_id_ecv(&c->ids);
-    int ok_frq, ok_hctl, ok_voff, ok_cnt, have_poff = 0, poff_fault = 0, advancing = 0, window;
+    int ok_frq, ok_hctl, ok_voff, ok_cnt, have_poff = 0, poff_skipped = 0, poff_fault = 0, advancing = 0,
+        window;
     probe_sb *sb;
 
     tests_init_result(r, T_TIMER);
     r->label = TL_OBSERVED;
+    if (c->read_cntpoff)
+        r->not_proves = TIMER_NOT_PROVES_READ;
     ok_frq = rd(c, TR_CNTFRQ_EL0, &frq) == 0;
     ok_hctl = rd(c, TR_CNTHCTL_EL2, &hctl) == 0;
     ok_voff = rd(c, TR_CNTVOFF_EL2, &voff) == 0;
@@ -178,8 +195,12 @@ void tests_run_timer(tests_ctx *c, tests_result *r)
         advancing = p1 != p0;
     }
     if (ecv >= 2) {
-        have_poff = 1;
-        poff_fault = rd(c, TR_CNTPOFF_EL2, &poff) != 0;
+        if (c->read_cntpoff) {
+            have_poff = 1;
+            poff_fault = rd(c, TR_CNTPOFF_EL2, &poff) != 0;
+        } else {
+            poff_skipped = 1;
+        }
     }
     /* CNTVCT = physical count - CNTVOFF_EL2, so vct + voff must lie between the two
      * physical reads that bracket it (modular arithmetic: the offset may be larger
@@ -209,12 +230,19 @@ void tests_run_timer(tests_ctx *c, tests_result *r)
         tests_row_hex(r, "CNTVOFF_EL2", voff, 16);
     else
         tests_row_str(r, "CNTVOFF_EL2", "FAULT");
-    if (!have_poff)
+    if (poff_skipped) {
+        if ((sb = tests_row(r)) != NULL) {
+            probe_sb_puts(sb, "CNTPOFF_EL2 NOT READ (ECV=");
+            probe_sb_dec(sb, (uint64_t)ecv);
+            probe_sb_putc(sb, ')');
+        }
+    } else if (!have_poff) {
         tests_row_str(r, "CNTPOFF_EL2", "N/A (ID ECV<2)");
-    else if (poff_fault)
+    } else if (poff_fault) {
         tests_row_str(r, "CNTPOFF_EL2", "FAULT");
-    else
+    } else {
         tests_row_hex(r, "CNTPOFF_EL2", poff, 16);
+    }
     tests_row_str(r, "COUNTER ADVANCES", advancing ? "YES" : "NO");
     tests_row_str(r, "VCT+VOFF WITHIN PCT", window ? "YES" : "NO");
     tests_row_text(r, "CORES: BOOT CPU ONLY");

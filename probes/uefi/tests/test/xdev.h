@@ -35,6 +35,8 @@ void t_start(tbl *t, const char *sig, size_t extra);
 /* Length and checksum, as a firmware table carries them. */
 void t_seal(tbl *t);
 void madt_gicc(tbl *t, uint32_t flags, uint64_t gicr, uint64_t mpidr);
+/* The same with the ACPI Processor UID set (madt_gicc leaves it 0). */
+void madt_gicc_uid(tbl *t, uint32_t flags, uint32_t uid, uint64_t gicr, uint64_t mpidr);
 void madt_gicd(tbl *t, uint64_t base, unsigned version);
 void madt_gicr(tbl *t, uint64_t base, uint32_t len);
 void madt_its(tbl *t, uint64_t base);
@@ -63,6 +65,7 @@ typedef struct {
     /* system registers */
     uint64_t sys[TR_COUNT];
     uint8_t sys_fault[TR_COUNT];
+    unsigned sys_reads[TR_COUNT]; /* guarded reads made of each, whether they faulted or not */
     uint64_t pct;
     int counter_stuck;
     uint64_t vct_offset;

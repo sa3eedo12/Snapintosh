@@ -549,8 +549,10 @@ class XDeclaredBuildTests(Base):
         if shown.returncode != 0:
             raise unittest.SkipTest(f"git cannot show {MAIN_C} at {rev}: {text_of(shown.stderr).strip()}")
         if GATE in text_of(shown.stdout):
-            raise unittest.SkipTest(f"{rev} already contains {GATE}, so comparing with it proves nothing; set "
-                                    f"{BASELINE_ENV} to {revision_before_the_gate()}")
+            raise unittest.SkipTest(f"{rev} already contains {GATE}, so comparing with it proves nothing; the "
+                                    f"comparison was meant for the commit that added the gate, and with "
+                                    f"{BASELINE_ENV}={revision_before_the_gate()} hook.c now also differs by "
+                                    f"the intentional changes of the second image version")
         base = baseline_tree(rev)
         problems = [f"{what} differs from {rev}" for what in gate_off_differences(ROOT, base)]
         # The comparison can fail: with the gate on, the text is not the baseline's.

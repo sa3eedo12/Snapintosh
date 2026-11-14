@@ -150,6 +150,10 @@ void tests_nv2_run(const tests_nv2_ops *ops, const tests_idset *ids, tests_nv2_o
         return;
 
     o->attempted = 1;
+    /* Before prepare(), and so before any write: the stub's HCR is built from this value
+     * (tests_hcr_for keeps its E2H), and the page has to say which regime that was. */
+    if (ops->real_hcr != NULL)
+        o->have_entry_hcr = ops->real_hcr(ops->ctx, &o->entry_hcr) == 0;
     rc = ops->prepare(ops->ctx);
     if (rc != 0) {
         /* A failed prepare has already rolled itself back; only a failed
@@ -399,4 +403,22 @@ void tests_nv2_fill_rows(const tests_idset *ids, const tests_nv2_obs *o,
         probe_sb_puts(sb, tests_nv2_reason_name(v->reason));
     }
     tests_row_text(r, k1_text(v));
+}
+
+void tests_nv2_fill_regime(const tests_nv2_obs *o, tests_result *r)
+{
+    probe_sb *sb = tests_row(r);
+
+    if (sb == NULL)
+        return;
+    probe_sb_puts(sb, "REGIME ");
+    if (!o->have_entry_hcr) {
+        probe_sb_puts(sb, "NOT READ");
+        return;
+    }
+    probe_sb_hex(sb, o->entry_hcr, 16);
+    probe_sb_puts(sb, " E2H=");
+    probe_sb_dec(sb, (o->entry_hcr & TESTS_HCR_E2H) != 0);
+    probe_sb_puts(sb, " TGE=");
+    probe_sb_dec(sb, (o->entry_hcr & TESTS_HCR_TGE) != 0);
 }

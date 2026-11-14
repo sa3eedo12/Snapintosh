@@ -46,11 +46,12 @@ NATIVE_SOURCE = ROOT / "tools" / "test-uefi-tests-logic.c"
 TESTS_DIR = ROOT / "probes" / "uefi" / "tests"
 X_SECTIONS = ("ids and nv classes", "faulty id images", "syndrome and hcr", "guard policy",
               "sysstate and scope", "read windows", "nv2 classifiers", "nv2 decision", "nv2 run",
-              "record evidence", "record format", "acpi tables", "gic against madt",
+              "nv2 regime", "record evidence", "record format", "acpi tables", "gic against madt",
+              "t03 cntpoff", "t05 gicc layout",
               "pcie and nvme", "smmu timer zva misc", "device windows", "report and layout",
               "stick writer",
               "hook: clean run", "hook: cleanup failures", "hook: console deferral",
-              "hook: fatal page", "hook: phase b fallback",
+              "hook: fatal page", "hook: phase b fallback", "hook: post-bounce order",
               "ebs table layout", "ebs table bytes", "ebs range check", "ebs range model")
 # Sources of the image that are not part of the host build: the entry hook and
 # the two files made of privileged instructions (audited as built, not run).

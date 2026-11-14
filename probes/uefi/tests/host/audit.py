@@ -277,9 +277,55 @@ def audit_variable_writes(root: Path) -> list:
     return problems
 
 
+# CNTPOFF_EL2 is read in one place, behind a flag of the test context that only the build option
+# sets. EL2 access to the register is also gated at EL3 (SCR_EL3.ECVEn); firmware that leaves the
+# gate closed takes the access to EL3, where a monitor that does not handle it can hang the machine
+# (INFERRED from one frozen page on the Surface Pro 11, not tested), so no image for the machine
+# may reach the read: tools/build-uefi-tests.py refuses --cntpoff for them, and this audit refuses a
+# second read, a read that is not behind the flag and a second place that sets the flag.
+CNTPOFF_FILE = "t_misc.c"
+CNTPOFF_FLAG_FILE = "hook.c"
+_CNTPOFF_REG = re.compile(r"\bTR_CNTPOFF_EL2\b")
+_CNTPOFF_FLAG = re.compile(r"\bread_cntpoff\b")
+_CNTPOFF_SET = re.compile(r"\bread_cntpoff\s*=(?!=)")
+_CNTPOFF_DEFAULT = re.compile(r"#\s*ifndef\s+TESTS_READ_CNTPOFF\s*\n\s*#\s*define\s+TESTS_READ_CNTPOFF\s+0\s*\n"
+                              r"\s*#\s*endif")
+
+
+def audit_cntpoff_read(root: Path) -> list:
+    """TR_CNTPOFF_EL2 appears once, in t_misc.c, within three lines after `read_cntpoff`; only
+    hook.c assigns that flag, from TESTS_READ_CNTPOFF, which it defaults to 0."""
+    problems = []
+    base = root / "probes" / "uefi"
+    uses = 0
+    for path in sorted([*base.glob("*.[ch]"), *(base / "tests").glob("*.[ch]")]):
+        raw = path.read_text(encoding="utf-8")
+        code = _code_only(raw).splitlines()
+        for n, line in enumerate(code):
+            if _CNTPOFF_REG.search(line):
+                uses += 1
+                if path.name != CNTPOFF_FILE or path.parent != base / "tests":
+                    problems.append(f"{path.name}:{n + 1}: TR_CNTPOFF_EL2 outside tests/{CNTPOFF_FILE}")
+                elif not any(_CNTPOFF_FLAG.search(prev) for prev in code[max(0, n - 3):n]):
+                    problems.append(f"{path.name}:{n + 1}: TR_CNTPOFF_EL2 is not directly behind `read_cntpoff`")
+            if _CNTPOFF_SET.search(line):
+                if path.name != CNTPOFF_FLAG_FILE or path.parent != base / "tests":
+                    problems.append(f"{path.name}:{n + 1}: read_cntpoff is set outside tests/{CNTPOFF_FLAG_FILE}")
+                elif not re.search(r"\bg_tc\.read_cntpoff\s*=\s*TESTS_READ_CNTPOFF\s*;", line):
+                    problems.append(f"{path.name}:{n + 1}: read_cntpoff is set to something other than "
+                                    f"TESTS_READ_CNTPOFF")
+        if path.name == CNTPOFF_FLAG_FILE and path.parent == base / "tests" and not _CNTPOFF_DEFAULT.search(
+                "\n".join(code)):
+            problems.append(f"{path.name}: TESTS_READ_CNTPOFF is not defined to 0 by default")
+    if uses != 1:
+        problems.append(f"TR_CNTPOFF_EL2 appears {uses} times in the image's sources, expected once")
+    return problems
+
+
 def audit_sources(root: Path) -> list:
     """No store through a volatile device pointer, no write member on the bus interface."""
-    problems = audit_state_model(root) + audit_verified_writes(root) + audit_variable_writes(root)
+    problems = (audit_state_model(root) + audit_verified_writes(root) + audit_variable_writes(root)
+                + audit_cntpoff_read(root))
     tests = root / "probes" / "uefi" / "tests"
     for path in sorted(tests.glob("*.[ch]")):
         text = path.read_text(encoding="utf-8")

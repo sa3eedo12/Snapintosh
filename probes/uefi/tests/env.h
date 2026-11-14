@@ -30,7 +30,9 @@ typedef struct {
     unsigned (*faults)(void *ctx);
 } tests_bus;
 
-#define TESTS_ALLOW_MAX 16u
+/* The most windows T05 admits: the distributor, one redistributor frame per CPU in the per-CPU
+ * layout (TESTS_MAX_CPUS) and the ITS frames (TESTS_MAX_ITS), with a little to spare. */
+#define TESTS_ALLOW_MAX 40u
 
 typedef struct {
     unsigned n;

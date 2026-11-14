@@ -96,6 +96,10 @@ typedef struct {
      * 0 only if every one matches what was saved. Called on every path after
      * a successful prepare(). */
     int (*restore)(void *ctx);
+    /* A guarded read of the real HCR_EL2; 0 on success. Optional: a NULL here, or a
+     * failed read, leaves the REGIME row saying NOT READ. Appended last so that an ops
+     * table written before it existed (positional initialiser) still means what it did. */
+    int (*real_hcr)(void *ctx, uint64_t *value);
 } tests_nv2_ops;
 
 enum tests_ctl {
@@ -136,6 +140,11 @@ typedef struct {
     tests_el1_exit red_exit;
     unsigned landed_offset; /* byte offset of the pattern for RED_LANDED_ELSEWHERE */
     uint64_t readback;      /* what the stub read back through its access */
+    /* HCR_EL2 as the firmware left it, read once before anything was written and so before
+     * the stub's HCR was built from it (tests_hcr_for). It tells which regime the run was
+     * made in (HCR_EL2.E2H, .TGE) and appears on the screen only: no record carries it. */
+    int have_entry_hcr;
+    uint64_t entry_hcr;
 } tests_nv2_obs;
 
 enum tests_nv2_reason {
@@ -172,7 +181,9 @@ tests_nv2_verdict tests_nv2_decide(const tests_idset *ids, const tests_nv2_obs *
 /* Runs the control and the functional test through the operations and fills
  * the observations. It calls restore() on every path after prepare() succeeds,
  * and does not start the functional part unless the ID registers advertise
- * FEAT_NV (writing HCR_EL2.NV on a core without it would write a RES0 bit). */
+ * FEAT_NV (writing HCR_EL2.NV on a core without it would write a RES0 bit).
+ * Once it has decided to start, and before prepare() or any write, it reads
+ * HCR_EL2 through real_hcr for the REGIME row. */
 void tests_nv2_run(const tests_nv2_ops *ops, const tests_idset *ids, tests_nv2_obs *out);
 
 /* Classifiers, exposed so that every outcome can be tested on its own. */
@@ -193,5 +204,11 @@ int tests_nv2_make_record(const tests_idset *ids, const tests_nv2_obs *o,
 /* Fills the result rows of T02 (everything but the record lines). */
 void tests_nv2_fill_rows(const tests_idset *ids, const tests_nv2_obs *o,
                          const tests_nv2_verdict *v, tests_result *r);
+
+/* The one screen-only row that closes T02, after the record lines:
+ * "REGIME <HCR_EL2 as 16 hex digits> E2H=<0|1> TGE=<0|1>" (35 columns), the HCR_EL2 the firmware
+ * left with bits 34 and 27 spelled out, or "REGIME NOT READ". An "HCR=" label would make the row
+ * 39 columns and a row holds 38, so the value follows the word REGIME directly. */
+void tests_nv2_fill_regime(const tests_nv2_obs *o, tests_result *r);
 
 #endif /* TESTS_NV2_H */

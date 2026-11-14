@@ -416,6 +416,14 @@ static int nv2_real_tpidr(void *ctx, uint64_t *v)
     return sys_rd(TR_TPIDR_EL2, v);
 }
 
+/* HCR_EL2 as it stands, a guarded read: the REGIME row shows what the firmware left, read
+ * before nv2_prepare() or any write. */
+static int nv2_real_hcr(void *ctx, uint64_t *v)
+{
+    (void)ctx;
+    return sys_rd(TR_HCR_EL2, v);
+}
+
 static uint64_t *nv2_page(void *ctx)
 {
     (void)ctx;
@@ -435,7 +443,8 @@ static int nv2_restore(void *ctx)
 }
 
 static const tests_nv2_ops g_nv2_ops = {NULL,         nv2_prepare, nv2_set_hcr, nv2_run,
-                                        nv2_real_tpidr, nv2_page,  nv2_page_sync, nv2_restore};
+                                        nv2_real_tpidr, nv2_page,  nv2_page_sync, nv2_restore,
+                                        nv2_real_hcr};
 
 const tests_nv2_ops *tests_sys_nv2_ops(void)
 {

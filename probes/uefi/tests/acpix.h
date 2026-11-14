@@ -32,6 +32,11 @@
  * validate each table base against (alignment from env.h, extent from here). */
 #define TESTS_GIC_FRAME_BYTES 0x10000u
 #define TESTS_SMMU_WINDOW_BYTES 0x100u
+/* A redistributor frame in the per-CPU layout (see tests_madt_gicc_frames): 256 KiB, the four
+ * 64 KiB pages of a GICv4 redistributor (RD, SGI, VLPI, reserved; Arm GIC Architecture
+ * Specification). The Surface Pro 11's MADT spaces its per-CPU frames this far apart (OBSERVED in
+ * its dump). */
+#define TESTS_GICC_FRAME_BYTES 0x40000u
 
 typedef struct {
     uint64_t base;
@@ -50,11 +55,13 @@ typedef struct {
     uint8_t gicd_version; /* 0 = not stated, else the MADT value (2, 3 or 4) */
     unsigned n_gicr;
     tests_range gicr[TESTS_MAX_GICR]; /* redistributor discovery ranges */
+    unsigned n_gicr_seen;             /* GICR discovery-range structures present, kept or dropped */
     unsigned n_its;
     uint64_t its[TESTS_MAX_ITS];
     unsigned n_cpus; /* enabled GICC entries kept */
     uint64_t mpidr[TESTS_MAX_CPUS];
     uint64_t gicc_gicr[TESTS_MAX_CPUS]; /* per-CPU redistributor base, 0 if absent */
+    uint32_t uid[TESTS_MAX_CPUS];       /* ACPI Processor UID of each kept GICC entry */
     unsigned n_gicc_seen;               /* every GICC entry, enabled or not */
     unsigned truncated;                 /* entries dropped because an array was full */
     unsigned rejected;                  /* GICR and ITS entries dropped for a bad base or length */
@@ -65,6 +72,20 @@ typedef struct {
  * checked before the entry is read, and an entry shorter than its minimum is a
  * refusal rather than a skip). */
 int tests_madt_parse(const uint8_t *t, size_t len, tests_madt *out);
+
+typedef struct {
+    uint64_t base; /* the GICC structure's GICR Base Address, as the table gave it: not yet validated */
+    unsigned cpu;  /* index into tests_madt.mpidr[], .gicc_gicr[] and .uid[] */
+} tests_gicc_frame;
+
+/* The per-CPU redistributor layout. A MADT that states GICv3 or later (GICD version 3 or 4) and
+ * holds no GICR discovery-range structure (type 0x0E) names each CPU's redistributor frame in
+ * the GICR Base Address field of that CPU's GICC structure instead (OBSERVED in the Surface Pro
+ * 11's MADT: twelve GICC structures, a GICD of version 4 and no type 0x0E). Returns one entry per
+ * kept GICC structure in ACPI Processor UID order (ties in table order), or 0 when the MADT is
+ * not of that shape. Bases are returned unchecked, zero included: the caller validates each one
+ * and refuses it by name. */
+unsigned tests_madt_gicc_frames(const tests_madt *m, tests_gicc_frame out[TESTS_MAX_CPUS]);
 
 typedef struct {
     uint64_t base; /* processor-relative address of the ECAM window */

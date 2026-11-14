@@ -46,6 +46,13 @@ refused): the memory map of the QEMU machine lists no GIC, ECAM or SMMU window a
 all, and whether the Surface Pro 11 firmware does is for the first hardware run
 to show (the probe's memmap.txt). The option changes the build id.
 
+--cntpoff makes T03 read CNTPOFF_EL2 when ID_AA64MMFR0_EL1.ECV says it exists; it is for the
+emulator images only and is refused for any image for the machine. Without it no image reads
+the register: on the Surface Pro 11 the read is the suspected cause (INFERRED, untested) of the
+page that froze on T03 and the board that reset itself afterwards, because EL2 access to the
+register is also gated at EL3. A deliberate, isolated test of the read belongs in a payload of
+the q1n1 stick runner, never in this image's default flow. The option changes the build id.
+
 The build needs clang and lld-link only. Like the probe's, it is reproducible:
 building twice gives identical bytes, and the 12-hex-digit build id shown on
 every page is a hash of the variant, its defines, the compiler flags and every
@@ -308,6 +315,9 @@ def main(argv=None) -> int:
     ap.add_argument("--require-mmio-map", action="store_true",
                     help="T05 to T07 read a device window only if the UEFI memory map lists all of "
                          "it as MMIO (default: windows the map does not mention are read too)")
+    ap.add_argument("--cntpoff", action="store_true",
+                    help="emulator images only: T03 reads CNTPOFF_EL2 when ECV says it exists "
+                         "(default: no image reads it; refused for the images for the machine)")
     ap.add_argument("--verify-reproducible", action="store_true",
                     help="build each variant twice into separate directories and compare")
     ap.add_argument("--print-build-id", action="store_true",
@@ -321,6 +331,14 @@ def main(argv=None) -> int:
     variants = [VARIANTS[n] for n in dict.fromkeys(names)]
     if args.require_mmio_map:
         variants = [replace(v, defines=v.defines + ("TESTS_REQUIRE_MMIO_IN_MAP=1",)) for v in variants]
+    if args.cntpoff:
+        shipped = [v.name for v in variants if v.shipped]
+        if shipped:
+            print(f"REFUSED: --cntpoff is for the emulator images only, not for {', '.join(shipped)}: on the "
+                  "unit the read may trap to EL3 and reset the board; a deliberate test of it belongs in a "
+                  "payload of the q1n1 stick runner", file=sys.stderr)
+            return 2
+        variants = [replace(v, defines=v.defines + ("TESTS_READ_CNTPOFF=1",)) for v in variants]
     if any(v.shipped for v in variants) and args.soc is None:
         print("REFUSED: --soc is required for the hardware images (x1e80100 for the Surface Pro 11); "
               "the NV2 record carries it and the monitor's gate refuses a record for another SoC",
