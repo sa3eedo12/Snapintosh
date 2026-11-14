@@ -298,13 +298,13 @@ row 23).
 | --- | --- | --- | --- |
 | Firmware entry | UEFI enters at EL2 directly (OBSERVED: one boot, recorded in q1n1 `docs/A16-FIRST-EL2-BOOT.md`) | UEFI at EL1 under Gunyah. EL2 only through slbounce plus an older Microsoft-signed `tcblaunch.exe` (VERIFIED from slbounce's source and README; OBSERVED on one community unit) | New gate X1. Instrument: the EFI state probe (EXPERIMENTAL, QEMU-tested only). |
 | EL2 regime on entry | Firmware-native; the monitor is a non-VHE host (VERIFIED) | slbounce returns with `HCR_EL2` = TGE+E2H (VHE), the MMU on and UEFI's tables reinterpreted (VERIFIED, slbounce source) | A VHE host or a de-VHE trampoline. Decision record and host model: [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) (EXPERIMENTAL, linked into no build). |
-| FEAT_NV2 | Measured `NV` == 2 (VERIFIED, code comment) | Measured `NV` == 2, `NV_frac` == 0, `VNCR_EL2` redirect PASS and the NV2-off negative control PASS on the unit (OBSERVED, 2026-11-11; X2 item 2) | X2 stop gate, resolved: K1 did not fire. **Host groundwork (A3, EXPERIMENTAL):** an SP11 monitor build refuses to launch without an embedded functional record for this core, so NV and NV2 stay clear; the A16 build is unchanged. The record from this run is not yet embedded in a monitor build. |
+| FEAT_NV2 | Measured `NV` == 2 (VERIFIED, code comment) | Measured `NV` == 2, `NV_frac` == 0, `VNCR_EL2` redirect PASS and the NV2-off negative control PASS on the unit (OBSERVED, 2026-11-11; X2 item 2); repeated on 2026-11-14 with `E2H` 0 read in the second X2 image's `REGIME` row beside the GO (OBSERVED, one boot; M8) | X2 stop gate, resolved: K1 did not fire. **Host groundwork (A3, EXPERIMENTAL):** an SP11 monitor build refuses to launch without an embedded functional record for this core, so NV and NV2 stay clear; the A16 build is unchanged. The record from this run is not yet embedded in a monitor build. |
 | CPUs | 6 guest vCPUs; `GUEST_CPU_COUNT` is the literal `6U` on A16 (a `-D` override is a macro redefinition) and defaults to `6U` and is overridable on SP11 only (`GUEST_CPU_COUNT` in `compat/cpu.h`); the A16 build is byte-identical | 12 Oryon v1 in 3 clusters of 4, no E/P split (VERIFIED, device tree; the guest-visible affinities and MPIDR values are INFERRED until X2) | Placement and redistributor-discovery models exist (`compat/topology.c`, host-tested); a count other than 6 still needs the follow-ups listed under C2 |
-| GIC | GICD `0x17000000`, GICR `0x17080000` stride `0x40000`, hard-coded | The same bases in `hamoa.dtsi`, with the GICR window sized for 12 redistributors (VERIFIED). An ITS node is present at `0x17040000`; the upstream EL2 overlay comments that Gunyah's ITS emulation seems broken (a developer's note, read but not measured). | Discover and cross-check; never assume |
-| Timer | 19.2 MHz host counter. The guest's 24 MHz timebase comes from trapped counter reads, and the monitor refuses to start a vCPU without a non-zero `ID_AA64MMFR0_EL1.ECV` and a matching `CNTFRQ_EL0` (VERIFIED, read: `probes/xnuboot/prepare.c`, `docs/KERNEL-PATCHES.md`) | `ID_AA64MMFR0_EL1.ECV` reads 2 on this unit at EL2 (OBSERVED, 2026-11-11, X2 item 1), matching the third-party profile of another X1E80100 machine (E26). `CNTFRQ_EL0` itself is still unread: T03, the timer test, has not completed on this unit (a board reset a short, fixed time after T01, not yet explained; [SP11-X2-TESTS.md](SP11-X2-TESTS.md)). The pinned Hamoa device tree gives the architected timer no frequency. The MIDR is now read (`0x00000000512F0011`, OBSERVED): the Oryon X1 "Broken CNTVOFF_EL2" erratum workaround (E17) applies to this unit, no longer only INFERRED. | Functional tests; relocation risk (R6). Offset policy and model: [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 3 (EXPERIMENTAL). |
+| GIC | GICD `0x17000000`, GICR `0x17080000` stride `0x40000`, hard-coded | The same bases in `hamoa.dtsi`, with the GICR window sized for 12 redistributors (VERIFIED). An ITS node is present at `0x17040000`; the upstream EL2 overlay comments that Gunyah's ITS emulation seems broken (a developer's note, read but not measured). On the unit (OBSERVED, X2 T05, 2026-11-14, one boot): the GICD at `0x17000000` reads architecture revision 4, as the MADT says; the 12 redistributor frames named by the MADT's GICC structures were all read and each MADT CPU matched exactly one of them; the ITS frame answered (`CTLR` `0x80000000`, `ARCH=4`); no read faulted. | Discover and cross-check; never assume |
+| Timer | 19.2 MHz host counter. The guest's 24 MHz timebase comes from trapped counter reads, and the monitor refuses to start a vCPU without a non-zero `ID_AA64MMFR0_EL1.ECV` and a matching `CNTFRQ_EL0` (VERIFIED, read: `probes/xnuboot/prepare.c`, `docs/KERNEL-PATCHES.md`) | `ID_AA64MMFR0_EL1.ECV` reads 2 on this unit at EL2 (OBSERVED, 2026-11-11, X2 item 1), matching the third-party profile of another X1E80100 machine (E26). `CNTFRQ_EL0` reads `0x124F800` (19.2 MHz) at EL2 on this unit (OBSERVED: q1n1's page in B1 attempts 5 and 7, and T03 of the second X2 image on 2026-11-14, which completed where the first image's T03 froze five times). That T03 also read `CNTHCTL_EL2` `0x3` (its ECV bit reads 0) and `CNTVOFF_EL2` 0 and saw the counter advance, boot CPU only (OBSERVED, one boot). It did not read `CNTPOFF_EL2`: that read is INFERRED to be what froze the first image's T03, and the `timer` payload of the stick runner stalled at it (INFERRED from a line count; [SP11-X2-TESTS.md](SP11-X2-TESTS.md), Run 6). The pinned Hamoa device tree gives the architected timer no frequency. The MIDR is now read (`0x00000000512F0011`, OBSERVED): the Oryon X1 "Broken CNTVOFF_EL2" erratum workaround (E17) applies to this unit, no longer only INFERRED. | Functional tests; relocation risk (R6). Offset policy and model: [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 3 (EXPERIMENTAL). |
 | PAuth | QARMA3 reported in ISAR2 | QARMA5 reported in ISAR1 (APA = 5, GPA = 1) with APA3 = GPA3 = 0 in the same third-party profile; confirmed on this unit (OBSERVED, 2026-11-11: APA=5/API=0/GPA=1/GPI=0, passive probe and X2 T01 agree) | ID-register normalization. **Host groundwork (C4, EXPERIMENTAL):** `compat/oryon-idregs.c`; an unrecorded MIDR refuses the launch. |
 | Stage 2 | 36-bit IPA, 4K granule, 8-bit VMID (VERIFIED). The A16 also reports PARange 44 bits and no 16K granule ([FEASIBILITY.md](FEASIBILITY.md)), so 36 bits is a monitor choice. | PARange 44 bits and no 16K granule confirmed on this unit (OBSERVED, 2026-11-11, X2 item 1: `PARANGE=4` i.e. 44-bit, `TGRAN 16K=NO`), matching the third-party profile. VMIDBits reads 16 on this unit, not the 8 that profile reported (OBSERVED; a real difference, not yet explained) | Audit the DRAM and MMIO map. **Host groundwork (C5, EXPERIMENTAL):** the model `compat/ipa-geometry.c` and an SP11-gated check in `probes/xnuboot/stage2.c`. |
-| Storage | Virtual ANS2 over the real NVMe, window design (VERIFIED) | NVMe on `pcie6a` behind a PCIe SMMUv3 (VERIFIED device tree). The SMMU state is UNKNOWN. | Port `compat/nvme-host.c`. **Host groundwork (S2/S3, EXPERIMENTAL):** an SP11 window contract in `compat/nvme-host.c` under `SNAP_PLATFORM_SP11`, not called by the monitor yet: an SP11 monitor refuses to adopt the SSD (prepare status -145) instead of falling back to the A16 adoption; audit and per-machine questions in [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md). |
+| Storage | Virtual ANS2 over the real NVMe, window design (VERIFIED) | NVMe on `pcie6a` behind a PCIe SMMUv3 (VERIFIED device tree). The SMMU state is UNKNOWN: on 2026-11-14 T07's read of the SMMUv3 at `0x15400000` faulted again and T06 never finished (OBSERVED, one boot). The firmware's NVMe device path and the unit's ACPI tables put the NVMe on PCIe segment 6, ECAM base `0x70000000`, stream `0x60100` (INFERRED; [SP11-X2-TESTS.md](SP11-X2-TESTS.md), Run 6). | Port `compat/nvme-host.c`. **Host groundwork (S2/S3, EXPERIMENTAL):** an SP11 window contract in `compat/nvme-host.c` under `SNAP_PLATFORM_SP11`, not called by the monitor yet: an SP11 monitor refuses to adopt the SSD (prepare status -145) instead of falling back to the A16 adoption; audit and per-machine questions in [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md). |
 | Display | AdrenoDisplay, 2880x1800 at 60 Hz | Samsung ATNA30DW01 13-inch OLED, 2880x1920 (3:2) (VERIFIED in public sources: the Linux binding and Microsoft's tech specs; this unit's GOP mode is INFERRED), on `mdss_dp3`, 4-lane eDP up to HBR3 (VERIFIED, upstream device tree). See [SP11-DISPLAY-STUDY.md](SP11-DISPLAY-STUDY.md). | Reuse the firmware pipeline. The A16's dispcc and eDP constants are wrong on Hamoa and must not be reused. |
 | GPU | Adreno X2-90 (a8xx), chip `0x44070041` | Adreno X1-85 (a7xx, gen70500). Device-tree compatible `qcom,adreno-43050c01` and GMU `adreno-gmu-x185.1` (VERIFIED). Upstream `drivers/gpu/drm/msm/adreno/a7xx_catalog.c:376-380` binds chip id `0x43050c01` to `gen70500_sqe.fw` and `gen70500_gmu.bin` (VERIFIED). The entry spans lines 375-418; it also selects the 48-slot `a730_protect` CP_PROTECT table, GMU chip-id word `0x7050001` and 3 MiB of GMEM, and names no zap firmware (VERIFIED at that commit; [SP11-GPU-A7XX-STUDY.md](SP11-GPU-A7XX-STUDY.md) section 1.1). Silicon read-back pending (X8a). | The largest port |
 | Input | I2C-HID through SnapI2CHID | The Surface Aggregator Module (`microsoft,surface-sam`) on UART2 at 4 Mbps (VERIFIED, device tree). The Type Cover keyboard and touchpad are HID nodes under its KIP hub in the Linux client registry for `microsoft,denali` (VERIFIED by reading, not seen on a wire). The pinned Linux has no touch or pen node for the Denali boards (VERIFIED, negative); an SPI HID touch digitizer on the engine at `0x00a88000` is OBSERVED by two community repositories (one unit); the pen transport is UNKNOWN. See [SP11-INPUT-STUDY.md](SP11-INPUT-STUDY.md). | New drivers. A frame codec exists (EXPERIMENTAL, linked into nothing). |
@@ -331,14 +331,14 @@ row 23).
 | E13 | The "nested-virt trap handlers registered" message printed by one laptop's KVM is unconditional (`kvm_sys_reg_table_init()` calls `populate_nv_trap_config()`), so it is **not** NV2 evidence. | VERIFIED | Linux, as read |
 | E14 | Hamoa addresses: GICD `0x17000000`; GICR `0x17080000` size `0x300000`; `pcie6a` PARF `0x01bf8000`, DBI `0x70000000`, ELBI `0x70000f40`, ATU `0x70001000`, config window `0x70100000` (size `0x100000`), MHI `0x01bfb000`; `pcie_smmu` (SMMUv3) `0x15400000`; `apps_smmu` `0x15000000`. | VERIFIED | `hamoa.dtsi` |
 | E15 | GPU `0x03d00000` (SPI 300); GMU `0x03d6a000` (SPI 304/305); `adreno_smmu` `0x03da0000`; `usb_1_ss0` DWC3 `0x0a600000`; `mdss` `0x0ae00000`; `uart2` `0x00b88000`. | VERIFIED | `hamoa.dtsi` |
-| E16 | The A16 monitor requires `DCZID_EL0` = 4 (`DC ZVA` permitted, 64-byte block) on every CPU before it grants `DC ZVA` to EL0, and refuses otherwise. The third-party EL1 profile of another X1E80100 also reads 4. The EL2 value on this unit is unmeasured. The test compares the whole register, so it conflates two things the register holds: the block size (`BS`, implementation defined) and the prohibit bit `DZP`, which follows configuration. A value of 0x14 is `DZP` set with a 64-byte block, a configuration state and not evidence of broken silicon (E30). | VERIFIED (A16); OBSERVED (other unit); UNKNOWN (this unit) | `vcpu_arch_prepare` in `probes/xnuboot/prepare.c` (the `DCZID_EL0` check); E26 |
+| E16 | The A16 monitor requires `DCZID_EL0` = 4 (`DC ZVA` permitted, 64-byte block) on every CPU before it grants `DC ZVA` to EL0, and refuses otherwise. The third-party EL1 profile of another X1E80100 also reads 4. The EL2 value on this unit is 4, a 64-byte block (OBSERVED on the boot CPU: X2's run 5, T01, and the second image's T04 on 2026-11-14, which also executed one `DC ZVA` without a fault and changed nothing outside the block; other cores and EL1 are unmeasured). The test compares the whole register, so it conflates two things the register holds: the block size (`BS`, implementation defined) and the prohibit bit `DZP`, which follows configuration. A value of 0x14 is `DZP` set with a 64-byte block, a configuration state and not evidence of broken silicon (E30). | VERIFIED (A16); OBSERVED (other unit; and this unit at EL2 on the boot CPU, one boot) | `vcpu_arch_prepare` in `probes/xnuboot/prepare.c` (the `DCZID_EL0` check); E26 |
 | E17 | Linux carries an Oryon X1 erratum, "Broken CNTVOFF_EL2" (`ARM64_WORKAROUND_QCOM_ORYON_CNTVOFF`, matched on `MIDR_QCOM_ORYON_X1`, part `0x001`). KVM enables its workaround only when `VH` is reported, FEAT_E2H0 is implemented (`ID_AA64MMFR4_EL1.E2H0` == 0), ECV is non-zero, the host is VHE or hVHE, and the erratum capability is set. It then traps all virtual timer and counter accesses, requiring FEAT_ECV. A code comment says the affected hardware implements FEAT_VHE and FEAT_E2H0. | VERIFIED | Linux `arch/arm64/kernel/cpu_errata.c:1055-1063` and `kvm_timer_handle_errata()` in `arch/arm64/kvm/arch_timer.c:1413-1441` |
 | E18 | q1n1's xHCI host enumerates the Mac's CDC-NCM gadget (`05ac:1905`, two NCM functions) on the A16. | VERIFIED | q1n1 `docs/A16-Q1N1-PROXY.md` |
 | E19 | q1n1's USB host code is CDC-NCM only (`platform/uefi/ncm.{h,c}`). The pinned tree has no ECM, RNDIS, FTDI or CP210x host code, and its NCM path has only run against the Mac gadget. Its xHCI host also addresses devices on a root port only (`xhci.c:409`: the slot context carries the root-hub port, with no route string or transaction translator), so a USB hub in front of an adapter does not work. | VERIFIED (read; search of the pinned tree); third-party adapters UNVERIFIED | q1n1 `platform/uefi/ncm.{h,c}` and `docs/A16-Q1N1-PROXY.md`; [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) (G03) |
 | E20 | The A16 reached the Mac over the USB2 half only, which is acceptable for a proxy link. | VERIFIED | q1n1 `docs/A16-Q1N1-PROXY.md` |
 | E21 | The Surface Aggregator Module (`microsoft,surface-sam`) is on UART2 (`0x00b88000`, engine 2 of QUP wrapper 0, which the same device tree also declares as I2C2 and SPI2) with `current-speed` 4 Mbps; the Linux driver hard-codes 4 Mbps, RTS/CTS and no parity on its device-tree path (VERIFIED). The Type Cover keyboard and touchpad are HID nodes under its KIP hub in the Linux registry entry for `microsoft,denali` (VERIFIED by reading, not by observation). The touchscreen is OBSERVED by two community repositories to be an SPI HID digitizer on the engine at `0x00a88000`, for which the pinned Linux has no driver or binding; the pen transport is UNKNOWN. The claim that touch and pen are HID-over-SPI is not in the pinned Linux sources. | VERIFIED / OBSERVED / UNKNOWN | Linux `x1-microsoft-denali.dtsi`, `hamoa.dtsi`, `surface_aggregator_registry.c`, `core.c`; [SP11-INPUT-STUDY.md](SP11-INPUT-STUDY.md) |
 | E22 | The SP11 SSD is user-removable. | INFERRED | Public product documentation, not re-read here |
-| E23 | The stage-2 and DART code assume 36-bit addresses, so larger-memory SKUs may not fit identity-mapped. A model of the public Linux layout (a 2 GiB low bank plus one high bank from `0x880000000`) fits 16 GiB and 32 GiB when guest RAM is carved from the high bank (the 32 GiB bank ends exactly on `1<<36`) and ends a 64 GiB part 32 GiB past the limit, so the model refuses it by default (carving guest RAM low is opt-in). The unit's own firmware memory map (the X1 probe's dumps) lists about 32 GiB of conventional memory: a few low chunks and one high bank, `0x880000000` to `0x1000000000` (30 GiB), so nothing lies at or above `1<<36` and the model's 32 GiB case is this unit. This is the firmware's view, not a DRAM-controller read. | INFERRED for the fit (a model); OBSERVED for the map | E3 plus the Hamoa high-DDR layout; audit item C5; `tools/test-stage2-geometry.py` (which also pins the SP11 NVMe window's copy of the limit, `NVMEH_SP11_IPA_LIMIT` in `compat/nvme-host.h`) |
+| E23 | The stage-2 and DART code assume 36-bit addresses, so larger-memory SKUs may not fit identity-mapped. A model of the public Linux layout (a 2 GiB low bank plus one high bank from `0x880000000`) fits 16 GiB and 32 GiB when guest RAM is carved from the high bank (the 32 GiB bank ends exactly on `1<<36`) and ends a 64 GiB part 32 GiB past the limit, so the model refuses it by default (carving guest RAM low is opt-in). The unit's own firmware memory map (the X1 probe's dumps) lists about 32 GiB of conventional memory: a few low chunks and one high bank, `0x880000000` to `0x1000000000` (30 GiB), so nothing lies at or above `1<<36` and the model's 32 GiB case is this unit. The second X2 image's T09 agrees (OBSERVED, 2026-11-14, one boot): RAM 32289 MiB in 7 extents, the highest ending at `0x1000000000`. This is the firmware's view, not a DRAM-controller read. | INFERRED for the fit (a model); OBSERVED for the map | E3 plus the Hamoa high-DDR layout; audit item C5; `tools/test-stage2-geometry.py` (which also pins the SP11 NVMe window's copy of the limit, `NVMEH_SP11_IPA_LIMIT` in `compat/nvme-host.h`) |
 | E24 | At EL2 the upstream overlay hands the OS an enabled `pcie_smmu` (the `pcie6a` stream window is `0x60000`, size `0x10000`) and the ADSP and CDSP `apps_smmu` streams (`0x1000/0x80`, `0x0c00/0x0`). It disables the Gunyah software `sbsa_watchdog` and enables the hardware `apss_watchdog`. It also comments that Gunyah's ITS emulation seems broken (a developer's note, read but not measured). | VERIFIED | Linux `x1-el2.dtso` |
 | E25 | The Denali device tree names the Microsoft firmware layout: GPU ZAP `qcom/x1e80100/microsoft/qcdxkmsuc8380.mbn`; ADSP `.../Denali/qcadsp8380.mbn` and `adsp_dtb.mbn`; CDSP `.../Denali/qccdsp8380.mbn` and `cdsp_dtb.mbn`. The OLED panel is `samsung,atna30dw01`. | VERIFIED | Linux `x1-microsoft-denali.dtsi` and `x1e80100-microsoft-denali-oled.dts` |
 | E26 | A third-party CPU profile, generated under Windows on Arm for an X1E80100 machine that is not this unit, records at EL1: `MIDR_EL1` `0x511f0011` and `0x512f0011` (implementer `0x51`, part `0x001`), `CNTFRQ_EL0` 19.2 MHz (`0x0124f800`), `ID_AA64MMFR0_EL1.ECV` 2, `TGran16` 0, `PARange` 4 (44 bits), `VMIDBits` 8, `ID_AA64ISAR1_EL1` APA 5 and GPA 1, `ID_AA64ISAR2_EL1` APA3 and GPA3 0, and `DCZID_EL0` 4. It also shows `VH`, `NV` and `FGT` as 0, which is inconclusive (E12). | OBSERVED (other unit; hypervisor-filtered view) | VirtualBox `src/VBox/VMM/VMMR3/cpus/ARM_Qualcomm_Snapdragon_X.h` (§12) |
@@ -714,12 +714,17 @@ exactly that path, with a clean restore (`RESTORED=YES MECH=NO CLEANUP=OK`).
 An earlier run (before the fix below) also got real results from T05 (FAIL:
 a redistributor walk found zero frames for all 12 cores despite a correct
 MADT), T07 (UNKNOWN: a register read faulted) and T09 (PASS), and left T06
-interrupted mid-window-read. T03 and T04 remain NOT RUN on every attempt so
-far: this unit's firmware resets the board a fixed, short time after T01
-completes, for a reason not yet confirmed (see the phase-B test order below);
-T02 now runs before T03 specifically so K1 is decided regardless. Not covered
-by any run: items 9 to 13 and the `CNTVOFF_EL2` comparison across cores (T01
-does read the ID registers behind M1).
+interrupted mid-window-read. T03 and T04 remained NOT RUN on every attempt up
+to 2026-11-14 (run 5): this unit's firmware resets the board a fixed, short time
+after T01 completes, for a reason not yet confirmed (see the phase-B test order
+below); T02 now runs before T03 specifically so K1 is decided regardless.
+**The second version of the image ran once on the unit (2026-11-14, one boot,
+`declared` variant, [SP11-X2-TESTS.md](SP11-X2-TESTS.md) Run 6; OBSERVED): T03, T04,
+T05 and T09 PASS, T07 UNKNOWN (its read of the PCIe SMMUv3 faulted), T06 never
+finished (its read of the ECAM window of segment 3 did not return and the board
+reset itself) and T08 is UNIMPL.** Not covered by any run: items 9 to 13 and the
+`CNTVOFF_EL2` comparison across cores (T01 does read the ID registers behind M1;
+T03 reads `CNTVOFF_EL2` on the boot CPU only).
 
 **Phase-B test order (OBSERVED, Surface Pro 11, 2026-11-11).** This unit's
 firmware only reaches EL2 during slbounce's own `ExitBootServices` hook, never
@@ -796,7 +801,10 @@ real run, so far).**
 **Exit:** a local qualification report with labels. **Decision D4:** usable NV2
 proceeds; absent NV2 stops here (K1). **Decided, 2026-11-11: NV2 is usable on
 this unit (OBSERVED); K1 did not fire; the plan proceeds.** Item 2's result is
-in; items 3, 4 and 9 to 13 of the qualification report above are not, so the
+in, and the second image's first run (2026-11-14, one boot) gave the boot CPU's
+part of item 3, item 4 (at EL2), item 5 and item 8; the rest of item 3 (other
+cores, `CNTPOFF_EL2`), items 6 and 7 (T06 never finished, T07 faulted) and items
+9 to 13 of the qualification report above are not in, so the
 gate's full exit criterion is not yet met even though the one criterion that
 could stop the plan (K1) has been resolved. The choice between a VHE host and a
 de-VHE entry is recorded with its evidence; the recommended default and what
@@ -836,8 +844,8 @@ of it validated on hardware. Section 9.3 lists the tests.
 | --- | --- | --- |
 | X0 | Boot-media staging tool (`tools/stage-sp11-boot-media.py`, which checks the shell against its pinned hash); five `tcblaunch.exe` candidates staged from the unit; N2 to N4 matched to the public package | The rest of N5 (Surface UEFI version, Secure Boot state, SoC SKU, RAM); the BitLocker recovery key stored off the device, and the choice of the Secure Boot and BitLocker way ([section 8.1](#81-secure-boot-and-bitlocker)); an older `tcblaunch.exe` if none of the five works (K2). The SSD backup is waived for X1 to X3 and needed before X6; recovery media are needed before X3 and X6 (N7) |
 | X1 | EFI state probe (`probes/uefi`, two images, QEMU-tested; hardened after an independent review: no unguarded newer ID register, no `hvc`, a GOP and dump policy that fails closed) and the stick layout | **Done, 2026-11-11.** Build 28144's `tcblaunch.exe` reaches EL2 under slbounce; `ResetSystem` does not work afterwards (R18 answered: no); the first-run observations of [section 6.2](#62-x1-el2-through-slbounce) (`SEL=SAME`, PSCI conduit SMC, GICv4.1) are recorded there. slbounce's blanket `clear_dcache_range()` sweep before `ExitBootServices` hangs this unit's firmware (matching a public upstream issue on a different Surface model); the pinned build still has it, so a production monitor build needs the same fix a test-only local variant used to get past it; the Snapintosh fork's scoped sweep got through it once (OBSERVED, 2026-11-12; Status of B1 under WS-B) |
-| X2 | The X2 test image (T01 to T09; guarded reads, a halt on a failed restore, device windows refused unless plausible); the NV2 record format and `tools/nv2_record.py`; the SP11-gated NV2 launch gate and Oryon PAuth normalization; host models of the EL2 entry, timer offsets and `DC ZVA` | **K1 decided (GO), 2026-11-11; repeated 2026-11-14 under the de-VHE slbounce build (T02 GO again; regime `E2H` 0 INFERRED).** T03, T04 and the `CNTVOFF_EL2` comparison across cores are still NOT RUN (T03 froze for the fifth time, and the earlier freezes ended in a board reset; the leading explanation, INFERRED and untested, is its `CNTPOFF_EL2` read trapping to EL3); so are items 9 to 13 (the APSS watchdog, display, USB link state, the EL2 entry measurements), none of which affect K1. Embedding the obtained record in an actual monitor build is also still to do |
-| X3 | Descriptor-driven USB port table (the descriptor now lists the two controllers, INFERRED) and a default-off q1n1 path (applied and pushed to a q1n1 fork, 2026-11-11, not yet merged upstream); the D5 ladder, K3 and a persistent-log design | The link itself. The DWC3 core id (X2): until it is measured, `emit-c` needs `--allow-unmeasured-id`. PHY, clock and repeater bring-up is UNIMPLEMENTED (q1n1 programs none of it); the DRAM-retention test; the q1n1 port (B1): implemented and pushed to forks (2026-11-12); on the unit it reached EL2 in two runs under the scoped-sweep slbounce, drew its console and read back its EL2 state (OBSERVED, `--el2`; see Status of B1), and its first page stayed up for about 40 minutes, but the de-VHE gate, chainload and the whole USB path are not done (the de-VHE gate is built and host-tested, hardware NOT RUN), and its USB boot-window path is still A16-only |
+| X2 | The X2 test image (T01 to T09; guarded reads, a halt on a failed restore, device windows refused unless plausible); the NV2 record format and `tools/nv2_record.py`; the SP11-gated NV2 launch gate and Oryon PAuth normalization; host models of the EL2 entry, timer offsets and `DC ZVA` | **K1 decided (GO), 2026-11-11; repeated 2026-11-14 under the de-VHE slbounce build (T02 GO again; regime `E2H` 0 INFERRED for that run) and in the second image's first run (2026-11-14, `declared` variant, one boot; OBSERVED), which read `E2H=0 TGE=1` beside the GO: K1 stays GO.** That run also gave T03, T04, T05 and T09 PASS (T03 completed without its `CNTPOFF_EL2` read, which supports, but does not prove, the INFERRED explanation of its five freezes, that read trapping to EL3), T07 UNKNOWN (its read of the PCIe SMMUv3 faulted) and T06 NOT RUN (its read of the ECAM window of segment 3 did not return and the board reset itself); T08 is UNIMPL ([SP11-X2-TESTS.md](SP11-X2-TESTS.md), Run 6). Still NOT RUN: the `CNTVOFF_EL2` comparison across cores (T03 is boot CPU only) and items 9 to 13 (the APSS watchdog, display, USB link state, the EL2 entry measurements), none of which affect K1. Embedding the obtained record in an actual monitor build is also still to do |
+| X3 | Descriptor-driven USB port table (the descriptor now lists the two controllers, INFERRED) and a default-off q1n1 path (applied and pushed to a q1n1 fork, 2026-11-11, not yet merged upstream); the D5 ladder, K3 and a persistent-log design | The link itself. The DWC3 core id (X2): until it is measured, `emit-c` needs `--allow-unmeasured-id`. PHY, clock and repeater bring-up is UNIMPLEMENTED (q1n1 programs none of it), and with the stick plugged in directly both controllers read as unstarted at EL2 with the link down (OBSERVED, boot 5, one boot), so bring-up would start from reset; the DRAM-retention test; the q1n1 port (B1): implemented and pushed to forks (2026-11-12); on the unit it reached EL2 in two runs under the scoped-sweep slbounce, drew its console and read back its EL2 state (OBSERVED, `--el2`; see Status of B1), and its first page stayed up for about 40 minutes, but the de-VHE gate, chainload and the whole USB path are not done (the de-VHE gate is built and host-tested, hardware NOT RUN), and its USB boot-window path is still A16-only |
 | X4 | Board descriptor and board-info ABI; ACPI cross-check; vCPU placement and GIC discovery models; the monitor's launch refusal for a vCPU count that needs the fair lock (-146); stage-2 geometry model and its SP11-gated check; Hamoa thermal-guard model | Call sites for the topology, board-info and thermal models (UNIMPLEMENTED); the measurements that replace every INFERRED value; the vCPU count the J700 guest tolerates |
 | X5 | Display pipeline decision model (`compat/display-pipeline-check.c`) and the GOP/EDID mode validator, linked by nothing | The X2 display reads; whether the firmware leaves the display blocks readable at EL2 |
 | X6 | SP11 window contract in `compat/nvme-host.c`; the monitor's refusal to adopt the SSD until that contract is wired (-145); the `sp11` profile of the partition planner (readers counted by content, with the MBR visibility reported); synthetic GPT fixtures | Descriptor fields for the NVMe segment, BDF and SMMU stream; the SMMU state; a call site that enforces the contract; the operator's one GPT entry |
@@ -1138,7 +1146,7 @@ Still UNKNOWN after attempt 7: the X2 image's post-bounce reset (what it does th
 de-VHE entry repeats and what the other CPUs do in it, FEAT_NV2 with `E2H` clear (M8), why the blanket sweep hung, and why
 `LocateHandleBuffer` found no GOP handle in attempts 1 and 2.
 
-**Status of B2 and B3 (host only; EXPERIMENTAL; hardware NOT RUN).**
+**Status of B2 and B3 (host only and EXPERIMENTAL, except two read-only surveys that ran on the unit on 2026-11-14; the link itself NOT RUN).**
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) holds the A16 USB inventory
 (what is A16-specific, what is firmware-coupled, what is generic), the Hamoa and
 Denali USB facts from the pinned device tree, ten measurements (M1 to M10) that
@@ -1159,14 +1167,23 @@ table; the default q1n1 build is byte-identical to the pristine tree. The shippe
 `usb-1-ss1`, INFERRED from the pinned Denali and Hamoa device trees), so the table
 derives (`python3 tools/sp11_usb_ports.py table` prints it with its core id
 UNMEASURED). `emit-c` still refuses to write it unless `--allow-unmeasured-id` is
-given, because no DWC3 core id is measured (X2) and an `expect_gsnpsid` of 0 makes
+given, because the descriptor carries no DWC3 core id (S0 and S0b read `GSNPSID` `0x33313130` on `usb_1_ss0`, OBSERVED on the
+unit, 2026-11-14, but it is not entered there) and an `expect_gsnpsid` of 0 makes
 q1n1 accept any DWC3 core family. **Not done:** PHY, clock,
 repeater, retimer and ADSP PMIC-GLINK bring-up (UNIMPLEMENTED; q1n1 programs
 none of it today), the DRAM-retention test and the D5 exercise on a real link
 failure (NOT RUN), and hub support (q1n1's xHCI host addresses root-port
-devices only).
+devices only). **What did run on the unit, read-only (OBSERVED, one unit, one boot
+each, 2026-11-14):** the S0 survey (boot 2) and the `usbsmmu` payload of the stick
+runner (boot 5), described below and in [SP11-STICK-LOG.md](SP11-STICK-LOG.md)
+sections 12 and 13; no xHCI, PHY or SMMU register was written. With the stick
+plugged in directly, both USB controllers read as unstarted at EL2: no firmware
+xHCI state is left to adopt and the link is down. A stick writer would have to
+bring the controller and the link up from reset, which needs the PHY and
+repeater work above (UNIMPLEMENTED) and the first xHC register write (A1, NOT
+granted).
 
-**Fewer boots: autorun, the declared X2 image and stage S0 (autorun, the declared X2 variant and the S0 survey each OBSERVED once on the unit, 2026-11-14; the rest host side only, EXPERIMENTAL, hardware NOT RUN).**
+**Fewer boots: autorun, the declared X2 image, stage S0, the second X2 image and the stick payload runner (each OBSERVED on the unit, boots 1 to 5 of 2026-11-14, one unit, one boot each; the rest host side only, EXPERIMENTAL, hardware NOT RUN).**
 Typing `fsN:`, `load` and the image names by hand cost boots, so
 `tools/stage-sp11-boot-media.py autorun` can stage a `startup.nsh` that runs one allow-listed step per boot
 ([RUNNING.md](RUNNING.md)). **On the unit (2026-11-14, one boot, photographs): the Shell ran the script with nothing typed**
@@ -1191,15 +1208,35 @@ port 3, route string 3); both controllers are powered, clocked and readable at E
 with its host controller error flag (HCE) set, which appeared between ExitBootServices and the survey and whose cause is
 UNKNOWN, so a reset and a full enumeration are needed and adopting the firmware's slot state is unlikely to work (INFERRED);
 the firmware's rings and slot contexts are intact in RAM; both USB streams translate through SMMU context bank 3, whose
-contents nobody has read, so whether the xHC can DMA into an EL2 arena is open.** The next step is a read-only follow-up (S0b)
-as a payload, not a write; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 12 has the table. The operator answered the study's
+contents S0 did not read (S0b did, in boot 5, below), so whether the xHC can DMA into an EL2 arena is open.** The read-only
+follow-up (S0b), a payload and not a write, then ran in boots 4 and 5 (below); [SP11-STICK-LOG.md](SP11-STICK-LOG.md)
+section 12 has S0's table and section 13 S0b's. The operator answered the study's
 Q1: the stick sits behind an adapter or hub, which S0 confirmed. q1n1's xHCI driver cannot address a device behind a hub, so
 the study's S1.5 is needed only if the stick cannot be plugged in directly: the operator has a USB-C stick or a passive adapter
 (2026-11-14). The default q1n1 builds are
 byte-identical to the commit before the survey (`tools/test-q1n1-sp11-entry.py` in the fork).
+**Boot 3 (OBSERVED, one boot): the second X2 image (`declared` variant, build `E5BF1A6BD94C`), the stick plugged in
+directly (one USB node in its UEFI path, where S0's had two).** T03, T04, T05 and T09 PASS and T02 is GO with `E2H=0 TGE=1`
+read (M8); T03 completed without its `CNTPOFF_EL2` read, which supports, but does not prove, the INFERRED explanation of its
+five freezes. T06 never finished (its read of segment 3's ECAM window did not return and the board rebooted by itself, an
+operator report; a hang then a watchdog reset is INFERRED) and T07 is UNKNOWN (its read of the PCIe SMMUv3 faulted); the ACPI
+tables put the NVMe on segment 6 (INFERRED; [SP11-X2-TESTS.md](SP11-X2-TESTS.md), Run 6).
+**Boot 4 (OBSERVED, one boot): the stick payload runner, chain `psci usbsmmu timer`, stick direct.** The runner loaded and
+hashed the three payloads, six declared ranges were accepted and EL2 was reached, but the photographs cut off the right-hand
+column, so none of the panel's 58 lines was captured; `UPTIME` stayed 0 S, and the board rebooted by itself and then booted
+something other than the stick (both operator reports). From the line count the `timer` payload stopped after announcing its
+read of `CNTPOFF_EL2` (INFERRED: it assumes that `psci` and `usbsmmu` printed as many lines as in boot 5; the cause,
+`SCR_EL3.ECVEn` clear, stays INFERRED); `timer` is not run again.
+**Boot 5 (OBSERVED, one boot): chain `psci usbsmmu`, stick direct.** Both payloads returned and the page stayed up (`UPTIME`
+3 S and 10 S): the runner works on hardware, and the firmware's PSCI answers an SMC from EL2 (version 1.1, SMCCC 1.1; `CPU_ON`
+implemented, INFERRED from `PSCI_FEATURES` returning 0; CPU 0 on and the eleven other cores OFF, none started). Both USB
+controllers read `IDLE` (nothing connected, `DCBAAP` 0, and no event ring on `usb_1_ss0`: the link is down), unlike S0 behind
+the hub (cause UNKNOWN), and context
+bank 3 is nested with stage 1 off, so the walk is `UNSUPPORTED NESTED`: UNKNOWN, with SC2 neither triggered nor cleared
+([SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 13 and Appendix D; the next paragraph).
 
-**Stick payload runner (EXPERIMENTAL; hardware NOT RUN).** The fork's third image, `Q1N1-PAYLOAD.EFI` (gate
-`Q1N1_SP11_PAYLOAD`; `docs/SP11-PAYLOAD.md` there; commits `4a01c31` to `2e50548` on `sa3eedo12-sp11-boot`), loads reviewed
+**Stick payload runner (EXPERIMENTAL; ran on the unit in boots 4 and 5 of 2026-11-14, OBSERVED, one unit, one boot each; the `state` payload NOT RUN).** The fork's third image, `Q1N1-PAYLOAD.EFI` (gate
+`Q1N1_SP11_PAYLOAD`; `docs/SP11-PAYLOAD.md` there; commits `4a01c31` to `2e50548` on `sa3eedo12-sp11-boot`; the unit ran build `A9F00F9CCBB5`, commit `a9f00f9`), loads reviewed
 EL2 test code from the volume it started from before ExitBootServices, checks each file against a manifest, declares the
 pages to slbounce's scoped sweep, and after the bounce hashes the payload again and calls it at EL2 through a small ABI
 (print, hex, a guarded 32-bit load, the counter; deliberately no store). The next measurements (secondary CPUs through PSCI,
@@ -1221,24 +1258,38 @@ reports HCE) and the SMMU context bank the stick's DMA goes through, and walks t
 few probe addresses, to decide whether an EL2 xHCI driver may give the xHC DMA memory of its own and where; every device read
 is inside three fixed windows and every RAM read is checked against the UEFI memory map. A bank it does not model (stage 2,
 nested, all zero) is UNKNOWN, not a stop. A payload that may stall or reset the board goes last in a chain, in order of
-increasing risk, so the unit's chain is `psci usbsmmu timer`: 83 of the 89 rows the page layout gives it. What
-stays UNKNOWN until the unit runs them:
-whether its firmware maps `EfiLoaderCode` executable (the runner allocates payloads there, as `q1n1.efi` itself runs from
-it), whether the sweep takes the extra declared ranges, whether the allocation is still mapped after the bounce, whether the
-firmware answers an SMC from EL2 after the bounce at all, whether reading an SMMU context bank hangs or resets the board
-(nothing recovers it; the last line, `NEXT CB<n>`, would name it), what that bank maps, and whether `CNTVOFF_EL2` and
-`CNTPOFF_EL2` read, fault or stall. Hardware NOT RUN for all four payloads.
+increasing risk, so boot 4's chain was `psci usbsmmu timer` (83 of the 89 rows the page layout gives it).
+
+**What the unit showed (OBSERVED, one unit, one boot each; the full panel of boot 5 is in
+[SP11-STICK-LOG.md](SP11-STICK-LOG.md) Appendix D).** The runner and its ABI work: the payload code, allocated in
+`EfiLoaderCode`, executes at EL2; the sweep took the extra declared ranges (six in boot 4, five in boot 5, every one
+`contained=yes`) and the bounce was taken; the allocation was still mapped after it; each payload was hashed again at EL2
+(`VERIFY=OK`); and a payload's lines reach the panel. `psci`, boot 5, 15 lines, SMC only: the firmware's PSCI answers an SMC
+issued from q1n1's EL2 after the bounce (it was UNKNOWN). `PSCI_VERSION` is `0x10001` (v1.1) and `SMCCC_VERSION` `0x10001`
+(v1.1); `MIGRATE_INFO_TYPE` is -1 (not supported); `PSCI_FEATURES` returns `0x3` for `CPU_SUSPEND` and 0 for `CPU_OFF`,
+`CPU_ON`, `AFFINITY_INFO`, `SYSTEM_OFF`, `SYSTEM_RESET`, `PSCI_FEATURES` and `SYSTEM_SUSPEND`, and -1 for `SYSTEM_RESET2` (a 0
+means implemented: INFERRED from the PSCI specification, which was not re-read here); `AFFINITY_INFO` says CPU 0
+(`MPIDR_EL1` `0x80000000`) is ON and the eleven other MPIDRs the MADT lists are OFF. So `CPU_ON` is implemented (INFERRED, as
+above) and the secondaries are waiting: M4 (secondary bring-up) is possible in principle and was NOT tried (no `CPU_ON`,
+`CPU_OFF`, `CPU_SUSPEND`, `SYSTEM_OFF` or `SYSTEM_RESET` was issued: the payload cannot issue them). `usbsmmu`, boot 5, 17
+lines, 213 loads, 0 faults, 0 refused: reading an SMMU context bank did not hang the board; both USB controllers are `IDLE`
+and context bank 3 is nested with stage 1 off, so what it maps is UNKNOWN (stage 2 is not walked); see
+[SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 13. `timer`, boot 4: it did not return. It stopped after announcing its read of
+`CNTPOFF_EL2` (INFERRED from a line count; its text was not captured), and the board rebooted by itself (operator report);
+`CNTVOFF_EL2` is not the culprit, since the second X2 image's T03 read it as 0. It is not run again. `state` (`MRS` only):
+NOT RUN. Still UNKNOWN: why `U0`'s state differs from S0's, SMMU stage 2 for streams `0x1420` and `0x1460`, whether DMA by an
+EL2 xHCI driver works, DRAM retention (M10), a secondary CPU's start (M4), and the NVMe and PCIe state at EL2.
 
 ### WS-C: monitor core on Oryon v1
 
 | Item | Acceptance criteria |
 | --- | --- |
-| C1 | A VHE-host versus de-VHE decision from the X1/X2 evidence. The de-VHE sequence is: MMU off, clear E2H, reprogram TCR, TTBR0 and MAIR in non-VHE format, `tlbi alle2`, barriers, MMU on. A host model covers it with negative cases (E2H cleared with the MMU on is rejected). Secondaries arrive by PSCI in a different incoming state than the boot CPU; both paths are covered. **Host groundwork (EXPERIMENTAL):** decision record and host model in [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2 (`python3 tools/test-el2-entry-transition.py`; linked into no build). Recommended default: de-VHE on every CPU, inside slbounce's restore where the MMU is already off (placement A1 of that document), else as the first code after its return (A2); a VHE-native monitor only if X2 reads `ID_AA64MMFR4_EL1.E2H0` other than 0 or the functional de-VHE test fails. The X1/X2 measurements M1 to M5 of that document settle it. **Hardware (B1 attempt 7, OBSERVED once on one unit):** placement A1 ran on the boot CPU and left `E2H` clear with the MMU on, `E2H0` is 0 here, and q1n1 ran afterwards; the secondaries (M4), the functional probe (M5) and NV2 with `E2H` clear (M8) are not measured. |
+| C1 | A VHE-host versus de-VHE decision from the X1/X2 evidence. The de-VHE sequence is: MMU off, clear E2H, reprogram TCR, TTBR0 and MAIR in non-VHE format, `tlbi alle2`, barriers, MMU on. A host model covers it with negative cases (E2H cleared with the MMU on is rejected). Secondaries arrive by PSCI in a different incoming state than the boot CPU; both paths are covered. **Host groundwork (EXPERIMENTAL):** decision record and host model in [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 2 (`python3 tools/test-el2-entry-transition.py`; linked into no build). Recommended default: de-VHE on every CPU, inside slbounce's restore where the MMU is already off (placement A1 of that document), else as the first code after its return (A2); a VHE-native monitor only if X2 reads `ID_AA64MMFR4_EL1.E2H0` other than 0 or the functional de-VHE test fails. The X1/X2 measurements M1 to M5 of that document settle it. **Hardware (B1 attempt 7, OBSERVED once on one unit):** placement A1 ran on the boot CPU and left `E2H` clear with the MMU on, `E2H0` is 0 here, and q1n1 ran afterwards; the secondaries (M4) and the functional probe (M5) are not measured. NV2 with `E2H` clear (M8) was measured later: the second X2 image read `E2H=0 TGE=1` beside a T02 GO (OBSERVED, 2026-11-14, one boot). PSCI answers from EL2 and the eleven secondaries are OFF (OBSERVED, boot 5), but no `CPU_ON` was issued. |
 | C2 | `GUEST_CPU_COUNT` becomes a profile parameter, default 6 and A16-identical. Placement on 12 cores in 3x4; redistributors discovered, not hard-coded; the cross-cluster starvation lessons (`SNAP_FAIR_TOKEN`) applied. The smallest vCPU count the J700 profile tolerates is evaluated first. **Host groundwork (EXPERIMENTAL):** `compat/topology.{h,c}` and `tools/test-guest-topology.py`. Nothing calls the model yet, but the monitor enforces the same rule at launch: a build without the token is refused with prepare status -146 (`GUEST_CPU_NEEDS_FAIR_LOCK` in `compat/cpu.h`), and `tools/test-monitor-hardening.py` holds the rule equal to the model for every count from 1 to 12. The SP11 default of six vCPUs needs `-DSNAP_FAIR_TOKEN=1`, because the model refuses six vCPUs across two clusters without a fair lock. SP11 values are INFERRED until X2, X3 and X4. |
 | C3 | Functional ECV use, and the `compat/boot-relocate.h` assumptions re-derived given the Oryon X1 `CNTVOFF_EL2` erratum, if X2 confirms the MIDR. A test with injected mismatched offsets. **Host groundwork (EXPERIMENTAL):** policy and model in [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 3 (`python3 tools/test-timer-offset-model.py`; linked into no build). A `CNTVOFF_EL2` that does not read back what was written fails the boot closed; the recommended monitor time base is `CNTPCT_EL0` minus a monitor-owned epoch, which needs no per-CPU register. |
 | C4 | ISAR1-versus-ISAR2 PAuth normalization in `probes/xnuboot/pauth.c` and `prepare.c`. Unknown ID registers stay RAZ per `probes/idregs.h`. Tests with synthesized registers. **Host groundwork (EXPERIMENTAL):** Oryon v1 PAuth ID normalization is in `compat/oryon-idregs.{h,c}`, hooked into `id_forge` in `probes/idregs.h` behind `SNAP_PLATFORM_SP11`. The guest sees the J700 shape (`ID_AA64ISAR1_EL1` APA and GPA cleared, `ID_AA64ISAR2_EL1` APA3 = 5 and GPA3 = 1) for the recorded Oryon MIDRs; an unrecorded MIDR or an unrecognised PAuth shape refuses the launch (prepare statuses -94 and -95). `probes/xnuboot/pauth.c` is unchanged: the monitor implements no PAC cipher, so normalization changes what the guest reads and never what the hardware computes. Tests: `tools/test-oryon-idregs.py`. The QARMA5-versus-QARMA3 consequences are INFERRED only. |
 | C5 | A host model with 16, 32 and 64 GiB maps. Guest RAM and all MMIO below `1<<36`, or an explicit refusal. No single-constant change is assumed. **Host groundwork (EXPERIMENTAL):** the model `compat/ipa-geometry.{h,c}` with the test `tools/test-stage2-geometry.py`, and an SP11-gated range check before `stage2_build` in `probes/xnuboot/stage2.c` (compile-checked only). Guest RAM and all MMIO must lie below `1<<36`, or the check refuses with a named reason; the emulated guest's own 36-bit contract does not follow `S2_TXSZ`, so no single-constant change is assumed. INFERRED: 16 and 32 GiB fit when guest RAM is carved from the high DRAM bank (the 32 GiB bank ends exactly on `1<<36`); a 64 GiB part ends 32 GiB past the limit and is refused by default, with an opt-in carve-low. The real DRAM map is measured at gate X2. |
-| C6 | **Closed as not applicable until X2.** Only if X2 shows `DCZID_EL0` other than 4 (the monitor already refuses, so this is a design decision, not a bug fix): trap and emulate `DC ZVA`, or a documented guest policy, with a test that covers XNU's use. `DCZID_EL0` = 0x14 is `DZP` set with a 64-byte block, a configuration state and not evidence of broken silicon, and the A16 admission test `dczid != 4` conflates the two (E16, E30). **Host groundwork (EXPERIMENTAL):** study and model in [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 4 (`python3 tools/test-dc-zva-model.py`; linked into no build). Reopen it only if X2's functional `DC ZVA` test fails. |
+| C6 | **Closed as not applicable until X2.** Only if X2 shows `DCZID_EL0` other than 4 (the monitor already refuses, so this is a design decision, not a bug fix): trap and emulate `DC ZVA`, or a documented guest policy, with a test that covers XNU's use. `DCZID_EL0` = 0x14 is `DZP` set with a 64-byte block, a configuration state and not evidence of broken silicon, and the A16 admission test `dczid != 4` conflates the two (E16, E30). **Host groundwork (EXPERIMENTAL):** study and model in [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) section 4 (`python3 tools/test-dc-zva-model.py`; linked into no build). Reopen it only if X2's functional `DC ZVA` test fails (T04 passed at EL2 on the boot CPU on 2026-11-14, OBSERVED once; the other cores and EL1 are unmeasured). |
 | C7 | The X4 exit criteria on the SP11. |
 
 ### WS-D: storage
@@ -1587,11 +1638,16 @@ SKIP is not a pass. The same commands, with their build lines, are in
 
 ### 11.1 Questions a measurement resolves
 
-Each is resolved by a measurement. None has been measured: hardware status is
-NOT RUN.
+Each is resolved by a measurement. Hardware status is NOT RUN unless an item says
+that a run answered it, or answered it in part, and which run.
 
 1. Raw `ID_AA64MMFR2.NV` and `ID_AA64MMFR4.NV_frac`, and VNCR behaviour (X2).
-2. Is ECV visible at EL2 on this unit, and does `CNTPOFF_EL2` work (X2)?
+2. Is ECV visible at EL2 on this unit, and does `CNTPOFF_EL2` work (X2)? Partly
+   answered (OBSERVED, one unit): ECV is 2 at EL2 (X2 T01), and `CNTHCTL_EL2` reads
+   `0x3` with its ECV bit clear (T03, 2026-11-14). A read of `CNTPOFF_EL2` has not
+   been seen to return: it is INFERRED to be what froze the first image's T03 five
+   times and, by a line count, the `timer` payload; the cause (`SCR_EL3.ECVEn`
+   clear, trapping to EL3) is INFERRED and untested.
 3. TGran16 on this unit's Oryon v1 (X2; the A16 and the third-party profile
    both report none).
 4. The ADSP and PMIC-GLINK state at handoff, and whether a qebspil-style
@@ -1601,8 +1657,13 @@ NOT RUN.
 7. Which USB-C port enumerates the Mac gadget, and does the SP11 stay host
    (X3)?
 8. The PCIe SMMUv3 state, the NVMe Identify facts and the LBA format
-   (X2, X6).
-9. This unit's RAM size and high-DDR base (X2).
+   (X2, X6). Not answered: the read of the SMMUv3 at `0x15400000` faulted again
+   (T07) and T06 never finished (OBSERVED, 2026-11-14, one boot). The NVMe sits
+   behind PCIe segment 6, ECAM `0x70000000`, stream `0x60100` (INFERRED from the
+   firmware's device path, the MCFG and the IORT; [SP11-X2-TESTS.md](SP11-X2-TESTS.md), Run 6).
+9. This unit's RAM size and high-DDR base (X2). Answered as the firmware's view
+   (OBSERVED, X2 T09, 2026-11-14, one boot): 32289 MiB of RAM in 7 extents, the
+   highest ending at `0x1000000000` (E23); not a DRAM-controller read.
 10. Which of the five staged `tcblaunch.exe` builds, if any, works with this
     unit's UEFI, and if none does, which older build (X1)?
 11. Can EL2 read the Surface Aggregator link on UART2 (X9)? The plan is in
@@ -1625,18 +1686,33 @@ NOT RUN.
 17. What does firmware leave configured for the two USB controllers (clocks,
     GDSC, PHYs, repeater), what survives slbounce and ExitBootServices, and does
     the controller's DMA reach DRAM behind the SMMU (X2, X3; M1 to M10 of
-    [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) section 4)?
+    [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) section 4)? Partly
+    answered (OBSERVED, one unit, 2026-11-14; [SP11-STICK-LOG.md](SP11-STICK-LOG.md)
+    sections 12 and 13): GDSC and clocks are on and both controllers are readable
+    at EL2 (S0); behind a hub the xHC still held the firmware's rings, halted with
+    HCE set (S0), and with the stick plugged in directly both controllers read as
+    unstarted with the link down (S0b, boot 5). Both streams translate through
+    context bank 3, which is nested with stage 1 off, so whether DMA reaches DRAM
+    is UNKNOWN; PHY and repeater state: UNKNOWN.
 18. `ID_AA64MMFR4_EL1.E2H0`, the hand-off registers, the identity map and TTBR1
     use, the arrival registers of a PSCI secondary, and the functional de-VHE
     test (X1, X2; M1 to M5 and M8 of [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md)).
     Answered for the boot CPU of one unit: `E2H0` is 0 (X2 run 4), the
     hand-off registers (B1 attempt 5), TTBR1 walks are off (attempt 5), and the
-    non-VHE state after the sequence (attempt 7). Open: the identity map per
-    address (M3's `AT`), a PSCI secondary's arrival registers (M4), the
-    functional probe (M5) and NV2 with `E2H` clear (M8).
+    non-VHE state after the sequence (attempt 7); and NV2 with `E2H` clear (M8):
+    the second X2 image read `E2H=0 TGE=1` beside a T02 GO (2026-11-14, one
+    boot). Open: the identity map per address (M3's `AT`), a PSCI secondary's
+    arrival registers (M4) and the functional probe (M5). For M4, PSCI answers an
+    SMC from EL2 and the eleven secondaries are OFF (OBSERVED, boot 5), but no
+    `CPU_ON` was issued.
 19. Per-core `CNTVOFF_EL2` read-back and effect, and `DCZID_EL0` with the
     registers that configure it plus a functional `dc zva` test (X2; M6 and M7
-    of the same document).
+    of the same document). Partly answered for the boot CPU at EL2 (OBSERVED,
+    X2 T03 and T04, 2026-11-14, one boot): `CNTVOFF_EL2` reads 0, the counter
+    advances and `CNTVCT_EL0` plus the offset lies between two `CNTPCT_EL0`
+    reads; `DCZID_EL0` is 4 (a 64-byte block, as the monitor needs) and one
+    `DC ZVA` ran without a fault and changed nothing outside its block. Not
+    done: the other cores, a write and read-back of `CNTVOFF_EL2`, and EL1.
 20. Does the firmware leave the Wi-Fi module powered, the `pcie4` controller
     clocked and its link trained at hand-off, is configuration space readable
     at 01:00.0, and what does the PCIe SMMU do for StreamID `0x40100` (X12a;
@@ -1765,8 +1841,9 @@ maintainer's acceptance ([section 11.2](#112-decisions-for-the-project-owner)).
   never committed.
 - [FEASIBILITY.md](FEASIBILITY.md): the historical A16 study, for the style of
   evidence this plan aims for.
-- The Surface Pro 11 studies and operator guides, all host-side
-  (EXPERIMENTAL, hardware NOT RUN):
+- The Surface Pro 11 studies and operator guides (host-side and EXPERIMENTAL;
+  hardware NOT RUN except where a document records a run on the unit, as the
+  X2 guide, the stick log and the payload runner do):
   [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) (the EL2 entry regime, timer offsets
   and `DC ZVA`: C1, C3, C6),
   [SP11-X2-TESTS.md](SP11-X2-TESTS.md) (the operator guide for the X2 test
@@ -1809,7 +1886,7 @@ hard-coded.
 
 | Item | Value | Label |
 | --- | --- | --- |
-| GICD, GICR | `0x17000000`, `0x17080000` with size `0x300000` (12 x `0x40000`) | VERIFIED; matches the A16 hard-codes |
+| GICD, GICR | `0x17000000`, `0x17080000` with size `0x300000` (12 x `0x40000`) | VERIFIED; matches the A16 hard-codes. OBSERVED on this unit (X2 T05, 2026-11-14, one boot): the GICD reads architecture revision 4, and the 12 frames named by the MADT's GICC structures were all read as redistributors, one per CPU |
 | `pcie6a` (NVMe) | PARF `0x01bf8000`, DBI `0x70000000`, ELBI `0x70000f40`, ATU `0x70001000`, config window `0x70100000` (size `0x100000`), MHI `0x01bfb000` | VERIFIED |
 | PCIe SMMU (SMMUv3) | `0x15400000` (the A16 Wi-Fi code used `0x15480000`) | VERIFIED |
 | apps SMMU (MMU-500) | `0x15000000` | VERIFIED |
@@ -1825,7 +1902,7 @@ hard-coded.
 | `mdss_dp3` (eDP) | `0x0aea0000` (aux +`0x200`, link +`0x400`, p0 +`0x1000`, p1 +`0x1400`), PHY `0x0aec5a00` | VERIFIED in the device tree; INFERRED for the unit |
 | UART2 (Surface Aggregator) | `0x00b88000`, SPI 584; engine 2 of QUP wrapper 0, which the same device tree also declares as I2C2 and SPI2 | VERIFIED |
 | Touchscreen engine | `0x00a88000`, a GENI SPI engine (wrapper 1). The pinned Denali device tree has no touch node | OBSERVED (two community repositories, one unit) |
-| Counter frequency (`CNTFRQ_EL0`) | 19.2 MHz (`0x0124f800`) in a third-party profile of another X1E80100; not read on this unit (E26) | OBSERVED (other unit) |
+| Counter frequency (`CNTFRQ_EL0`) | 19.2 MHz (`0x0124f800`) in a third-party profile of another X1E80100 (E26); read as `0x124F800` at EL2 on this unit (q1n1's page in B1 attempts 5 and 7; the second X2 image's T03, 2026-11-14) | OBSERVED (other unit; and this unit, boot CPU) |
 | `pcie4` (Wi-Fi) | PARF `0x01c08000` (size `0x3000`), DBI `0x7c000000`, ELBI `0x7c000f40`, ATU `0x7c001000`, config window `0x7c100000` (size `0x100000`), MHI `0x01c0b000`; I/O window `0x7c200000`, memory window `0x7c300000` (size `0x1d00000`); 2 lanes; PHY `0x01c0e000` | VERIFIED |
 | Wi-Fi endpoint | `wifi@0`, `pci17cb,1107` (WCN7850), `reg = <0x10000 ...>` (01:00.0) under `pcie4_port0`; StreamID `0x40100` by the EL2 overlay's `0x40000` window | VERIFIED (tree); INFERRED (the stream) |
 | Wi-Fi GPIOs | TLMM GPIO 214 (3.3 V switch), 117 (`WLAN_EN`), 116 (`BT_EN`), 146 to 148 (an unreferenced `pcie4_default` state: PERST#, CLKREQ#, WAKE#); TLMM `0x0f100000` + n * `0x1000` | VERIFIED (tree); UNKNOWN (PERST# wiring) |

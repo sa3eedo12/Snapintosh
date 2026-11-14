@@ -8,11 +8,15 @@ redirect PASS, the NV2-off negative control PASS, state restored and cleanup OK)
 row by row (90/90) and independently confirmed with `tools/nv2_record.py show --check` against
 the retyped record (`gate: ALLOW`). Runs 1-3 (below) found and fixed two bugs before this
 result was reachable at all; see "A phase-ordering bug" and "A second finding" for that history.
-T03, T04 and items 9-13 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3 are still NOT RUN
-(the same board reset shortly after T01/T02 that run 3 found, still unexplained, happens again
+T03, T04 and items 9-13 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3 were still NOT RUN
+after run 4 (the same board reset shortly after T01/T02 that run 3 found, still unexplained, happens again
 right after T02 in run 4) — none of that affects K1, which only needs T01 and T02. Run 5 (below)
-reproduced K1 GO under the reviewed slbounce and froze on T03 once more; the second version of the
-image that follows from it (the order of the tests, T03, T05, T02's REGIME row) is **NOT RUN**. Evidence
+reproduced K1 GO under the reviewed slbounce and froze on T03 once more. The second version of the
+image that follows from it (the order of the tests, T03, T05, T02's REGIME row) ran once on the unit, in
+run 6 (below; `declared` variant, one unit, one boot): T03, T04, T05 and T09 PASS, T07 UNKNOWN, K1 NV2: GO
+again with `E2H` clear, and T06 never finished, because its read of an ECAM window did not return and the
+board reset itself. Items 9-13 are still NOT RUN, and so is the `hardware` variant of the second
+version. Evidence
 labels: VERIFIED (reproduced by a test here), OBSERVED (read on
 the machine that ran the image), INFERRED (follows from other results),
 EXPERIMENTAL (written, emulator-tested only), UNIMPLEMENTED, UNKNOWN. The image
@@ -101,7 +105,8 @@ then T02's verdict was already on screen. Transcribed and CRC-verified row by ro
   reconstructed record: `parse: PARSED`, `gate: ALLOW`, exit 0.
 
 K1 did not fire: NV2 is functionally usable on this unit. T03, T04 and items 9-13 of
-[SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3 remain NOT RUN; none of them bear on K1.
+[SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3 remained NOT RUN after this run (T03 and T04 first
+ran in run 6, below); none of them bear on K1.
 The record is a measurement of this one machine (`tools/nv2_record.py`'s own rule): it is kept
 under `build/`, never committed, and never shown here in full; the embedding of it into an
 actual monitor build is separate, later work.
@@ -134,10 +139,12 @@ EL3 by `SCR_EL3.ECVEn`. If the firmware leaves that bit clear, the read is taken
 that does not handle it can hang; the board then resets some seconds later. That matches a frozen
 screen with neither a `FATAL` page nor an exception page, which is what every run showed.
 `CNTVOFF_EL2` has no EL3 trap control, so it is not the suspect. *Falsified by:* the second version
-of the image, which never reads the register, freezing on T03 again; the cause is then elsewhere in
-T03 (its other register reads or its counter loop). *Supported, not proved, by:* T03 completing in the
-second version, without the read. *Settled by:* a deliberate, isolated read of `CNTPOFF_EL2`, which belongs in a payload of the q1n1
-stick runner (the coordinator's plan) and never in this image's default flow.
+of the image, which never reads the register, freezing on T03 again (it did not, in run 6 below); the
+cause is then elsewhere in T03 (its other register reads or its counter loop). *Supported, not proved,
+by:* T03 completing in the second version, without the read (it did, in run 6 below). *Settled by:* a
+deliberate, isolated read of `CNTPOFF_EL2`, which belongs in a payload of the q1n1
+stick runner (the coordinator's plan) and never in this image's default flow (its first run, the `timer`
+payload of boot 4, is described under run 6).
 
 **T05 (GIC) was a test bug, not a hardware finding.** Its first version knew only the GICR
 discovery-range structure (MADT type 0x0E), so on this machine it found no redistributor frame for
@@ -145,32 +152,39 @@ any CPU. The unit's MADT (OBSERVED from its dump, which is not committed) has tw
 (type 0x0B, 80 bytes), each with a `GICR Base Address` (offset 60) that names that CPU's own frame, one
 GICD (type 0x0C, base `0x17000000`, GIC version 4), one GIC ITS (type 0x0F) and no type 0x0E
 structure. The per-CPU frames are `0x17080000 + 0x40000 * uid`, uid 0 to 11: 256 KiB each, the GICv4
-layout. T05 has not run on the unit.
+layout. The fixed T05 did not run in this run (T03 came first); it first ran in run 6, below.
 
 **INFERRED, not tested: the regime T02 ran in.** The page did not record `HCR_EL2`. T02's stub keeps
 the E2H of the value it finds (`tests_hcr_for`), and q1n1 saw `HCR_EL2` `0x88000010` (E2H clear, TGE
 set) under the same slbounce build ([SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md), OBSERVED there). So the GO
 is INFERRED to have been decided with E2H clear: NV2 works in the non-VHE EL2 regime this slbounce build
 produces. *Falsified by:* a REGIME row (below) that reads `E2H=1`; the GO then holds for the VHE regime
-only. `E2H=0` would confirm it as an observation, not as a verification.
+only. `E2H=0` would confirm it as an observation, not as a verification. (Run 6, below, read `E2H=0` in
+its own GO. This run's GO stays INFERRED to have been decided with `E2H` clear, because its page printed no
+`HCR_EL2`.)
 
 ### The second version of the image
 
-Same two variants (`hardware` and `declared`), everything else unchanged. **Hardware status of every
-item below: NOT RUN.** What was run is host tests and QEMU, which are models.
+Same two variants (`hardware` and `declared`), everything else unchanged. **Hardware status: the
+`declared` variant ran once on the unit, in run 6 below (one unit, one boot); the `hardware` variant is
+NOT RUN. Items 2 to 4 below were each exercised by that run (OBSERVED); of item 1 only the last place, T06,
+is visible.** Everything else that was run is host tests and QEMU, which are models.
 
 1. **The order after the bounce** is now `T01, T02, T04, T09, T05, T07, T08, T03, T06`. Where phase A
    already ran at EL2 its four tests (T01, T03, T04, T02) are marked run and skipped, and the rest
    follow in this order. Why: T01 first because T02 reads what it read; T02 next because it is what the
    image exists to decide and it has completed on the unit (OBSERVED, runs 4 and 5); T04, T09, T05, T07
    and T08 before T03 because they sat behind it, and the page froze on T03's footer in every run since
-   the fallback was introduced (OBSERVED), so none of them has run since (T04 has never run there and no
-   T08 result is recorded; T09, T05 and T07 gave results only in the first runs: PASS, a FAIL caused by
-   this image's own MADT parsing, UNKNOWN; OBSERVED, [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3);
+   the fallback was introduced (OBSERVED), so none of them had run since, until run 6 below (before it,
+   T04 had never run there and no T08 result was recorded; T09, T05 and T07 had given results only in the
+   first runs: PASS, a FAIL caused by this image's own MADT parsing, UNKNOWN; OBSERVED,
+   [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3);
    T03 second to last because its cause is INFERRED and untested, so removing one read is not proof that
    it is safe; T06 last because it is the only other test seen cut off by the reset (once, in its PCIe
-   ECAM read, OBSERVED) and a read of an ECAM window can hang the bus (INFERRED). The page is redrawn after
-   every finished test, so a freeze leaves the verdicts of all that finished on the screen.
+   ECAM read, OBSERVED) and a read of an ECAM window can hang the bus (INFERRED; run 6 below saw it
+   again, in segment 3's window). The page is redrawn after
+   every finished test, so a freeze leaves the verdicts of all that finished on the screen (OBSERVED in
+   run 6: T06 stopped the board and the verdicts of the other eight tests were already there).
 2. **T03 does not read `CNTPOFF_EL2`.** Its row reads `CNTPOFF_EL2 NOT READ (ECV=2)`, its verdict comes
    from the counter and the other registers exactly as before, and what it does not prove is now `N: OTHER
    CORES OR ANY CNTPOFF ACCESS`. Where ECV is below 2 the row is still `CNTPOFF_EL2=N/A (ID ECV<2)`. The
@@ -202,7 +216,7 @@ the distributor and the ITS frames fit.
 
 | Row | Meaning |
 | --- | --- |
-| `REGIME 0000000088000010 E2H=0 TGE=1` (an example of the form, not a prediction) | T02 ran in this regime. `E2H=0`: EL2 in its original, non-VHE regime; `E2H=1`: a VHE host. The stub's own `HCR_EL2` keeps this E2H and clears TGE. |
+| `REGIME 0000000088000010 E2H=0 TGE=1` (the form; run 6 read exactly this value) | T02 ran in this regime. `E2H=0`: EL2 in its original, non-VHE regime; `E2H=1`: a VHE host. The stub's own `HCR_EL2` keeps this E2H and clears TGE. |
 | `CNTPOFF_EL2 NOT READ (ECV=2)` | The register exists (ECV says so) and this image did not touch it. T03's verdict does not depend on it. |
 | `GICR GICC FRAMES=12 OF 12` | Twelve frames named by the GICC structures, twelve read as redistributors. Fewer read than named: a frame was refused (a row says why) or the reading stopped at the first frame that faulted or did not identify as GICv3/v4; nothing after it is touched. |
 | `GICC GICR<k> REFUSED: <reason>` | The frame of the k-th CPU in UID order was not read, for the reason shown (`BASE IS ZERO`, `MISALIGNED`, `BAD RANGE`, `ALLOW LIST FULL`, `NO MEMORY MAP`, `MAP SAYS NOT MMIO`, `NOT MMIO IN MAP`). At most four are listed, then `GICC GICR: <n> MORE REFUSED`; the `MAP MMIO=.. REFUSED=` row counts all of them. |
@@ -219,17 +233,116 @@ read and everything agrees.
 Everything, as in section 4 of this guide, and then: the whole screen as soon as it freezes or the
 report appears, footer included. The report is redrawn after every finished test, so the summary rows at
 the top show which tests finished and with what verdict even on a frozen page; the footer names the test
-that was running. If it freezes, the footer is the most valuable photograph, and the tests before it in
-the order above are the new information: T04 has never run on the unit, and T09, T05 (whose first
-version was a test bug), T07 and T08 have no result since the order changed. Then:
+that was running. If it freezes, the footer is the most valuable photograph. The first run of the second
+version (run 6, below) did freeze, on T06, and the verdicts of the other eight tests were on the page. Then:
 T02's last rows (the `NV2R END LINES=11` row that closes the record and the `REGIME ...` row under it), all of T03 (the
-`CNTPOFF_EL2 NOT READ` row and its verdict) and all of T05 (the rows of the table above).
+`CNTPOFF_EL2 NOT READ` row and its verdict), all of T05 (the rows of the table above) and, if T06 runs, every
+`T06 ECAM ...` footer: the last one names the window that was being read when the board stopped.
 
 Tests: `python3 -B tools/test-uefi-tests.py XV2SourceTests XV2BuildTests XV2MutantTests XV2QemuTests`
 (and the native sections `t03 cntpoff`, `t05 gicc layout`, `nv2 regime` and `hook: post-bounce order`
 of `XNativeTests`). The order after the bounce has no console channel (nothing is printed after
 ExitBootServices), so QEMU shows only phase A's order on the console; the order after the bounce is
 checked natively (the real `hook.c` over models, including a freeze at T03) and in the source.
+
+## Run 6: the second version of the image on the unit: T03 completes, and T06 stops the board
+
+OBSERVED (operator photos, read against enlarged crops; one unit, one boot, 2026-11-14; X1E80100 Surface
+Pro 11; build `E5BF1A6BD94C`, the `declared` variant of section 10; image SHA-256 `6b68cab6...aaad`). This
+is the first hardware run of the second version of the image; its `hardware` variant is still NOT RUN.
+The stick was plugged in directly, with no hub: its UEFI path was `Pci(0x80,0x0)/USB(0x1,0x0)`, one USB
+node, where the hub run of the stick survey ([SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 12) had two.
+T06 is the last test of the new order, so T01 to T05 and T07 to T09 were on the page before it.
+
+| Test | Verdict | What the page showed |
+| --- | --- | --- |
+| T01 ID dump | INFO | The ID registers, as in runs 4 and 5. |
+| T02 NV2 | FUNC GO | The new row `REGIME 0000000088000010 E2H=0 TGE=1`: the GO was obtained with `E2H` clear. |
+| T03 timer | PASS | `CNTFRQ_EL0` `0x124F800` (19.2 MHz); `CNTHCTL_EL2` `0x3` (its ECV bit reads 0); `CNTVOFF_EL2` 0, readable at EL2; `CNTPOFF_EL2 NOT READ (ECV=2)`; the counter advances; `CNTVCT_EL0` plus `CNTVOFF_EL2` lies between two reads of `CNTPCT_EL0`; boot CPU only. |
+| T04 DC ZVA | PASS | `DCZID_EL0` block 64 bytes, the monitor needs 4 (`MATCH`); `DC ZVA` did not fault; nothing changed outside the block. |
+| T05 GIC | PASS | `GICD` `0x17000000`, `ARCH=4` (the MADT says 4), `CTLR` `0x10`, `TYPER` `0xF87F051E`, `IIDR` `0x0401043B`, `ARE_NS=1`; redistributor frames derived from the GICC structures: 12 of 12; `MADT CPUS=12 MATCHED=12`; `AWAKE=12 ASLEEP=0`; `GICC BASE DIFF=0`; `ITS0` `CTLR` `0x80000000`, `ARCH=4`; `FAULTS=0`. |
+| T06 PCIe and NVMe | NOT RUN | The last footer was `T06 ECAM 0740000000`. The read never returned and the board rebooted by itself (operator report). |
+| T07 PCIe SMMU | UNKNOWN | The read of the SMMUv3 at `0x15400000` faulted (guarded and recoverable): `NO STATE`. |
+| T08 ADSP | UNIMPL | Nothing touched, as designed. |
+| T09 DRAM | PASS | RAM total 32289 MiB in 7 extents, the highest ending at `0x1000000000` (2^36); the list is cut after 4 rows; no comparison with a descriptor was made. |
+
+**T02 and the regime (OBSERVED).** `REGIME 0000000088000010 E2H=0 TGE=1` is the `HCR_EL2` the firmware left,
+read before T02 built its own, so this GO was obtained with `E2H` clear: FEAT_NV2 works in the non-VHE EL2
+regime (M8 of [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md); one boot). K1 stays GO. This is the reading the
+"regime" paragraph of Run 5 named as the confirmation; Run 5's own GO stays INFERRED to have been decided
+with `E2H` clear, because that page printed no `HCR_EL2`.
+
+**T03 completed without the read (OBSERVED). That supports, but does not prove, the explanation of the
+earlier freezes (INFERRED).** T03 froze on the footer `RUNNING T03 TIMER` five times, each time with the
+`CNTPOFF_EL2` read in it. Here the read was left out and T03 completed. `CNTVOFF_EL2` read 0, so reading
+it is not what stopped the board. That is what the explanation of Run 5 predicts (the read is gated at EL3
+by `SCR_EL3.ECVEn`, and a clear bit would send it to EL3), and it does not prove it: one boot, in another
+place in the order of the tests, and the cause itself (`SCR_EL3.ECVEn` clear) stays INFERRED. The isolated
+read that Run 5 named as the settling test has been tried once since, in the `timer` payload of the q1n1
+stick runner (boot 4 of the same day). Its panel text was not captured; its line count reads as a stop
+right after the line that announces the `CNTPOFF_EL2` read, and the board then rebooted by itself (INFERRED;
+[SURFACE-PRO-11.md](SURFACE-PRO-11.md), the "Fewer boots" paragraph). Both observations point at that read
+and not at the rest of T03; neither shows why it does not return. T03 is boot CPU only (`CORES: BOOT CPU
+ONLY`); the other cores were not tested (the `psci` payload of boot 5 saw the other eleven cores OFF, and
+`PSCI_FEATURES` returned 0 for `CPU_ON`, which means implemented, INFERRED from the PSCI specification;
+none was started).
+
+**T05: the per-CPU path works (OBSERVED).** This MADT has twelve GICC structures and no GICR discovery
+range (Run 5), and the second version of T05 takes the redistributor frames from the GICC structures. It
+read 12 of 12; each MADT CPU matched exactly one frame's `GICR_TYPER` (`MADT CPUS=12 MATCHED=12`); no
+frame was read at an address other than its CPU's own GICC base (`GICC BASE DIFF=0`); the GICD's `ARCH=4`
+agreed with the MADT. The test bug of Run 5 is fixed. T05 still does not prove that interrupts are
+delivered.
+
+**T06: the read of segment 3's ECAM window never returned (OBSERVED); the cause is INFERRED.** The last
+footer was `T06 ECAM 0740000000`, the base of the MCFG entry of segment 3 (buses 0 to 1). The read did not
+return and the board rebooted by itself (operator report; the time was not recorded). A hang followed by a
+watchdog reset is INFERRED, as for the T03 freezes. T06 never finished, so its own page was never drawn;
+the verdicts of the other eight tests were already on the screen, which is what the order of the second
+version is for. T06 reads the MCFG windows in table order, so the windows before segment 3 had been handled
+(read or refused) when it stopped; which, and what they returned, is not known (their rows were never
+drawn). A later T06 would have to leave segment 3's window alone (UNIMPLEMENTED: no such image exists).
+
+**T07: UNKNOWN again (OBSERVED).** The read of the SMMUv3 at `0x15400000` faulted. The fault was guarded and
+recoverable (the image went on) and T07 shows `NO STATE`. The IORT gives this one SMMUv3 to all eight PCIe
+segments (below), so the NVMe's translation state at EL2 is still not known. T07 was UNKNOWN in the earliest
+runs too, from a faulting register read ([SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3). Why the window
+faults is UNKNOWN.
+
+**T09 (OBSERVED).** RAM totals 32289 MiB in 7 extents and the highest ends exactly at `0x1000000000`, so no
+RAM lies at or above 2^36: the 32 GiB case of E23 in the plan is this unit, now from a test of the image
+and not only from the probe's dumps. This is the firmware's view, not a DRAM controller read.
+
+**What the unit's ACPI tables say about PCIe (OBSERVED in the dump, which is not committed; the NVMe's place
+is INFERRED).** The DSDT has eight PCI roots with `_SEG` = `_UID` = 0 to 7, and the MCFG has one entry for
+each:
+
+| Segment | ECAM base | Buses | Note |
+| --- | --- | --- | --- |
+| 0 | `0x400000000` | 0-255 | |
+| 1 | `0x500000000` | 0-255 | |
+| 2 | `0x6000000000` | 0-255 | above 2^36, the monitor's IPA limit |
+| 3 | `0x740000000` | 0-1 | where T06 stopped |
+| 4 | `0x7c000000` | 0-1 | equal to the DBI base of `pcie4`, the Wi-Fi controller (plan, Appendix A) |
+| 5 | `0x7e000000` | 0-1 | |
+| 6 | `0x70000000` | 0-1 | the NVMe's segment (INFERRED, below); equal to the DBI base of `pcie6a` (plan, E14) |
+| 7 | `0x74000000` | 0-1 | |
+
+The firmware's block device path for the NVMe is `PcieRoot(0x6)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(...)` (the
+identifier is left out), so the NVMe is behind the root with ACPI `_UID` 6: segment 6, ECAM base
+`0x70000000` (INFERRED from `_UID` = `_SEG`). The IORT maps each segment n's stream ids to the single SMMUv3
+node at `0x15400000`, with output base `0xn0000`; the NVMe, at bus 1, device 0, function 0, would be stream
+`0x60100` (INFERRED). These agree with the device-tree values of the plan (`pcie6a` DBI `0x70000000` and
+stream window `0x60000`, E14 and E24; `pcie4` DBI `0x7c000000` and the Wi-Fi's stream `0x40100`, Appendix A),
+which they would if segments 4 and 6 were those controllers (INFERRED). Segment 3 is not the NVMe's window
+(INFERRED); T06 reached it because it reads the windows in table order.
+
+**What this changes.** T03, T04, T05 and T09 are the first hardware results for items 3 (boot CPU only), 4
+(at EL2), 5 and 8 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3. None bears on K1, which stays GO,
+now with its regime read. Still open: whether `CNTPOFF_EL2` works (no read of it has been seen to return),
+`CNTVOFF_EL2` on the other cores, the state of the NVMe and of the PCIe SMMU at EL2 (T06 stopped the board,
+T07 faulted) and the ADSP (T08 is UNIMPL). T06 as built stops the board at segment 3's window on this unit
+(OBSERVED once).
 
 ## 1. Before you start
 
@@ -500,7 +613,9 @@ not only T05 to T09.
 
 ## 10. The `declared` image, for the reviewed scoped-sweep slbounce
 
-**Hardware status of this step: NOT RUN.** The host tests and the QEMU run below are models; they
+**Hardware status of this step: OBSERVED to work on the unit in runs 5 and 6 (one unit, one boot each).**
+Run 5 printed `EBSRANGES STATE=DECLARED RANGES=1 ... STATUS=0x0`, the scoped sweep accepted the range and
+the bounce was taken; run 6 reached EL2 as well. The host tests and the QEMU run below are models; they
 say nothing about the unit's firmware or about slbounce running on it.
 
 The image above never tells slbounce which memory it dirtied. The reviewed slbounce fork
@@ -546,8 +661,8 @@ shows `SP11X2-EBS=DECLARED-IMAGE-RANGE`; the hardware image has no such string.
   STATUS=0x0000000000000000` before the usual `EBS STATE=CALLING`.
 * **Limits.** INFERRED, not tested: nothing the image reads after the bounce depends on the lines
   that are not declared, the firmware's stack among them. The runs without any sweep worked, so
-  declaring the image is at least as protective as them. UNKNOWN until a run: that this
-  firmware's memory map holds the image in one descriptor that passes the rule. The X1 probe
+  declaring the image is at least as protective as them. OBSERVED in run 5 (`STATUS=0x0` and the
+  bounce): this firmware's memory map holds the image in one descriptor that passes the rule. The X1 probe
   dumps (OBSERVED) list 226 to 227 descriptors, under the fork's limit of 512, and every
   descriptor of the swept types has write-back set, but they do not say which descriptor holds
   this image. The variable is volatile and the image does not delete it if ExitBootServices then

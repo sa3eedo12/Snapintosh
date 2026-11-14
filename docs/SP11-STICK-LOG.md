@@ -1,10 +1,12 @@
 # Surface Pro 11 stick log: reaching the boot stick from EL2 (B3, and the first step of B2)
 
 **Design study with host-side groundwork. The writer (S1 to S6) is UNIMPLEMENTED. Hardware status: NOT RUN for the writer;
-the read-only survey S0 ran once on the unit (section 12).** Nothing of the writer ran on a Surface Pro 11. When the study
+the read-only survey S0 ran once on the unit (section 12), and its follow-up S0b, a payload, in two boots (section 13).**
+Nothing of the writer ran on a Surface Pro 11. When the study
 was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as an opt-in, read-only survey in
 the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`) and has run
-once on the unit: its results are OBSERVED (one unit, one boot) and are recorded in section 12. Stages S1 and later do not
+once on the unit: its results are OBSERVED (one unit, one boot) and are recorded in section 12. S0b is a payload for the
+fork's payload runner (`docs/SP11-PAYLOAD.md` there); its results are in section 13. Stages S1 and later do not
 exist. It answers plan item B3 (a persistent log sink) and the
 first deliverable of B2 (EL2 USB host bring-up) of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) and
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) as far as public sources and a host can: which controller the boot stick
@@ -33,7 +35,7 @@ guarded log writer, and their tests (section 8).
    not only a header, and the writer refuses to overwrite a sector that does not still hold its own tag. A wrong, stale or
    hostile map then cannot damage the stick's file system, which is the failure that matters most. The per-sector tag is also
    what makes a later q1n1 FAT walker (workflow W2) self-verifying.
-3. **The stick sits behind a USB hub (OBSERVED by S0, section 12: two USB nodes in the path, a hub function on each of the
+3. **In S0 the stick sat behind a USB hub (OBSERVED by S0, section 12: two USB nodes in the path, a hub function on each of the
    controller's two root ports, and the stick on hub port 3 with route string 3; the operator confirmed an adapter or hub,
    Q1 in section 11).** The UEFI path has two USB nodes; in EDK2's code each USB node is
    one device on the way down, so the second node is a device behind the first, a hub (section 3.1). q1n1's xHCI driver
@@ -42,7 +44,10 @@ guarded log writer, and their tests (section 8).
    available, so the next boots can use a direct connection.** Hub support is stage S1.5 (about 250 to 350 lines, 2 to 4
    more boots) and is then needed only if a direct connection does not work. S0 makes the alternative, adopting the
    firmware's own slot state (S1a), unlikely: the xHC reports a host
-   controller error and needs a reset, which drops every slot (INFERRED, section 12).
+   controller error and needs a reset, which drops every slot (INFERRED, section 12). Boots 3 to 5 of that day used the
+   direct connection (OBSERVED for boot 3: one USB node in the X2 run's UEFI path, `Pci(0x80,0x0)/USB(0x1,0x0)`; boots 4 and
+   5 are recorded as direct too), and in that
+   topology S0b found no firmware xHCI state at EL2 and the link down (section 13), so S1a has nothing to adopt there.
 4. **The stick's controller is `usb_1_ss0` at `0x0a600000` (OBSERVED by S0, section 12).** The survey prints its baseline line
    only for the host controller whose BAR 0 equals that window, and it printed. `usb_1_ss1` at `0x0a800000` had nothing
    connected and firmware never started it. Which physical USB-C port `usb_1_ss0` is on the unit is not recorded (Q2,
@@ -61,12 +66,21 @@ guarded log writer, and their tests (section 8).
    ExitBootServices handlers and the QHEE teardown (S0 lines GCC, GATE and OP); (b) which controller and port, and whether a
    hub is in the way (lines HUB, XECP, PORT, SLOT); (c) whether DMA from the xHC reaches q1n1's arena coherently through the
    SMMU (line SMMU, then the S1 No-Op). S0 has answered (a) and (b) apart from the PHY (section 12). (c) is half answered:
-   both streams translate through context bank 3, whose contents S0 did not read.
+   both streams translate through context bank 3; S0b read that bank (section 13): it is nested with stage 1 off, so what
+   it maps is still UNKNOWN.
 9. **S0 ran once on the unit (OBSERVED, one unit, one boot; section 12).** The controller is powered, clocked and readable at
    EL2, an xHCI 1.10 on a DWC3 in host mode, with no fault and no hang. The xHC is halted with its host controller error flag
    (HCE) set, which this study did not anticipate. The firmware's rings and slot contexts are intact in RAM. Both USB streams
-   translate through SMMU context bank 3. The conditional GO of section 4.7 is met except its SMMU condition, which needs a
-   read-only follow-up (S0b, section 12) before any write.
+   translate through SMMU context bank 3. The conditional GO of section 4.7 is met except its SMMU condition; the read-only
+   follow-up S0b has since run (item 10, section 13) and did not decide it.
+10. **S0b ran in two boots and was read in one (OBSERVED, one unit, one boot; section 13).** With the stick plugged in
+    directly, both USB controllers read `IDLE` at EL2: nothing connected and no DCBAAP (and, on `usb_1_ss0`, no event ring).
+    The firmware's xHCI state
+    that S0 found behind the hub is not there to adopt, and the link is down; the cause is UNKNOWN, because one boot per
+    topology cannot separate a reset, the topology and the unit. A stick writer would have to bring the controller and the
+    link up from reset (INFERRED; PHY and repeater bring-up UNIMPLEMENTED, M3 not measured). Context bank 3 is nested with
+    stage 1 off, so the S0b walk is `UNSUPPORTED NESTED`: UNKNOWN, and SC2 is neither triggered nor cleared. A1 and A2 stay
+    NOT granted.
 
 ## 2. The problem and the requirements
 
@@ -345,7 +359,7 @@ All of it uses boot services and writes nothing. Any failure prints a reason and
 | --- | --- | --- | --- | --- |
 | (i) | **Bulk-only (BOT) versus UAS** | BOT is three transfers per command on one pair of bulk endpoints, needs no streams, and a stick that firmware read has a BOT interface: EDK2's mass-storage driver speaks only CBI and BOT (`UsbMassImpl.c:16`, `UsbMassImpl.c:17`, `UsbMassImpl.c:18`; INFERRED that Surface's does too). UAS needs xHCI streams, four pipes, information units and tags; no code exists here or in q1n1, and its speed gain is irrelevant to a log. The protocol numbers are BOT `0x50` and UAS `0x62` (`storage.h:32`, `storage.h:33`) | A UAS-only stick has no BOT interface (UNKNOWN for the unit; S2 reads the descriptors) | **BOT.** A stick with no BOT interface is not usable; use another stick |
 | (ii) | **FAT-aware versus raw LBA writes** | Raw writes touch no metadata: the file never changes size, clusters or entry, and a bug can only damage log sectors, which the tags guard. FAT-aware writes need cluster allocation, both FAT copies, FSInfo, directory entries and long names: about 600 to 1,000 risky lines (INFERRED estimate), and a torn write corrupts the FAT so the stick no longer boots | Raw needs the Mac-side pre-allocation and a stable map (4.3); the file's modification time does not reflect writes (harmless) | **Raw** |
-| (iii) | **DRAM retention across a warm reset, then a dump on the second boot** | No EL2 USB at all: firmware's own USB and file system drivers write the dump in boot services. About 100 to 150 lines for the canary test, which is M10 of the host-link study | Three unknowns in series: a reset that works at EL2 (`ResetSystem` was OBSERVED not to work after the bounce; PSCI SYSTEM_RESET and a watchdog reset are untried, UNKNOWN), retention of DRAM across it (UNKNOWN, A1), and a boot that returns to the stick. The last needs either BootNext, which is a non-volatile variable write that needs the operator's explicit authorization, or the operator holding the boot keys on every boot | **Keep as a cheap parallel experiment (M10), not the primary route.** If it works it could also recover something after a forced reset following a hang before USB works, which the stick writer cannot |
+| (iii) | **DRAM retention across a warm reset, then a dump on the second boot** | No EL2 USB at all: firmware's own USB and file system drivers write the dump in boot services. About 100 to 150 lines for the canary test, which is M10 of the host-link study | Three unknowns in series: a reset that works at EL2 (`ResetSystem` was OBSERVED not to work after the bounce; PSCI SYSTEM_RESET and a watchdog reset are untried, UNKNOWN), retention of DRAM across it (UNKNOWN, A1), and a boot that returns to the stick. The last needs either BootNext, which is a non-volatile variable write that needs the operator's explicit authorization, or the operator holding the boot keys on every boot. Update, 2026-11-14: after the automatic reboot that followed a stall at EL2 (boot 4) the Surface booted something other than the stick (operator report), so the operator at the keys is a fact and not a worst case; whether DRAM survives such a reset is still UNKNOWN (M10 NOT RUN; section 13) | **Keep as a cheap parallel experiment (M10), not the primary route.** If it works it could also recover something after a forced reset following a hang before USB works, which the stick writer cannot |
 | (iv) | **UEFI runtime SetVariable after ExitBootServices** | Needs no USB driver | An NVRAM write is a persistent firmware modification and needs explicit authorization (AGENTS.md section 5). Runtime services at EL2 here are unverified (`ResetSystem` was OBSERVED not to work after the bounce). The store is small, wears, and a damaged store can disturb the boot configuration. A volatile variable (no NON_VOLATILE attribute, as q1n1's A16 prep step stores its snapshot) is not an NVRAM write but does not survive a reset and cannot be written after ExitBootServices | **Rejected** unless explicitly authorized, and then only for a few bytes of stage marker as a last resort |
 | (v) | **A camera pointed at the panel** | No device risk and no new q1n1 code. A fixed camera takes a photograph at each page; a Mac script decodes the text. The glyph set is known and small (`screen_char` in q1n1's `main.c`), so template matching should decode it almost exactly; QR frames would make it exact (an encoder in q1n1 is a few hundred lines, UNIMPLEMENTED) | Shows only what is on screen when photographed; after a hang nothing later appears; someone still arms the camera. Not built here: it needs real photographs to validate | **Do it in parallel.** It removes the tiring part, transcription, at no device risk, but it is not a persistent log |
 
@@ -359,8 +373,12 @@ All of it uses boot services and writes nothing. Any failure prints a reason and
   arena (or no SMMU in the way), with no fault.
 - **S0 outcome (OBSERVED once, section 12).** The gate is ON and the identity is sane, so the first two conditions are met.
   The SMMU condition is not decided: both streams translate through context bank 3 and S0 did not read it, so neither GO nor
-  SC2 applies yet. S0 also found what this study had not anticipated: the xHC is halted with HCE set. The next step is the
-  read-only S0b of section 12, not S1.
+  SC2 applied after S0. S0 also found what this study had not anticipated: the xHC is halted with HCE set. The follow-up was
+  the read-only S0b of section 12, not S1.
+- **S0b outcome (OBSERVED once, section 13).** S0b read context bank 3: it is nested (stage 1 followed by stage 2) with stage 1
+  off and no table base, so its walk is `UNSUPPORTED NESTED`, which is UNKNOWN. The SMMU condition is still not decided and
+  SC2 is neither triggered nor cleared. What would decide it: a read-only stage-2 walker payload (it must first find the
+  stage-2 context, UNKNOWN how, with NUMS2CB 0), or the S1 No-Op, which needs A1 (NOT granted). S1 has not started.
 - **NO-GO** for (iv). (iii) only as the M10 experiment. (v) yes, in parallel.
 
 **Stop criteria.** Each is a point at which work on the stick writer stops and the plan is reviewed, not retried.
@@ -469,9 +487,8 @@ S1.5.
   firmware's slot state, so a stick behind a hub is gone until a hub is enumerated (S1.5). **S1a, adopt the firmware's slot:**
   no reset; keep the firmware's DCBAA and slot contexts, give the controller q1n1's own command and event rings, set Run, resume
   the ports, then stop the stick's endpoints and set their dequeue pointers to q1n1's rings. It avoids hub code entirely, but
-  needs the firmware's contexts intact (S0 line FWRINGS with INRAM=1) and the link alive; its feasibility is UNKNOWN and it
-  is the riskier variant (writes into state the controller owns). The study recommends S1b with a direct connection first, and
-  S1a only if the stick must stay behind a hub.
+  needs the firmware's contexts intact (S0 line FWRINGS with INRAM=1) and the link alive; its feasibility is UNKNOWN behind a hub, and
+  with a direct connection it has nothing to adopt (S0b, OBSERVED once, section 13: DCBAAP 0, no event ring, link down at EL2). It is the riskier variant (writes into state the controller owns). The study recommends S1b with a direct connection first, and S1a only if the stick must stay behind a hub.
 - *Acceptance:* a No-Op Command Completion event with a success code (proves DMA both ways, the event ring and coherence of TRBs;
   the host-link study's G12 checkpoint, M6b), and for S1b a connection on the right root port after the reset. Lines
   `STK S1 NOOP` and `STK S1 PORT`.
@@ -611,12 +628,17 @@ any claim in section 3 about the unit is true beyond what section 12 records. Ha
 | Claim | Label | Where |
 | --- | --- | --- |
 | The stick's path has two USB nodes and a hub is in front of it (slots 1 and 2 are hub-shaped, the stick has route string 3) | OBSERVED (S0; that slots 1 and 2 are hub functions is INFERRED from the endpoint shape) | 3.1, 12 |
+| With the stick plugged in directly, the UEFI path has one USB node | OBSERVED (X2 run 6, one boot) | 1, 13 |
 | Which of the two Denali controllers the stick uses | OBSERVED (S0): `usb_1_ss0` | 3.2, 12 |
 | The xHC is halted at EL2 | OBSERVED (S0); that firmware's ExitBootServices handler halted it is INFERRED | 3.3, 12 |
 | The xHC reports HCE (USBSTS bit 12) at EL2, which it did not before ExitBootServices | OBSERVED (S0); cause UNKNOWN | 12 |
 | GDSC and clocks of both controllers at EL2 | OBSERVED (S0): on | 3.3, 12 |
 | SMMU streams `0x1420` and `0x1460` at EL2 | OBSERVED (S0): translate through context bank 3 | 3.3, 12 |
-| PHY, repeater, retimer, context bank 3 contents, DMA coherence at EL2 | UNKNOWN | 3.3, 12 |
+| Both USB controllers at EL2 with the stick plugged in directly: `IDLE`, nothing connected, no DCBAAP (on `usb_1_ss0` also no event ring), link down | OBSERVED (S0b, one boot); the cause of the difference from S0 is UNKNOWN | 13 |
+| A stick writer has to bring the controller and the link up from reset | INFERRED; PHY and repeater bring-up UNIMPLEMENTED, M3 not measured | 13 |
+| Context bank 3 is nested with stage 1 off; the S0b walk is `UNSUPPORTED NESTED` | OBSERVED (the registers); what the bank maps is UNKNOWN; SC2 neither triggered nor cleared | 13 |
+| PHY, repeater, retimer, what context bank 3 maps, DMA coherence at EL2 | UNKNOWN (the bank's registers were read by S0b: 13) | 3.3, 12, 13 |
+| DRAM retention across a reset | UNKNOWN (M10 NOT RUN); after an automatic reboot the Surface booted something other than the stick (operator report) | 4.6, 13 |
 | M2, M1, M1b, M1c and M6a are read-only at EL2 | VERIFIED as a classification; run once (S0) without a fault | 3.5, 12 |
 | `ResetSystem` does not work after the bounce | OBSERVED (X1) | 3.4, 4.6 |
 | Raw writes into a tagged, pre-allocated region are guarded against wrong maps and device faults | EXPERIMENTAL (host tests) | 4.5, 5 |
@@ -663,19 +685,23 @@ The first two need the operator.
    direct, the two-node path of 3.1 is a surprise worth a photograph of the setup. If it is behind a hub, may the next sessions
    plug it straight in? (If not: S1a or S1.5.) **Answered 2026-11-14 (operator): through an adapter or hub.** S0 confirmed an
    active hub (section 12). **Asked the same day whether the stick can go in without a hub: yes, the operator has a USB-C
-   stick or a plain passive adapter.** The next boots use a direct connection; S1.5 stays on the table only as the fallback,
-   and S1a is unlikely (section 12).
+   stick or a plain passive adapter.** Boots 3 to 5 used a direct connection (section 13); S1.5 stays on the table only as the
+   fallback, and S1a has nothing to adopt in the direct topology (section 13).
 2. **Q2. Which port.** Which of the unit's USB-C ports is the stick in, so that D3 of 3.2 has a starting point? S0 says
    `usb_1_ss0` carries it now (section 12). The path node was `Pci(0x81,0x0)` in the earlier report of 3.1, which suggests
    (INFERRED) that the stick was then in the other port. The operator can say which physical port is which.
 3. **Q3. Imaging.** Can the operator write a disk image to the stick (W1b), or must the log region be created by copying files
    (W2, which needs a q1n1 FAT walker)? Will the operator keep the stick on an MBR disk (GPT is refused)?
 4. **Q4. Authorization.** May A1 (the first write to an xHC register at EL2, S1) and A2 (the first sector write to the stick,
-   S5) be granted, and when? Nothing in this study grants them.
+   S5) be granted, and when? Nothing in this study grants them, and both stay NOT granted after S0b.
 5. **Q5. Gate name.** The model is gated by `SNAP_PLATFORM_SP11`; a runtime writer needs its own gate and a boot option. Name
    them before S0 code is written.
-6. **Q6. Camera.** Is a fixed camera, with a Mac-side decoder, worth setting up in parallel (alternative (v))?
-7. **Q7. Retention.** Is the M10 experiment to run now, since it is cheap and independent?
+6. **Q6. Camera.** Is a fixed camera, with a Mac-side decoder, worth setting up in parallel (alternative (v))? Still open:
+   boot 4's photographs did not frame the right-hand column of the page and its payload text was lost (section 13).
+7. **Q7. Retention.** Is the M10 experiment to run now, since it is cheap and independent? Still open, with one new fact: after
+   the automatic reboot of boot 4 the Surface booted something other than the stick (operator report; section 13), so a dump
+   on the next stick boot would need the operator to select the stick again. DRAM retention across such a reset is UNKNOWN
+   (M10 NOT RUN).
 
 ## 12. Result of the S0 survey on the unit (OBSERVED, one unit, one boot)
 
@@ -710,11 +736,12 @@ tables may live in memory that the hypervisor teardown or q1n1 reuses (UNKNOWN).
 
 **What S0 does not show.** Any DMA by the xHC; the cause of HCE; PHY, repeater and retimer state; which physical port is
 `usb_1_ss0`; the fourth firmware xHCI handle; whether a reset of this xHC works at EL2; the state of either controller with a
-device attached to `usb_1_ss1`.
+device attached to `usb_1_ss1`. S0b (section 13) added the direct-topology state of both controllers and the registers of
+context bank 3, and showed none of the rest.
 
-**S0b: the read-only follow-up, before any write.** It needs no authorization because it only loads, and it can ride in a boot
-that is happening anyway, as a payload for the payload runner (`docs/SP11-PAYLOAD.md` in the q1n1 fork). It should print, in
-order and bounded:
+**S0b: the read-only follow-up, before any write (it has run: section 13).** It needs no authorization because it only loads,
+and it rode in boots that were happening anyway, as a payload for the payload runner (`docs/SP11-PAYLOAD.md` in the q1n1
+fork). It was specified to print, in order and bounded:
 
 1. the whole of `USBSTS` and the last few event TRBs before the firmware's event dequeue pointer, to look for the cause of HCE;
 2. SMMU context bank 3: its base register, control and translation-control registers, the translation table base, the memory
@@ -726,9 +753,85 @@ order and bounded:
 4. the firmware's slot contexts and the port status registers of both controllers again, taken with the stick plugged in
    directly (no hub): the topology the writer should target, and whether HCE appears without a hub in the path.
 
-The S0 build does not decode HCE, lists three of four xHCI handles and cannot read a context bank; S0b covers these without a
-new survey image. S1 follows only if S0b does not trigger SC2, with A1 (section 11, Q4) granted and a direct connection
-shown to work (otherwise S1.5 is planned). Until then A1 and A2 stay NOT granted.
+The S0 build does not decode HCE, lists three of four xHCI handles and cannot read a context bank; S0b was to cover these without a
+new survey image, and section 13 says what it did. S1 follows only if S0b does not trigger SC2 (it did not trigger it, and did not
+clear it), with A1 (section 11, Q4) granted and a direct connection shown to work (otherwise S1.5 is planned). Neither condition
+holds: A1 is NOT granted, and in the direct topology the link was down at EL2 (section 13). A1 and A2 stay NOT granted.
+
+## 13. Result of S0b on the unit (OBSERVED, one unit, one boot)
+
+**What ran.** On 2026-11-14 two boots ran the payload runner (`Q1N1-PAYLOAD.EFI`; q1n1 build `A9F00F9CCBB5`, commit `a9f00f9`
+of the fork; `docs/SP11-PAYLOAD.md` there) with the stick plugged in directly, no hub. S0b is its payload `usbsmmu`: a file on
+the stick that the runner loads before ExitBootServices, hashes again at EL2 and calls. The runner replaces a new survey image
+per measurement by a file; it does not replace the photographs. The lines still reach the operator only as text on the panel,
+and the persistent log (B3) is still UNIMPLEMENTED. The payload reads devices only through the runner's guarded 32-bit load and
+has no store (213 loads, 0 faults, 0 refused in boot 5): no write to an xHC register, to the SMMU or to the stick. File hashes
+(SHA-256 prefixes): `q1n1-payload.efi` `c20579093ec7`, `PSCI.BIN` `d391a9c8`, `USBSMMU.BIN` `9f0260dc`, `TIMER.BIN`
+`68cace99`.
+
+- **Boot 4** (chain `psci`, `usbsmmu`, `timer`; manifest `3f99a4d0`, 920 bytes). Before ExitBootServices the console showed all
+  three payloads loaded and hashed, six declared ranges accepted (every one `contained=yes`) and
+  `PAYLOAD READY FILES=3 RANGES=6 CODE=3`; the bounce was taken and EL2 was reached. The right-hand panel held 58 lines, counted
+  from the geometry of a photograph that cut the column off, so no payload text was captured and boot 4 gave no `usbsmmu`
+  values. `UPTIME` stayed 0 S in both photographs (the heartbeat loop starts only after the chain returns) and the board rebooted
+  by itself before a third could be taken (operator report); afterwards it booted something other than the stick (operator
+  report). With boot 5's line counts (`psci` 15, `usbsmmu` 17), 58 lines are the runner's four notes, a `VERIFY`, a `CALL` and
+  (except for the last payload) a `DONE` for each of the three payloads, and 14 lines of the `timer` payload, the 14th being
+  `PAYLOAD TIMER NEXT CNTPOFF_EL2`: the `timer` payload stopped at its read of `CNTPOFF_EL2` and the board was reset. That is
+  INFERRED from a count, assuming that `psci` and `usbsmmu` printed as many lines as in boot 5; the cause (`SCR_EL3.ECVEn` clear)
+  stays INFERRED too.
+- **Boot 5** (chain `psci`, `usbsmmu` only; manifest `9d6f731b`, 624 bytes; the `timer` payload is not run again).
+  `PAYLOAD READY FILES=2 RANGES=5 CODE=2`; both payloads returned (`RETURN=0X0 STACK=OK`), the page stayed up (`UPTIME 3 S` in
+  one photograph, `UPTIME 10 S` in another) and the panel was photographed in full. Its 41 lines are in Appendix D, verbatim.
+
+**The `usbsmmu` lines, decoded (boot 5; every value was re-read against enlarged crops).**
+
+| # | Question | Panel line | What the unit showed | Label | Consequence |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `usb_1_ss0` (`U0`, window `0x0a600000`) at EL2, stick plugged in directly | `U0` | `IDLE`: `CAPL` `0x20`, `USBCMD` 0, `USBSTS` `0x11` (HCH and PCD; HCE clear), `DCBAAP` 0, port 1 `PORTSC` `0x20002A0` (RxDetect, port power, WCE). The rule for `IDLE` is `DCBAAP` 0 and CCS clear on both ports, so port 2 has no connection; its raw value is not on the page (the payload drops a field that does not fit the 100-character line) | OBSERVED | In S0, behind a hub, this controller still held the firmware's rings: `DCBAAP` `0xCF412000`, three slots, `USBSTS` `0x1019` with HCE, port 1 `0xE03` in U0. Here nothing is started and nothing is connected |
+| 2 | `usb_1_ss1` (`U1`, `0x0a800000`) | `U1` | `IDLE`: `USBSTS` `0x1` (HCH), `DCBAAP` 0, port 1 `0x20002A0` | OBSERVED | As in S0: untouched by firmware |
+| 3 | The DWC3 of `U0` | `DWC3` | `GSNPSID` `0x33313130` (as in S0), `GCTL` `0x101005`, `GSTS` `0x7E800001`, no bus error latched, `GDBGLTSSM` `0x9CC20026` (raw, not decoded here) | OBSERVED | The same core, readable, no fault |
+| 4 | The event ring and the slots | `RINGS`, `TRB`, `U0 SLOTS` | `ERSTSZ`, `ERSTBA` and `ERDP` all 0 (`SEG0=NO_ERST`), so the TRB and slot groups were skipped (`NO_SEG0`, `NO_DCBAAP`) | OBSERVED | There are no firmware rings to read in this topology: S0b item 1 (the last event TRBs, to look for the cause of HCE) could not be done. HCE is clear here, so its cause in S0 stays UNKNOWN |
+| 5 | The apps SMMU (`0x15000000`), global registers | `SMMU` | `ID0` `0x7C017E9A` (154 stream match registers), `ID1` `0x6000005F` (95 context banks, `NUMS2CB` 0, 4 KiB pages, `NUMPAGENDXB` 6), `ID2` `0x5222` (IAS, OAS and UBS 40 bits; 4 KiB and 64 KiB granules), `sCR0` `0x230406`, `sGFSR` 0, context bank base `0x15080000`; streams `0x1420` and `0x1460` match SMR3 and SMR4, S2CR `TRANS` into context bank 3 | OBSERVED | As S0 row 11, plus the identification registers. `NUMS2CB` is 0 |
+| 6 | Context bank 3 | `CB3` | `CBAR` `0x35E03`: TYPE 3 (stage 1 followed by stage 2, `NESTED`), VMID/CBNDX field 3, MemAttr 5, BPSHCFG 2; `CBA2R` `0x1` (VA64); `SCTLR` `0xE0` (M 0: stage 1 off; only fault-report bits set); `TCR`, `TTBR0`, `TTBR1` and `MAIR0` all 0, `TCR2` `0x60`; `FSR` `0x400`, `FAR` `0x953FDF7CF7F7`, `FSYNR0` `0x46005D` | OBSERVED (the values); UNKNOWN (what `FSR` bit 10, `FAR` and `FSYNR0` mean: bit 10 is not in the `FSR` bit list of Linux's `arm-smmu.h`, perhaps implementation defined) | Stage 1 is off and no table base is programmed, so there is no stage-1 table to walk. Whether stage 2 maps an EL2 xHCI driver's DMA is UNKNOWN |
+| 7 | The walk | `WALK` | `UNSUPPORTED NESTED`, echoing `CBAR`, `CBA2R`, `SCTLR`, `TCR` and `TTBR0` | UNKNOWN | The payload's rule: a bank it does not model (stage 2, nested, all zero) is UNKNOWN, not a stop. Neither a GO nor SC2 follows (below) |
+
+**What S0b answered of its four items (section 12).** (1) `USBSTS` was read and HCE is clear; the event TRBs could not be read,
+because no firmware ring exists in this topology. (2) Context bank 3's registers were read (row 6). No line shows another bank's
+fault status or the global fault address and syndrome; whether none was non-zero or the payload does not print them is not
+established by the page. (3) The walk was impossible (row 7). (4) The ports and slots were read in the direct topology (rows 1, 2
+and 4): nothing connected, no slots.
+
+**Against section 4.7.** The conditional GO needs an SMMU stream that is bypass or maps q1n1's arena without a fault. S0b did not
+decide it: stage 1 of the stream's context bank is off and its tables are zero, and the bank is nested, so the translation that
+would apply is a stage 2 that the payload does not model. SC1 is not triggered (both controllers answer as xHCI). SC2 is neither
+triggered nor cleared. What would decide it: a read-only stage-2 walker payload (it must first find the stage-2 context: UNKNOWN
+how, with `NUMS2CB` 0), or the S1 No-Op, which needs A1 (the first xHC register write at EL2; NOT granted). SC3 to SC6 are not
+reached: S1 has not started.
+
+**What this changes.**
+
+- **The firmware's xHCI state cannot be adopted in the direct topology (on `U0` or `U1`).** In the hub run (S0) `usb_1_ss0` still
+  held the firmware's rings and slots. In the direct run both controllers read as unstarted or reset at EL2, with the stick
+  attached and the firmware having just booted from it: S1a has nothing to adopt there (which controller the stick was on is not
+  printed; see the last paragraph). The cause of the difference is UNKNOWN: a reset between the firmware's last use and EL2, the
+  different topology, or the unit. One boot per topology cannot separate them.
+- **The link is down at EL2.** No port of either controller shows a connection. A stick writer would have to bring the controller
+  and the link up from reset (INFERRED); the PHY and repeater state is UNKNOWN (M3 not measured) and their bring-up is
+  UNIMPLEMENTED. Every such step is a write and needs A1 (NOT granted), and A2 stays NOT granted: the writer (S1 to S6) is still
+  UNIMPLEMENTED.
+- **The DRAM-retention alternative ((iii), M10) has an operator fact.** After the automatic reboot of boot 4 the Surface booted
+  something other than the stick (operator report, once). A dump on the next stick boot therefore needs the operator to select the
+  stick again, and whether DRAM survives such a reset is UNKNOWN (M10 NOT RUN). The mechanism of the reboot was not observed (a
+  watchdog is INFERRED).
+- **The camera alternative ((v)) stays open.** Boot 4's payload text was lost because its photographs missed the right-hand column
+  of the page. Nothing was built or tried for (v).
+
+**What S0b does not show.** Why `U0` reads differently from S0 (UNKNOWN, above); which controller the stick was on in these boots
+(the payload prints neither the stick's device path nor a baseline from before ExitBootServices; the path of boot 3 carried the
+same PCI-style node as S0's, `Pci(0x80,0x0)`, which makes `usb_1_ss0` likely, INFERRED); stage-2 translation for streams `0x1420`
+and `0x1460`; any DMA by the xHC; PHY, repeater and retimer state; whether a controller or port reset brings a link up at EL2; DRAM
+retention. Boot 4 gave no `usbsmmu` values at all.
 
 ## Appendix A. The page lines of the survey boot (S0; EXPERIMENTAL in the q1n1 fork; ran once on the unit, section 12)
 
@@ -925,3 +1028,55 @@ region's; the run ends inside the capacity (64-bit sum); the capacity is not `0x
 the run starts on a cluster boundary of the data area and the data area does not precede the partition; and the verifier adds
 that the run is exactly the file's clusters, that the file is one contiguous run whose size is the region's, and that every
 sector of a pristine region holds its own tag.
+
+## Appendix D. The panel of boot 5 (payload runner; the `usbsmmu` lines are S0b, section 13)
+
+The whole panel of boot 5, verbatim as photographed and re-read against enlarged crops: 41 lines, capital letters only (the page
+font folds lower case to upper case), at most 100 characters each. Lines 1 to 3 are the runner's notes. Lines 4 to 21 are the
+`psci` payload with its framing (a `VERIFY`, a `CALL`, its own 15 lines and a `DONE`); its results are in
+[SURFACE-PRO-11.md](SURFACE-PRO-11.md), the stick payload runner paragraph. Lines 22 to 41 are the `usbsmmu` payload with its
+framing (lines 24 to 40 are its own 17 lines), which section 13 decodes. EXPERIMENTAL in the q1n1 fork; OBSERVED once on the unit.
+
+```text
+PAYLOAD LOADED INDEX=0 BASE=0XCEC90000 BYTES=4285 SHA=D391A9C8CBEECD00 TYPE=1
+PAYLOAD LOADED INDEX=1 BASE=0XCEA89000 BYTES=17936 SHA=9F0260DC5B2F910F TYPE=1
+PAYLOAD READY FILES=2 RANGES=5 CODE=2
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 0 D391A9C8CBEECD00
+PAYLOAD PSCI MPIDR_EL1=0X80000000
+PAYLOAD PSCI NEXT VERSION
+PAYLOAD PSCI VERSION PSCI_VERSION=0X10001:V1.1
+PAYLOAD PSCI VERSION MIGRATE_INFO_TYPE=0XFFFFFFFFFFFFFFFF:NOT_SUPPORTED(-1)
+PAYLOAD PSCI NEXT FEATURES
+PAYLOAD PSCI FEATURES CPU_SUSPEND=0X3 CPU_OFF=0X0 CPU_ON=0X0 AFFINITY_INFO=0X0
+PAYLOAD PSCI FEATURES MIGRATE_INFO_TYPE=0XFFFFFFFFFFFFFFFF:NOT_SUPPORTED(-1) SYSTEM_OFF=0X0
+PAYLOAD PSCI FEATURES SYSTEM_RESET=0X0 PSCI_FEATURES=0X0 SYSTEM_SUSPEND=0X0
+PAYLOAD PSCI FEATURES SYSTEM_RESET2=0XFFFFFFFFFFFFFFFF:NOT_SUPPORTED(-1)
+PAYLOAD PSCI NEXT AFFINITY
+PAYLOAD PSCI AFFINITY 0X0=0X0:ON 0X100=0X1:OFF 0X200=0X1:OFF 0X300=0X1:OFF 0X10000=0X1:OFF
+PAYLOAD PSCI AFFINITY 0X10100=0X1:OFF 0X10200=0X1:OFF 0X10300=0X1:OFF 0X20000=0X1:OFF
+PAYLOAD PSCI AFFINITY 0X20100=0X1:OFF 0X20200=0X1:OFF 0X20300=0X1:OFF
+PAYLOAD PSCI NEXT SMCCC
+PAYLOAD PSCI SMCCC SMCCC_VERSION=0X10001:V1.1
+PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=0 FAULTS=0 REFUSED=0 LINES=15 DROPPED=0
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 1 9F0260DC5B2F910F
+PAYLOAD USBSMMU NEXT U0
+PAYLOAD USBSMMU U0 IDLE CAPL=0X20 CMD=0X0 STS=0X11:HCH.PCD DCBAAP=0X0 P1=0X20002A0:RXDET
+PAYLOAD USBSMMU U1 IDLE CAPL=0X20 CMD=0X0 STS=0X1:HCH DCBAAP=0X0 P1=0X20002A0:RXDET
+PAYLOAD USBSMMU DWC3 ID=0X33313130 GCTL=0X101005 GSTS=0X7E800001 BERR=0X0 LTSSM=0X9CC20026
+PAYLOAD USBSMMU NEXT SMMU
+PAYLOAD USBSMMU SMMU ID0=0X7C017E9A ID1=0X6000005F ID2=0X5222 SCR0=0X230406 GFSR=0X0
+PAYLOAD USBSMMU SMMU SMRG=0X9A NCB=0X5F CBBASE=0X15080000 S1420=SMR3.TRANS.CB3 S1460=SMR4.TRANS.CB3
+PAYLOAD USBSMMU NEXT RINGS
+PAYLOAD USBSMMU RINGS CSZ=1 ERSTSZ=0X0 ERSTBA=0X0 ERDP=0X0 SEG0=NO_ERST
+PAYLOAD USBSMMU TRB SKIPPED=NO_SEG0
+PAYLOAD USBSMMU U0 SLOTS=NO_DCBAAP
+PAYLOAD USBSMMU NEXT CB3
+PAYLOAD USBSMMU CB3 CBAR=0X35E03 TYPE=NESTED CBA2R=0X1 VA64=1
+PAYLOAD USBSMMU CB3 SCTLR=0XE0 M=0 TCR=0X0 T0SZ=0 TG0=4K EPD0=0 TCR2=0X60
+PAYLOAD USBSMMU CB3 TTBR0=0X0 ASID=0X0 MAIR0=0X0 FSR=0X400 FAR=0X953FDF7CF7F7 FSYNR0=0X46005D
+PAYLOAD USBSMMU CB3 TTBR1=0X0
+PAYLOAD USBSMMU WALK UNSUPPORTED NESTED CBAR=0X35E03 CBA2R=0X1 SCTLR=0XE0 TCR=0X0 TTBR0=0X0
+PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=213 FAULTS=0 REFUSED=0 LINES=17 DROPPED=0
+```

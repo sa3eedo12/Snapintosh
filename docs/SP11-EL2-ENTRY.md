@@ -291,7 +291,7 @@ on, q1n1 running (B1 attempt 7). Rule 1 stays open for M5 and the secondaries (M
 ### 2.10 The X1 and X2 evidence that settles it
 
 Only M1 (`E2H0` on the boot CPU, X2 run 4), M2 and M3 in part, the marker stores and the de-VHE sequence itself have been
-measured, each once (the paragraphs after the table); nothing else below has been run.
+measured, each once (the paragraphs after the table); of the rest, only M8 and, in part, M6 and M7 (boot CPU) have run (X2, 2026-11-14).
 Gates are those of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6; every row that writes
 a register is a hardware step that needs its own authorization.
 
@@ -327,7 +327,7 @@ group or the `SCTLR_EL2` write, none of which the dry run ran (the next paragrap
 `HCR_EL2` 0x88000010 (E2H 0), `TCR_EL2` 0x80843514, `TTBR0_EL2` and `MAIR_EL2` unchanged, `CPTR_EL2` 0x22FF, `CNTHCTL_EL2` 0x3
 and `SCTLR_EL2` with M, C and I set: the values the trampoline writes, MMU on, q1n1 executing (M1, and M2 after the flip). The
 firmware-descriptor question that `test_observed_sp11` could not model did not show either: q1n1's pages kept executing under
-the non-VHE regime (OBSERVED for those pages; the XN-bit-54 reading is INFERRED). M8: X2's T02 gave K1 GO under this build (OBSERVED, 2026-11-14); its regime, E2H 0, is INFERRED (the page prints no HCR). Not measured: M4, M5, the other EL2
+the non-VHE regime (OBSERVED for those pages; the XN-bit-54 reading is INFERRED). M8: X2's T02 gave K1 GO under this build (OBSERVED, 2026-11-14); a later X2 run's REGIME row read E2H 0, TGE 1 beside a GO (OBSERVED once). Not measured: M4, M5, the other EL2
 registers, repeatability, uptime (one photograph, at 4 s).
 
 ### 2.11 What the model does not prove
@@ -537,7 +537,7 @@ Each is encoded conservatively and fails closed. None is a VERIFIED architectura
 | I9 | What an EL2 reader sees in `DCZID_EL0.DZP` | `dzv_dzp` |
 | I10 | The Oryon X1 CNTVOFF erratum applies to this unit | 3.2 |
 | I11 | The public XNU tag is the behaviour of build 26A428 | 4.2 |
-| I12 | NV2 has no dependence on the host's E2H (T02 GO under the de-VHE entry; regime INFERRED) | M8 |
+| I12 | NV2 has no dependence on the host's E2H (T02 GO under the de-VHE entry; E2H 0 read once) | M8 |
 | I13 | The model's constants (`0x88000010`, `0x80843510`, `0x6000`, `0x22ff`) are test data, not measurements | 2.3 |
 | I14 | Why slbounce chooses E2H = 1, and that EL1-style firmware code (UEFI runtime services) stops working at EL2 once E2H is clear | 2.1, 2.4 |
 
