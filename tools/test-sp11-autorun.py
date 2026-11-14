@@ -369,6 +369,7 @@ class Tables(unittest.TestCase):
 
     def test_the_applications_and_their_arguments(self):
         self.assertEqual(autorun.APP_ARGUMENTS, {'Q1N1.EFI': ((), ('--el2',)), 'Q1N1-STK.EFI': (('--el2',),),
+                                                  'Q1N1-PAYLOAD.EFI': (('--el2',),),
                                                   'TESTS.EFI': ((),), 'TESTS-DECL.EFI': ((),), 'PROBE.EFI': ((),)})
 
     def test_the_survey_image_takes_exactly_one_argument_vector_and_it_is_el2(self):
@@ -607,7 +608,7 @@ class Generated(unittest.TestCase):
                     self.assertEqual([l for l in lines if l.startswith('SP11\\')], [' '.join((f'SP11\\{app}',) + args)])
                     self.assertEqual(autorun.script_problems(script), [])
                     count += 1
-        self.assertEqual(count, 4 * 6)
+        self.assertEqual(count, 4 * 7)
 
     def test_plans_of_every_length(self):
         for n in range(1, 9):

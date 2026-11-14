@@ -27,6 +27,11 @@ lld-link) that print one line and return. No reviewed binary runs. The staged di
               failed redirect and nothing runs
   survey      a plan whose application is named Q1N1-STK.EFI (the read-only USB survey build of q1n1, run with
               --el2): the first command name with a hyphen, and an exact 8.3 name where the others are long ones
+  payload     a plan whose application is named Q1N1-PAYLOAD.EFI (the stick payload runner, run with --el2) and whose
+              PAYLOAD.MAN and payload file are staged with --data: a name that is not 8.3, so the volume holds it as
+              a long name; one step per boot over two boots, and the data files stay on the volume, unchanged
+  payload-ls  the same stick, ESC at the countdown and a directory listing typed at the Shell prompt: the Shell itself
+              lists the data files (a stand-in image cannot open them, so this is the Shell's view of the volume)
 
 Evidence: EXPERIMENTAL (QEMU only), hardware NOT RUN. QEMU's firmware is edk2-stable202408 and the Shell is the pinned
 release binary (edk2-stable202608), not necessarily the firmware or even the file of the unit; what the unit's
@@ -65,11 +70,16 @@ autorun = load('sp11_autorun', TOOLS / 'sp11_autorun.py')   # the stager imports
 stage = load('stage_sp11_boot_media', TOOLS / 'stage-sp11-boot-media.py')
 fixtures = load('boot_media_fixtures', TOOLS / 'test-sp11-boot-media.py')
 import sp11_autorun_qemu as q  # noqa: E402
+import sp11_autorun_fixtures as fx  # noqa: E402
 
 STEP_ONE, STEP_TWO = 'SLBOUNCE-DEVHE-MARK.EFI Q1N1.EFI --el2', 'SLBOUNCE-DEVHE.EFI Q1N1.EFI --el2'
 APP_LINE = r'AUTORUN-DUMMY APP Q1N1.EFI OPTIONS=[SP11\Q1N1.EFI --el2]'
 STEP_SURVEY = 'SLBOUNCE-DEVHE-MARK.EFI Q1N1-STK.EFI --el2'
 SURVEY_LINE = r'AUTORUN-DUMMY APP Q1N1-STK.EFI OPTIONS=[SP11\Q1N1-STK.EFI --el2]'
+STEP_PAYLOAD = 'SLBOUNCE-DEVHE-MARK.EFI Q1N1-PAYLOAD.EFI --el2'
+PAYLOAD_LINE = r'AUTORUN-DUMMY APP Q1N1-PAYLOAD.EFI OPTIONS=[SP11\Q1N1-PAYLOAD.EFI --el2]'
+PAYLOAD_FILES = {'STATE.BIN': fx.SAMPLE['STATE.BIN']}
+PAYLOAD_DATA = {'PAYLOAD.MAN': fx.listing(PAYLOAD_FILES), **PAYLOAD_FILES}      # a manifest written with struct.pack
 EFI_LOAD_ERROR = 0x8000000000000001
 
 
@@ -121,9 +131,10 @@ class Lab:
             self.built[key] = (path, stage.sha256_bytes(data))
         return self.built[key]
 
-    def tree(self, tag, steps, hung=(), failing=()):
-        """A staged directory made by `stage` then `autorun`. `hung` names the applications that never return and
-        `failing` the slbounce stand-ins whose entry point returns an error."""
+    def tree(self, tag, steps, hung=(), failing=(), data=None):
+        """A staged directory made by `stage` then `autorun`. `hung` names the applications that never return,
+        `failing` the slbounce stand-ins whose entry point returns an error, and `data` {NAME: bytes} the files staged
+        with --data (PAYLOAD.MAN and what it lists)."""
         tree = BUILD / tag / 'tree'
         shutil.rmtree(tree.parent, ignore_errors=True)
         tree.parent.mkdir(parents=True)
@@ -140,6 +151,11 @@ class Lab:
         for name, kind in sorted(names.items()):
             path, digest = self.dummy(name, kind, hang=name in hung, status=EFI_LOAD_ERROR if name in failing else 0)
             args += ['--file', name, path, digest]
+        for name, blob in (data or {}).items():
+            source = BUILD / tag / 'data' / name
+            source.parent.mkdir(exist_ok=True)
+            source.write_bytes(blob)
+            args += ['--data', name, source, stage.sha256_bytes(blob)]
         for step in steps:
             args += ['--step', step]
         code, result = run_tool(*args)
@@ -200,6 +216,8 @@ class AutorunUnderTheShell(unittest.TestCase):
             'ctrl-c': lab.stick(lab.tree('ctrl-c', [STEP_ONE, STEP_TWO])),
             'decoy': lab.stick(lab.tree('decoy', [STEP_ONE, STEP_TWO])),
             'survey': lab.stick(lab.tree('survey', [STEP_SURVEY])),
+            'payload': lab.stick(lab.tree('payload', [STEP_PAYLOAD], data=PAYLOAD_DATA)),
+            'payload-ls': lab.stick(lab.tree('payload-ls', [STEP_PAYLOAD], data=PAYLOAD_DATA)),
         }
         removed = lab.tree('removed', [STEP_ONE, STEP_TWO])
         code, result = run_tool('autorun', '--dest', removed, '--remove')
@@ -225,6 +243,9 @@ class AutorunUnderTheShell(unittest.TestCase):
             'removed': lambda: [lab.boot(cls.images['removed'], 'removed')],
             'no-volume': lambda: [lab.boot(cls.images['no-volume'], 'no-volume')],
             'survey': lambda: [lab.boot(cls.images['survey'], 'survey')],
+            'payload': lambda: [lab.boot(cls.images['payload'], 'payload', n) for n in (1, 2)],
+            'payload-ls': lambda: [lab.boot(cls.images['payload-ls'], 'payload-ls',
+                                            keys=(('Press ESC in 5', 'esc'), *q.typed('ls fs0:\\sp11\n')))],
         }
         with ThreadPoolExecutor(max_workers=max(1, min(4, (os.cpu_count() or 2) // 2))) as pool:
             futures = {name: pool.submit(job) for name, job in jobs.items()}
@@ -392,6 +413,40 @@ class AutorunUnderTheShell(unittest.TestCase):
         self.assertEqual(boot.stick.files['SP11/DONE1.TXT'], b'AUTORUN devhe-mark STEP 1 STARTED\r\n')
         self.assertEqual(boot.ended, 'idle')
 
+    def test_the_payload_runner_is_run_with_el2_once_per_boot_and_its_data_files_stay_on_the_volume(self):
+        # Q1N1-PAYLOAD.EFI is not an 8.3 name, so the volume holds it as a long name; PAYLOAD.MAN and STATE.BIN are
+        # data the script never names, staged with --data. A stand-in image runs here: it prints a line and returns.
+        self.assertFalse(q._is_short_name('Q1N1-PAYLOAD.EFI'), 'the stick image holds this name as a long name')
+        first, second = self.run_of('payload')
+        text = first.serial
+        self.assertIn('AUTORUN devhe-mark: 1 step, one per boot.', text)
+        self.assertIn('CMD1: load SP11\\SLBOUNCE-DEVHE-MARK.EFI', text)
+        self.assertIn('CMD2: SP11\\Q1N1-PAYLOAD.EFI --el2', text)
+        self.assertIn('FS0:\\> load SP11\\SLBOUNCE-DEVHE-MARK.EFI', text)
+        self.assertIn('FS0:\\> SP11\\Q1N1-PAYLOAD.EFI --el2', text)
+        self.assertIn(PAYLOAD_LINE, text)
+        self.assertEqual(text.count('AUTORUN-DUMMY DRIVER'), 1, 'slbounce is loaded once per boot')
+        self.assertEqual(text.count('AUTORUN-DUMMY APP'), 1, 'the runner runs once per boot')
+        self.assertLess(text.index('AUTORUN-DUMMY DRIVER'), text.index('AUTORUN-DUMMY APP'), 'load, then run')
+        self.assertEqual(markers(first), ['SP11/DONE1.TXT'])
+        self.assertEqual(first.ended, 'idle')
+        self.assertIn('ALL STEPS DONE, run --clear to repeat', second.serial)
+        self.assertNotIn('AUTORUN-DUMMY', second.serial, 'the second boot runs nothing')
+        for boot in (first, second):
+            for name, blob in PAYLOAD_DATA.items():
+                self.assertEqual(boot.stick.files[f'SP11/{name}'], blob, f'{name} is on the volume and was not changed')
+            self.assertEqual([(e.size, e.path) for e in autorun.parse_payload_manifest(boot.stick.files['SP11/PAYLOAD.MAN'])],
+                             [(len(fx.SAMPLE['STATE.BIN']), '\\SP11\\STATE.BIN')])
+
+    def test_the_shell_lists_the_data_files_of_a_payload_stick(self):
+        (boot,) = self.run_of('payload-ls')
+        listing = boot.serial.split('ls fs0:\\sp11', 1)[1]
+        for name in ('PAYLOAD.MAN', 'STATE.BIN', 'Q1N1-PAYLOAD.EFI', 'SLBOUNCE-DEVHE-MARK.EFI', 'PLAN.TXT'):
+            self.assertIn(name, listing, f'the Shell does not list {name}')
+        self.assertIn(f'{len(PAYLOAD_DATA["PAYLOAD.MAN"])} PAYLOAD.MAN', ' '.join(listing.replace(',', '').split()))
+        self.assertNotIn('AUTORUN', boot.serial, 'ESC skipped the script')
+        self.assertEqual(markers(boot), [])
+
     def test_after_remove_the_stick_starts_the_shell_with_no_script(self):
         (boot,) = self.run_of('removed')
         self.assertIn('Press ESC in 5 seconds to skip startup.nsh', boot.serial)
@@ -443,7 +498,7 @@ class LongNameImageTests(unittest.TestCase):
         'SP11/SLBOUNCE-DEVHE-MARK.EFI': b'a' * 4097, 'SP11/SLBOUNCE-DEVHE.EFI': b'b' * 10, 'SP11/SLBOUNCE-DRYRUN.EFI': b'c',
         'SP11/SLBOUNCE.EFI': b'd' * 2048, 'SP11/MANIFEST.SHA256': b'e' * 70, 'SP11/README.TXT': b'f' * 3000,
         'SP11/Mixed Case Name With Spaces.txt': b'g', 'TCBLAUNCH.EXE': b'h' * 5000, 'EMPTY.TXT': b'',
-        'SP11/Q1N1-STK.EFI': b'j' * 33,
+        'SP11/Q1N1-STK.EFI': b'j' * 33, 'SP11/Q1N1-PAYLOAD.EFI': b'k' * 70, 'SP11/PAYLOAD.MAN': b'm' * 328,
         'SP11/' + 'long-' * 40 + '.bin': b'i' * 20,
     }
 

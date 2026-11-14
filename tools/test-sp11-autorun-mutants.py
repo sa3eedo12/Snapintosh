@@ -3,7 +3,7 @@
 """Mutation check for the SP11 autorun generator and stager.
 
 Each mutant seeds one plausible bug into a copy of tools/sp11_autorun.py or tools/stage-sp11-boot-media.py (under
-build/) and runs the two host suites against that copy, through SP11_AUTORUN_DIR and SP11_STAGE_DIR. A mutant the
+build/) and runs the host suites against that copy, through SP11_AUTORUN_DIR and SP11_STAGE_DIR. A mutant the
 suites do not fail on is a hole in the suites, so this run fails. The first mutants put a banned argument or the
 scratch build into the tables or the template, for q1n1 and for the survey image Q1N1-STK.EFI, which is the check that
 the tests notice a banned argument seeded into the generator. A control run with no mutation must pass, and every
@@ -24,10 +24,13 @@ import unittest
 TOOLS = Path(__file__).resolve().parent
 ROOT = TOOLS.parent
 BUILD = ROOT / 'build' / 'test-sp11-autorun-mutants'
-SUITES = ('test-sp11-autorun.py', 'test-sp11-autorun-tree.py')
-REAL_IMAGE_VARIABLES = ('SP11_SHELL_EFI', 'SP11_SLBOUNCE_EFI', 'SP11_Q1N1_EFI', 'SP11_Q1N1_STK_EFI', 'SP11_TESTS_EFI')
+SUITES = ('test-sp11-autorun.py', 'test-sp11-autorun-tree.py', 'test-sp11-autorun-payload.py',
+          'test-sp11-autorun-payload-tree.py')
+REAL_IMAGE_VARIABLES = ('SP11_SHELL_EFI', 'SP11_SLBOUNCE_EFI', 'SP11_Q1N1_EFI', 'SP11_Q1N1_STK_EFI', 'SP11_TESTS_EFI',
+                        'Q1N1_DIR', 'SP11_Q1N1_PAYLOAD_EFI', 'SP11_PAYLOAD_STATE_BIN')
 GENERATOR, STAGER = 'sp11_autorun.py', 'stage-sp11-boot-media.py'
 SURVEY = "'Q1N1-STK.EFI': (('--el2',),),"   # the table entry of the survey image, which takes exactly --el2
+RUNNER = "'Q1N1-PAYLOAD.EFI': (('--el2',),),"   # the same for the payload runner
 
 # (module, what the bug is, [(old text, new text), ...]). Each old text occurs exactly once in its module.
 MUTANTS = (
@@ -41,6 +44,46 @@ MUTANTS = (
     (GENERATOR, 'the survey image may run with no argument', [(SURVEY, "'Q1N1-STK.EFI': ((), ('--el2',)),")]),
     (GENERATOR, 'the survey image may take --boot and the ban check is gone',
      [(SURVEY, "'Q1N1-STK.EFI': (('--el2',), ('--boot',)),"), ("if arg.lower().split('=')[0] in BANNED_ARGUMENTS:", 'if False:')]),
+    (GENERATOR, 'the runner may take --boot', [(RUNNER, "'Q1N1-PAYLOAD.EFI': (('--el2',), ('--boot',)),")]),
+    (GENERATOR, 'the runner may take --uart', [(RUNNER, "'Q1N1-PAYLOAD.EFI': (('--el2',), ('--uart',)),")]),
+    (GENERATOR, 'the runner may take --uart-proxy', [(RUNNER, "'Q1N1-PAYLOAD.EFI': (('--el2',), ('--uart-proxy',)),")]),
+    (GENERATOR, 'the runner may take --fault-test', [(RUNNER, "'Q1N1-PAYLOAD.EFI': (('--el2',), ('--fault-test',)),")]),
+    (GENERATOR, 'the runner may run with no argument', [(RUNNER, "'Q1N1-PAYLOAD.EFI': ((), ('--el2',)),")]),
+    (GENERATOR, 'the runner may take --boot and the ban check is gone',
+     [(RUNNER, "'Q1N1-PAYLOAD.EFI': (('--el2',), ('--boot',)),"), ("if arg.lower().split('=')[0] in BANNED_ARGUMENTS:", 'if False:')]),
+    # The data files of the payload runner, and its manifest.
+    (GENERATOR, 'the manifest is not checked when the plan is staged', [('if manifest is not None:', 'if False:')]),
+    (GENERATOR, 'the manifest sizes are not compared with the staged files', [('if entry.size != item.size:', 'if False:')]),
+    (GENERATOR, 'the manifest hashes are not compared with the staged files', [('if entry.sha256 != item.sha256:', 'if False:')]),
+    (GENERATOR, 'neither the sizes nor the hashes are compared',
+     [('if entry.size != item.size:', 'if False:'), ('if entry.sha256 != item.sha256:', 'if False:')]),
+    (GENERATOR, 'a staged data file the manifest does not list is tolerated', [('if unlisted:', 'if False:')]),
+    (GENERATOR, 'the data section is missing from PLAN.TXT', [('if plan.data:', 'if False:')]),
+    (GENERATOR, 'data files are accepted without a runner step', [('if hashes and not runner:', 'if False:')]),
+    (GENERATOR, 'a runner step does not need its manifest', [('if runner and MANIFEST_NAME not in hashes:', 'if False:')]),
+    (GENERATOR, 'a data name may be any name', [('if not DATA_NAME_RE.fullmatch(name):', 'if False:')]),
+    (GENERATOR, 'a data name may collide with a plan file', [('if name in taken or MARKER_RE.fullmatch(name):', 'if MARKER_RE.fullmatch(name):')]),
+    (GENERATOR, 'a data name may be a marker name', [('if name in taken or MARKER_RE.fullmatch(name):', 'if name in taken:')]),
+    (GENERATOR, 'any number of data files is allowed', [('if len(hashes) - (MANIFEST_NAME in hashes) > MAX_PAYLOAD_FILES:', 'if False:')]),
+    (GENERATOR, 'a manifest may hold more than five entries', [('MAX_PAYLOAD_FILES = 5 ', 'MAX_PAYLOAD_FILES = 50 ')]),
+    (GENERATOR, 'a manifest of any magic is accepted', [('if magic != MANIFEST_MAGIC:', 'if False:')]),
+    (GENERATOR, 'a manifest of any version is accepted', [('if version != 1:', 'if False:')]),
+    (GENERATOR, 'a manifest of any entry size is accepted', [('if entry_size != _ENTRY.size:', 'if False:')]),
+    (GENERATOR, 'bytes after the entries are tolerated', [('if len(blob) != _HEADER.size + count * _ENTRY.size:', 'if False:')]),
+    (GENERATOR, 'a duplicate manifest entry is tolerated', [('if path.lower() in seen:', 'if False:')]),
+    (GENERATOR, 'a manifest path outside SP11 is tolerated', [("if len(parts) != 2 or parts[0].upper() != 'SP11':", 'if False:')]),
+    (GENERATOR, 'a manifest path that is not 8.3 is tolerated', [('if not _NAME83_RE.fullmatch(parts[1]):', 'if False:')]),
+    (GENERATOR, 'a manifest path that is not canonical is tolerated',
+     [("if not path.startswith('\\\\') or any(char in path for char in '/:*?\"<>|') or any(part in ('', '.', '..') for part in parts):", 'if False:')]),
+    (GENERATOR, 'a manifest may list itself', [('if parts[1].upper() == MANIFEST_NAME:', 'if False:')]),
+    (GENERATOR, 'a manifest size is not range checked', [('if not 1 <= size <= DATA_MAX_BYTES:', 'if False:')]),
+    (STAGER, 'verify does not parse the manifest of a payload plan', [('if manifest is not None:', 'if False:')]),
+    (STAGER, 'verify ignores a tampered data file', [("if (found['size'], found['sha256']) != (item.size, item.sha256):", 'if False:')]),
+    (STAGER, 'remove leaves the data files', [("| {f'SP11/{item.name}' for item in plan.data}) - BASE_RELS", ') - BASE_RELS')]),
+    (STAGER, 'a data source is not hash checked', [("if info['sha256'] != data_hashes[name]:", 'if False:')]),
+    (STAGER, 'the scratch build is accepted as a data source', [('for name, path in {**sources, **data_sources}.items():', 'for name, path in sources.items():')]),
+    (STAGER, 'a data file may replace a staged file', [("if (dest / 'SP11' / name).exists():", 'if False:')]),
+    (STAGER, 'a data name given twice is tolerated', [('if name in data_sources:', 'if False:')]),
     (GENERATOR, 'the tests image may take --fault-test', [("'TESTS.EFI': ((),),", "'TESTS.EFI': ((), ('--fault-test',)),")]),
     (GENERATOR, 'the scratch build is an allowed slbounce build and no longer banned',
      [("'SLBOUNCE-DRYRUN.EFI')\n# Applications", "'SLBOUNCE-DRYRUN.EFI', 'SLBOUNCE-OLD-NOSWEEP.EFI')\n# Applications"),
@@ -91,7 +134,7 @@ def mutate(text, replacements):
 
 
 def run_suites(directory, tag):
-    """0 when both host suites pass against the modules in `directory`; the first failing return code otherwise.
+    """0 when every host suite passes against the modules in `directory`; the first failing return code otherwise.
 
     The real-image tests of the tree suite look for the pins file beside the stager, which a mutant's two-module copy does
     not have, so the child runs get no real image and those tests skip; the mutants are checked on the synthetic fixtures."""

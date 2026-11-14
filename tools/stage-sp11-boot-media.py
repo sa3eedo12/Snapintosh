@@ -22,12 +22,13 @@ records its hash, never checks it against an expectation.
 `autorun` is an opt-in addition and changes nothing for a tree that never uses it.
 It works on a directory `stage` made and `verify` accepts, under the same destination
 refusals, and never on a mounted stick: it copies the named experiment files into
-SP11/, writes EFI/BOOT/startup.nsh (one plan step per boot, markers written first)
-and SP11/PLAN.TXT, and lists them in the manifest. `verify` then accepts that one
+SP11/ (`--file` for what the steps run, `--data` for what Q1N1-PAYLOAD.EFI reads),
+writes EFI/BOOT/startup.nsh (one plan step per boot, markers written first) and
+SP11/PLAN.TXT, and lists them in the manifest. `verify` then accepts that one
 startup.nsh, and only if it is exactly the script the plan in PLAN.TXT generates;
 any other startup.nsh is still a finding. `autorun --clear` and `--remove` undo it in
 a staged directory (on a stick the markers and the script are deleted by hand).
-Plan rules and the script generator are in sp11_autorun.py.
+Plan rules, the payload manifest checks and the script generator: sp11_autorun.py.
 """
 from pathlib import Path
 import argparse
@@ -261,12 +262,14 @@ def read_validated_input(path: Path, role: str):
     st = path.lstat()
     if not stat.S_ISREG(st.st_mode):
         raise Refusal('input_not_regular_file', str(path))
-    cap = MAX_TCBLAUNCH_BYTES if role == 'tcblaunch' else MAX_EFI_BYTES
+    cap = {'tcblaunch': MAX_TCBLAUNCH_BYTES, 'data': autorun.DATA_MAX_BYTES}.get(role, MAX_EFI_BYTES)
     if st.st_size == 0:
         raise Refusal('input_empty_file', str(path))
     if st.st_size > cap:
         raise Refusal('input_too_large', f'{path}: {st.st_size} > {cap}')
     data = read_regular_bytes(path, st, cap)
+    if role == 'data':      # a file an application reads: no image to check, only its size and hash
+        return {'path': str(path), 'size': len(data), 'sha256': sha256_bytes(data)}, data
     pe = read_pe_header(data)
     if not pe['ok']:
         raise Refusal('input_' + pe['reason'], str(path))
@@ -737,7 +740,8 @@ def autorun_findings(dest: Path):
     default tree), else {'plan', 'steps', 'script', 'problems'}. Reads only, and returns its problems rather than raising.
 
     The script is accepted only if it is byte for byte what the plan in PLAN.TXT generates, PLAN.TXT is byte for byte
-    what the tool writes, every file the plan names is staged with the planned hash, and README.TXT says autorun is on.
+    what the tool writes, every file the plan names is staged with the planned hash (the data files with the planned
+    size, and the manifest listing exactly them), and README.TXT says autorun is on.
     """
     try:
         plan_bytes = read_staged_bytes(dest / autorun.PLAN_REL, AUTORUN_TEXT_MAX)
@@ -769,6 +773,22 @@ def autorun_findings(dest: Path):
             continue
         if found['sha256'] != digest:
             problems.append(f'SP11/{name}: sha256 differs from SP11/PLAN.TXT')
+    manifest = None
+    for item in plan.data:
+        try:
+            found, blob = read_validated_input(dest / 'SP11' / item.name, 'data')
+        except Refusal as refusal:
+            problems.append(f'SP11/{item.name}: {refusal.reason}')
+            continue
+        if (found['size'], found['sha256']) != (item.size, item.sha256):
+            problems.append(f'SP11/{item.name}: size or sha256 differs from SP11/PLAN.TXT')
+        elif item.name == autorun.MANIFEST_NAME:
+            manifest = blob
+    if manifest is not None:
+        try:
+            autorun.check_manifest(plan, manifest)
+        except autorun.PlanError as error:
+            problems.append(f'{error.reason}: {error.detail}')
     if script_bytes is not None:
         if script_bytes != expected_script:
             problems.append('EFI/BOOT/startup.nsh differs from the script SP11/PLAN.TXT generates')
@@ -820,8 +840,14 @@ def autorun_stage(dest: Path, args) -> dict:
         if name in sources:
             raise autorun.PlanError('file_given_twice', name)
         sources[name], hashes[name] = Path(path), digest
+    data_sources, data_hashes = {}, {}
+    for name, path, digest in getattr(args, 'data', ()):      # a namespace built without --data has no such attribute
+        if name in data_sources:
+            raise autorun.PlanError('data_given_twice', name)
+        data_sources[name], data_hashes[name] = Path(path), digest
     plan = autorun.build_plan(args.name, args.step, hashes)
-    for name, path in sources.items():
+    autorun.check_data_names(plan, data_hashes)         # the rules that need no file, before any file is read
+    for name, path in {**sources, **data_sources}.items():
         if path.name.upper() in autorun.BANNED_NAMES:
             raise autorun.PlanError('source_banned', f'{name}: {path}')
     if autorun_findings(dest) is not None:
@@ -841,6 +867,16 @@ def autorun_stage(dest: Path, args) -> dict:
                 raise Refusal('autorun_would_replace_staged_file', f'{rel} is already staged with other bytes')
         else:
             fresh[rel] = data
+    staged_data = []
+    for name, path in sorted(data_sources.items()):
+        info, blob = read_validated_input(path, 'data')
+        if info['sha256'] != data_hashes[name]:
+            raise Refusal('data_hash_mismatch', f'{name}: {path} is {info["sha256"]}, expected {data_hashes[name]}')
+        if (dest / 'SP11' / name).exists():
+            raise Refusal('data_would_replace_staged_file', f'SP11/{name} is already staged')
+        fresh[f'SP11/{name}'] = blob
+        staged_data.append(autorun.DataFile(name, info['size'], info['sha256']))
+    plan = autorun.attach_data(plan, staged_data, fresh.get(f'SP11/{autorun.MANIFEST_NAME}'))
     readme = read_staged_bytes(dest / README_REL, AUTORUN_TEXT_MAX)
     if readme != build_readme_text().encode('ascii'):
         raise Refusal('autorun_readme_unexpected', 'SP11/README.TXT is not the text this tool stages')
@@ -874,6 +910,7 @@ def autorun_stage(dest: Path, args) -> dict:
         'files_written': sorted(writes),
         'files_already_staged': sorted(f'SP11/{name}' for name in plan.files() if f'SP11/{name}' not in fresh),
         'shell_pin': base['shell_pin'],
+        **({'data': {item.name: {'size': item.size, 'sha256': item.sha256} for item in plan.data}} if plan.data else {}),
     }
 
 
@@ -892,7 +929,8 @@ def autorun_remove(dest: Path) -> dict:
     if report['problems']:
         raise Refusal('autorun_tree_not_valid', '; '.join(report['problems']))
     plan = autorun.parse_plan_text(read_staged_bytes(dest / autorun.PLAN_REL, AUTORUN_TEXT_MAX))
-    owned = ({autorun.PLAN_REL, autorun.SCRIPT_REL} | {f'SP11/{name}' for name in plan.files()}) - BASE_RELS
+    owned = ({autorun.PLAN_REL, autorun.SCRIPT_REL} | {f'SP11/{name}' for name in plan.files()}
+             | {f'SP11/{item.name}' for item in plan.data}) - BASE_RELS
     entries = parse_manifest(read_staged_bytes(dest / MANIFEST_REL, AUTORUN_TEXT_MAX).decode('utf-8'))
     base_readme = build_readme_text().encode('ascii')
     for rel in owned:
@@ -922,8 +960,8 @@ def cmd_autorun(args) -> dict:
     dest = check_destination_safety(args.dest, must_exist=True)
     try:
         if args.clear or args.remove:
-            if args.name or args.file:
-                raise Refusal('autorun_options_conflict', '--name and --file describe a plan, not --clear or --remove')
+            if args.name or args.file or getattr(args, 'data', None):
+                raise Refusal('autorun_options_conflict', '--name, --file and --data describe a plan, not --clear or --remove')
             return autorun_clear(dest) if args.clear else autorun_remove(dest)
         return autorun_stage(dest, args)
     except autorun.PlanError as error:
@@ -977,6 +1015,9 @@ def build_argparser() -> argparse.ArgumentParser:
     auto.add_argument('--file', nargs=3, action='append', default=[], metavar=('NAME', 'PATH', 'SHA256'),
                       help='the file SP11/NAME comes from PATH, which must hash to SHA256; one per file the steps '
                            'use (with --step)')
+    auto.add_argument('--data', nargs=3, action='append', default=[], metavar=('NAME', 'PATH', 'SHA256'),
+                      help='a file Q1N1-PAYLOAD.EFI reads, not runs (PAYLOAD.MAN and the files it lists): SP11/NAME '
+                           'comes from PATH, which must hash to SHA256; only with a step that runs it (with --step)')
     add_pin_options(auto)
 
     return ap

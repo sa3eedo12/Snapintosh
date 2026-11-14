@@ -14,12 +14,20 @@ and script_problems() then checks the result against a whitelist of line forms, 
 template slip cannot put `del`, a banned argument or a second `load` into a script that gets as far as the tool's
 output. verify recomputes the script from SP11\\PLAN.TXT and refuses any difference.
 
+Data files are what an application reads at run time and the script never names. Only the payload runner reads any:
+Q1N1-PAYLOAD.EFI loads \\SP11\\PAYLOAD.MAN, checks the size and SHA-256 of each file the manifest lists, and calls
+file 0 at EL2 (docs/SP11-PAYLOAD.md in the q1n1 fork). A boot is expensive, so the manifest is parsed here, when the
+tree is staged: a plan is refused unless the manifest is well formed and lists exactly the staged data files with
+their sizes and hashes. The data files are recorded in SP11\\PLAN.TXT and re-checked by verify; the script does not
+change for them.
+
 Evidence (see docs/RUNNING.md): the countdown, the search for startup.nsh in the directory the Shell was loaded from,
 the `homefilesystem` variable, `if exist`, `goto`, `stall`, `@echo` and the `echo ... >a` redirect were OBSERVED with
 the pinned Shell under QEMU (tools/test-sp11-autorun-qemu.py); they are INFERRED for the Shell on the unit.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
+import struct
 
 SCRIPT_REL = 'EFI/BOOT/startup.nsh'
 PLAN_REL = 'SP11/PLAN.TXT'
@@ -34,11 +42,14 @@ SLBOUNCE_BUILDS = ('SLBOUNCE.EFI', 'SLBOUNCE-DEVHE.EFI', 'SLBOUNCE-DEVHE-MARK.EF
 # run is its preflight, which never leaves boot services). Q1N1-STK.EFI is the second q1n1 image, the read-only USB
 # survey that the q1n1 fork builds from the same tree behind a compile-time gate (docs/SP11-STK-SURVEY.md there). It
 # runs only in the `--el2` flow and has no preflight-only use, so it takes exactly `--el2` and the no-argument form is
-# refused. SLTEST.EFI is not listed: it needs an explicit path argument and the operator procedure runs it without a
+# refused. Q1N1-PAYLOAD.EFI is the third q1n1 image, the stick payload runner (docs/SP11-PAYLOAD.md in the q1n1 fork):
+# the same `--el2` flow after one `load`, no preflight-only use, so exactly `--el2`; it also reads data files (below).
+# SLTEST.EFI is not listed: it needs an explicit path argument and the operator procedure runs it without a
 # preceding `load`.
 APP_ARGUMENTS = {
     'Q1N1.EFI': ((), ('--el2',)),
     'Q1N1-STK.EFI': (('--el2',),),
+    'Q1N1-PAYLOAD.EFI': (('--el2',),),
     'TESTS.EFI': ((),),
     'TESTS-DECL.EFI': ((),),
     'PROBE.EFI': ((),),
@@ -50,6 +61,23 @@ BANNED_ARGUMENTS = ('--boot', '--uart-proxy', '--uart', '--fault-test')
 _BANNED_TOKENS = BANNED_ARGUMENTS + tuple(name.lower() for name in BANNED_NAMES)
 NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,23}')
 SHA256_RE = re.compile(r'[0-9a-f]{64}')
+
+# Data files, which an application reads from the stick and the script never names. RUNNER is the one application
+# that reads any: it opens \SP11\PAYLOAD.MAN on the volume it started from and every file the manifest lists.
+RUNNER = 'Q1N1-PAYLOAD.EFI'
+MANIFEST_NAME = 'PAYLOAD.MAN'
+MAX_PAYLOAD_FILES = 5           # slbounce takes eight declared ranges and the runner's own allocations use three
+DATA_MAX_BYTES = 256 << 20      # slbounce splits a declared range into at most 256 chunks of 1 MiB
+DATA_NAME_RE = re.compile(r'[A-Z0-9_-]{1,8}\.[A-Z0-9_-]{1,3}')    # capitals and 8.3, so no long-name alias is in question
+# Names under SP11\ that the tool or the base tree owns and that are not application names: a data file may not take them.
+RESERVED_DATA_NAMES = ('PLAN.TXT', 'README.TXT', 'STARTUP.NSH', 'SLTEST.EFI')
+# The Q1N1PLD1 manifest, from docs/SP11-PAYLOAD.md and tools/preload.py in the q1n1 fork, written out here and not
+# imported: a header of four little-endian u64 (magic, version, count, entry size), then per file a u64 size, the
+# 32-byte SHA-256 and a 256-byte NUL-padded path.
+MANIFEST_MAGIC = 0x31444C50314E3151     # "Q1N1PLD1"
+_HEADER = struct.Struct('<4Q')
+_ENTRY = struct.Struct('<Q32s256s')
+_NAME83_RE = re.compile(r'[A-Za-z0-9_-]{1,8}\.[A-Za-z0-9_-]{1,3}')
 
 
 class PlanError(Exception):
@@ -73,9 +101,24 @@ class Step:
 
 
 @dataclass(frozen=True)
+class DataFile:
+    name: str       # under SP11\, capitals and 8.3
+    size: int       # of the staged bytes
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ManifestEntry:
+    size: int
+    sha256: str
+    path: str       # as the manifest writes it, \SP11\NAME
+
+
+@dataclass(frozen=True)
 class Plan:
     name: str
     steps: tuple
+    data: tuple = ()        # DataFile entries, the manifest first; empty unless a step runs RUNNER
 
     def files(self) -> dict:
         """File name under SP11\\ -> SHA-256, one entry per distinct name (a name always has one hash)."""
@@ -132,6 +175,125 @@ def build_plan(name: str, step_texts, hashes: dict) -> Plan:
     plan = Plan(name, tuple(Step(s, a, g, hashes[s], hashes[a]) for s, a, g in parsed))
     plan.files()
     return plan
+
+
+# ------------------------------------------------------------------------------------------------ data files
+
+def check_data_names(plan: Plan, hashes: dict) -> None:
+    """The rules for the data files that need no file, so that a plan breaking one is refused before anything is
+    read. `hashes` is {NAME: SHA-256} as `--data NAME PATH SHA256` gives them. Only RUNNER reads data files and it
+    can do nothing without its manifest, so a plan has data files exactly when a step runs RUNNER."""
+    runner = any(step.app == RUNNER for step in plan.steps)
+    if hashes and not runner:
+        raise PlanError('data_without_runner', f'{", ".join(sorted(hashes))}: no step runs {RUNNER}, the only '
+                                               'application that reads data files')
+    if runner and MANIFEST_NAME not in hashes:
+        raise PlanError('data_manifest_missing', f'a step runs {RUNNER}: give --data {MANIFEST_NAME} PATH SHA256')
+    taken = {*plan.files(), *SLBOUNCE_BUILDS, *APP_ARGUMENTS, *RESERVED_DATA_NAMES}
+    for name, digest in sorted(hashes.items()):
+        if not DATA_NAME_RE.fullmatch(name):
+            raise PlanError('data_name_invalid', f'{name!r}: 1 to 8 capitals, digits, "_" or "-", a dot, and 1 to 3 more')
+        if name in taken or MARKER_RE.fullmatch(name):
+            raise PlanError('data_name_collides', f'{name} is already a name of the plan, the tables, the tool or the base tree')
+        if not SHA256_RE.fullmatch(digest):
+            raise PlanError('data_hash_malformed', f'{name}: {digest!r} is not 64 lower-case hex digits')
+    if len(hashes) - (MANIFEST_NAME in hashes) > MAX_PAYLOAD_FILES:
+        raise PlanError('data_too_many_files', f'{len(hashes) - 1} files besides {MANIFEST_NAME}, at most {MAX_PAYLOAD_FILES}')
+
+
+def attach_data(plan: Plan, files, manifest: bytes = None) -> Plan:
+    """`plan` with its data files, DataFile entries that hold the size and hash of the bytes that are staged. The rules
+    of check_data_names apply; given `manifest` (the bytes of PAYLOAD.MAN) it is also parsed and compared with the
+    files. A plan with neither data files nor RUNNER comes back as it was."""
+    files = tuple(files)
+    names = [item.name for item in files]
+    if len(set(names)) != len(names):
+        raise PlanError('data_given_twice', ', '.join(sorted({name for name in names if names.count(name) > 1})))
+    check_data_names(plan, {item.name: item.sha256 for item in files})
+    for item in files:
+        if not 1 <= item.size <= DATA_MAX_BYTES:
+            raise PlanError('data_size_out_of_range', f'{item.name}: {item.size} bytes, not 1 to {DATA_MAX_BYTES}')
+    attached = replace(plan, data=tuple(sorted(files, key=lambda item: (item.name != MANIFEST_NAME, item.name))))
+    if manifest is not None:
+        check_manifest(attached, manifest)
+    return attached
+
+
+def _manifest_path(raw: bytes, index: int) -> str:
+    """The path of one manifest entry: printable ASCII and NUL padded, absolute and canonical (the rules of the A16
+    preload, tools/preload.py, which the runner shares), then \\SP11\\NAME and never the manifest itself (the runner's
+    rules). The runner accepts any name and depth below \\SP11\\; this tool stages flat 8.3 names, as the q1n1
+    manifest tool writes them, and refuses the rest. Directory and names compare without regard to case, as there."""
+    text, terminator, padding = raw.partition(b'\0')
+    if not terminator:
+        raise PlanError('manifest_path_unterminated', f'entry {index}: no NUL in the 256-byte path field')
+    if padding.strip(b'\0'):
+        raise PlanError('manifest_path_padding', f'entry {index}: bytes after the terminating NUL')
+    if not text or any(not 32 <= byte <= 126 for byte in text):
+        raise PlanError('manifest_path_not_printable', f'entry {index}: empty, or not printable ASCII')
+    path = text.decode('ascii')
+    parts = path[1:].split('\\')
+    if not path.startswith('\\') or any(char in path for char in '/:*?"<>|') or any(part in ('', '.', '..') for part in parts):
+        raise PlanError('manifest_path_not_canonical', f'entry {index}: {path}')
+    if len(parts) != 2 or parts[0].upper() != 'SP11':
+        raise PlanError('manifest_path_outside_sp11', f'entry {index}: {path} is not \\SP11\\NAME')
+    if not _NAME83_RE.fullmatch(parts[1]):
+        raise PlanError('manifest_path_not_83', f'entry {index}: {path}')
+    if parts[1].upper() == MANIFEST_NAME:
+        raise PlanError('manifest_lists_itself', f'entry {index}: {path}')
+    return path
+
+
+def parse_payload_manifest(blob: bytes) -> tuple:
+    """The ManifestEntry list of a Q1N1PLD1 manifest, or PlanError for anything the payload runner would refuse (its
+    header, 1 to 5 entries, the exact length, each path, sizes of 1 byte to 256 MiB, two entries of one path in any
+    letter case) and for the paths this tool does not stage (see _manifest_path)."""
+    if len(blob) < _HEADER.size:
+        raise PlanError('manifest_bad_length', f'{len(blob)} bytes is shorter than the {_HEADER.size}-byte header')
+    magic, version, count, entry_size = _HEADER.unpack_from(blob)
+    if magic != MANIFEST_MAGIC:
+        raise PlanError('manifest_bad_magic', f'{magic:#018x}')
+    if version != 1:
+        raise PlanError('manifest_bad_version', f'{version}, not 1')
+    if entry_size != _ENTRY.size:
+        raise PlanError('manifest_bad_entry_size', f'{entry_size}, not {_ENTRY.size}')
+    if not 1 <= count <= MAX_PAYLOAD_FILES:
+        raise PlanError('manifest_bad_count', f'{count} entries, not 1 to {MAX_PAYLOAD_FILES}')
+    if len(blob) != _HEADER.size + count * _ENTRY.size:
+        raise PlanError('manifest_bad_length', f'{len(blob)} bytes for {count} entries, not {_HEADER.size + count * _ENTRY.size}')
+    entries, seen = [], set()
+    for index in range(count):
+        size, digest, raw = _ENTRY.unpack_from(blob, _HEADER.size + index * _ENTRY.size)
+        path = _manifest_path(raw, index)
+        if not 1 <= size <= DATA_MAX_BYTES:
+            raise PlanError('manifest_size_out_of_range', f'entry {index}: {size} bytes, not 1 to {DATA_MAX_BYTES}')
+        if path.lower() in seen:
+            raise PlanError('manifest_duplicate_entry', f'entry {index}: {path}')
+        seen.add(path.lower())
+        entries.append(ManifestEntry(size, digest.hex(), path))
+    return tuple(entries)
+
+
+def check_manifest(plan: Plan, blob: bytes) -> None:
+    """PlanError unless `blob` is a manifest the runner would accept whose entries are exactly the plan's data files
+    other than the manifest: each entry is one of them, with its size and SHA-256, and none of them is left out. A
+    name is compared as the staged file has it, in capitals."""
+    staged = {item.name: item for item in plan.data if item.name != MANIFEST_NAME}
+    listed = set()
+    for entry in parse_payload_manifest(blob):
+        item = staged.get(entry.path.split('\\')[2])
+        if item is None:
+            raise PlanError('manifest_entry_not_staged', f'{entry.path} is not one of the staged data files')
+        if entry.size != item.size:
+            raise PlanError('manifest_entry_size_mismatch', f'{entry.path}: the manifest says {entry.size} bytes, '
+                                                           f'the staged file has {item.size}')
+        if entry.sha256 != item.sha256:
+            raise PlanError('manifest_entry_hash_mismatch', f'{entry.path}: the manifest says {entry.sha256}, '
+                                                           f'the staged file is {item.sha256}')
+        listed.add(item.name)
+    unlisted = sorted(set(staged) - listed)
+    if unlisted:
+        raise PlanError('data_file_not_in_manifest', ', '.join(unlisted))
 
 
 # ------------------------------------------------------------------------------------------------ the script
@@ -303,6 +465,8 @@ _PLAN_TAIL = ('How it runs',
               '  EFI\\BOOT\\startup.nsh. The tool\'s --clear and --remove do this in a staged directory.')
 _PLAN_STEP = re.compile(r'step (\d+)\r\n  load  (\S+)\r\n        sha256 (\S+)\r\n  run   (\S+)((?: \S+)*)\r\n'
                         r'        sha256 (\S+)\r\n  marker  SP11\\DONE(\d+)\.TXT, written before the step runs\r\n')
+_PLAN_DATA_HEAD = 'data files (read by Q1N1-PAYLOAD.EFI from this volume at run time; the script never names them)'
+_PLAN_DATA = re.compile(r'  file (\S+)\r\n        size (\d+)\r\n        sha256 (\S+)\r\n')
 
 
 def render_plan_text(plan: Plan) -> bytes:
@@ -311,6 +475,11 @@ def render_plan_text(plan: Plan) -> bytes:
         lines += [f'step {k}', f'  load  {step.slbounce}', f'        sha256 {step.slbounce_sha256}',
                   f'  run   {step.run_line}', f'        sha256 {step.app_sha256}',
                   f'  marker  SP11\\{MARKER_FORMAT.format(k)}, written before the step runs', '']
+    if plan.data:
+        lines.append(_PLAN_DATA_HEAD)
+        for item in plan.data:
+            lines += [f'  file {item.name}', f'        size {item.size}', f'        sha256 {item.sha256}']
+        lines.append('')
     return ('\r\n'.join([*lines, *_PLAN_TAIL]) + '\r\n').encode('ascii')
 
 
@@ -333,7 +502,8 @@ def parse_plan_text(data: bytes) -> Plan:
             if hashes.setdefault(name, digest) != digest:
                 raise PlanError('plan_inconsistent_hash', name)
         texts.append(f'{slbounce} {app}{args}')
-    plan = build_plan(head.group(1), texts, hashes)
+    data_files = [DataFile(name, int(size), digest) for name, size, digest in _PLAN_DATA.findall(text)]
+    plan = attach_data(build_plan(head.group(1), texts, hashes), data_files)
     if render_plan_text(plan) != data:
         raise PlanError('plan_text_not_canonical', 'differs from what the tool writes for this plan')
     return plan

@@ -244,6 +244,22 @@ class Boot:
     sent: tuple          # the (when, key) pairs actually sent through the monitor
 
 
+_TYPED_KEYS = {' ': 'spc', ':': 'shift-semicolon', '\\': 'backslash', '\n': 'ret', '.': 'dot', '-': 'minus'}
+
+
+def typed(text: str, prompt: str = 'Shell>') -> tuple:
+    """`keys` for boot_stick that type `text` (lower-case letters, digits and the few characters of _TYPED_KEYS) at the
+    Shell prompt. Each key is sent once the console has echoed the one before it: the monitor's sendkey holds a key for
+    100 ms, so two quick presses of one key (the "11" of sp11) would otherwise overlap and the second would be lost."""
+    keys = []
+    for index, char in enumerate(text):
+        name = _TYPED_KEYS.get(char, char if char.isascii() and (char.isdigit() or char.islower()) else None)
+        if name is None:
+            raise ValueError(f'no monitor key for {char!r}')
+        keys.append((f'{prompt} {text[:index]}' if index else prompt, name))
+    return tuple(keys)
+
+
 def boot_stick(image: Path, shell: Path, workdir: Path, *, keys=(), until=None, timeout: float = 150.0,
                settle: float = 5.0, decoy=None, read_only: bool = False) -> Boot:
     """Boots the stick image in `image` once and returns what the console showed and what the stick holds after.
