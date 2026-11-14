@@ -23,7 +23,9 @@ change for them.
 
 Evidence (see docs/RUNNING.md): the countdown, the search for startup.nsh in the directory the Shell was loaded from,
 the `homefilesystem` variable, `if exist`, `goto`, `stall`, `@echo` and the `echo ... >a` redirect were OBSERVED with
-the pinned Shell under QEMU (tools/test-sp11-autorun-qemu.py); they are INFERRED for the Shell on the unit.
+the pinned Shell under QEMU (tools/test-sp11-autorun-qemu.py). On the unit's own Shell the countdown, the search, the
+`homefilesystem` variable, `echo`, `stall`, the redirect with its `if not exist` check, and the `load` and the run were
+OBSERVED once (2026-11-14, an operator's photograph); ESC at the countdown and a second boot are not yet.
 """
 from dataclasses import dataclass, replace
 import re

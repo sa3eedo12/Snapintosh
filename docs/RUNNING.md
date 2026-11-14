@@ -534,17 +534,24 @@ ExitBootServices, so the script runs one step per boot and writes that step's
 marker file (`SP11\DONE<k>.TXT`) before the step starts: a step that hangs is
 never repeated.
 
-Status. Hardware: NOT RUN. QEMU: OBSERVED with stand-in images in place of
+Status. QEMU: OBSERVED with stand-in images in place of
 slbounce and q1n1 (`python3 tools/test-sp11-autorun-qemu.py`, EXPERIMENTAL
 evidence) under the pinned Shell binary (UEFI Interactive Shell v2.2,
 edk2-stable202608) and QEMU's edk2-stable202408 firmware: the script is found in
 `EFI\BOOT`, runs after the countdown with no key sent, runs one step per boot,
 and ESC at the countdown skips it. The lookup order, the `homefilesystem`
 variable and the ESC test agree with the `Shell.c` of the edk2-stable202608 tag
-that Shell reports (read, not run on the unit). INFERRED for the unit: that its
-firmware, USB stack and Type Cover behave the same (in particular that ESC reaches
-the countdown), and that the Shell file on the stick is the pinned one (it is if
-the tree was staged with the default pins).
+that Shell reports. **The unit: OBSERVED once (2026-11-14, one unit, the first step
+of a two-step plan, an operator's photograph of the console).** Its Shell printed the
+countdown, found `EFI\BOOT\startup.nsh` on the stick with no key pressed, printed the
+plan banner and the two commands, waited the five seconds, and then ran
+`load SP11\SLBOUNCE-DEVHE-MARK.EFI` and `SP11\TESTS-DECL.EFI` from `FS3:` (the Shell's
+`homefilesystem`): the directory search, `homefilesystem`, `echo`, `stall`, the
+`echo ... >a` marker write with its `if not exist` check, and the `load` and the run
+all work on the unit's Shell, with nothing typed. Still untested there: that ESC reaches
+the countdown (the Type Cover or a USB keyboard), a second boot of the same plan (the
+markers), and `--clear` by hand. Whether the Shell file on the stick is the pinned one
+depends on the tree having been staged with the default pins.
 
 Stage it on the Mac, in the directory `stage` made, never on the mounted stick (the
 tool refuses `/Volumes`). Give each file's SHA-256 from your own record of the
