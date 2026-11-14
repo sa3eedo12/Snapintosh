@@ -722,7 +722,9 @@ below); T02 now runs before T03 specifically so K1 is decided regardless.
 `declared` variant, [SP11-X2-TESTS.md](SP11-X2-TESTS.md) Run 6; OBSERVED): T03, T04,
 T05 and T09 PASS, T07 UNKNOWN (its read of the PCIe SMMUv3 faulted), T06 never
 finished (its read of the ECAM window of segment 3 did not return and the board
-reset itself) and T08 is UNIMPL.** Not covered by any run: items 9 to 13 and the
+reset itself) and T08 is UNIMPL.** A third version, in which T06 reads only the NVMe's own PCIe root, is
+built and tested on the host and under QEMU (EXPERIMENTAL; [SP11-X2-V3.md](SP11-X2-V3.md); hardware NOT RUN).
+Not covered by any run: items 9 to 13 and the
 `CNTVOFF_EL2` comparison across cores (T01 does read the ID registers behind M1;
 T03 reads `CNTVOFF_EL2` on the boot CPU only).
 

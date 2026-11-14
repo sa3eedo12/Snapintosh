@@ -16,7 +16,8 @@ image that follows from it (the order of the tests, T03, T05, T02's REGIME row) 
 run 6 (below; `declared` variant, one unit, one boot): T03, T04, T05 and T09 PASS, T07 UNKNOWN, K1 NV2: GO
 again with `E2H` clear, and T06 never finished, because its read of an ECAM window did not return and the
 board reset itself. Items 9-13 are still NOT RUN, and so is the `hardware` variant of the second
-version. Evidence
+version. A third version, in which T06 reads only the NVMe's own PCIe root, exists
+([SP11-X2-V3.md](SP11-X2-V3.md)); it has not run on the unit. Evidence
 labels: VERIFIED (reproduced by a test here), OBSERVED (read on
 the machine that ran the image), INFERRED (follows from other results),
 EXPERIMENTAL (written, emulator-tested only), UNIMPLEMENTED, UNKNOWN. The image
@@ -301,7 +302,9 @@ watchdog reset is INFERRED, as for the T03 freezes. T06 never finished, so its o
 the verdicts of the other eight tests were already on the screen, which is what the order of the second
 version is for. T06 reads the MCFG windows in table order, so the windows before segment 3 had been handled
 (read or refused) when it stopped; which, and what they returned, is not known (their rows were never
-drawn). A later T06 would have to leave segment 3's window alone (UNIMPLEMENTED: no such image exists).
+drawn). The third version of the image leaves segment 3's window alone: it reads only the root complex in
+which the firmware's own PCI I/O showed the NVMe, and holds the page for 8 s before each risky read
+([SP11-X2-V3.md](SP11-X2-V3.md); EXPERIMENTAL: host and QEMU tested, hardware NOT RUN).
 
 **T07: UNKNOWN again (OBSERVED).** The read of the SMMUv3 at `0x15400000` faulted. The fault was guarded and
 recoverable (the image went on) and T07 shows `NO STATE`. The IORT gives this one SMMUv3 to all eight PCIe
@@ -341,8 +344,8 @@ which they would if segments 4 and 6 were those controllers (INFERRED). Segment 
 (at EL2), 5 and 8 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3. None bears on K1, which stays GO,
 now with its regime read. Still open: whether `CNTPOFF_EL2` works (no read of it has been seen to return),
 `CNTVOFF_EL2` on the other cores, the state of the NVMe and of the PCIe SMMU at EL2 (T06 stopped the board,
-T07 faulted) and the ADSP (T08 is UNIMPL). T06 as built stops the board at segment 3's window on this unit
-(OBSERVED once).
+T07 faulted) and the ADSP (T08 is UNIMPL). T06 of the second version stopped the board at segment 3's window
+on this unit (OBSERVED once); the third version does not read that window (hardware NOT RUN).
 
 ## 1. Before you start
 
@@ -490,7 +493,7 @@ before trusting `tools/nv2_record.py show`'s output.
 | T03 timer | CNTFRQ, CNTHCTL_EL2.ECV, CNTVOFF_EL2, that the counter advances and that CNTVCT + CNTVOFF lies between two physical reads. `CNTPOFF_EL2` is not read by the images for the machine (`CNTPOFF_EL2 NOT READ (ECV=n)`); an emulator build made with `--cntpoff` reads it, if ID ECV >= 2 | the boot CPU's counter and offsets are coherent | other cores (see the open gap below) |
 | T04 DC ZVA | The block size, then one `DC ZVA` into the middle third of an image-owned buffer: exactly one block zeroed, both neighbours untouched | DC ZVA works and the block size is what the monitor assumes (64 bytes) | behaviour on device or Device-type memory |
 | T05 GIC | GICD/GICR/ITS registers at the addresses the **MADT** gives, the redistributor frames (a walk of the MADT's GICR discovery ranges or, when it has none, the frame each GICC structure names: "Run 5"), and each MADT CPU against a redistributor frame; the board descriptor is shown as a cross-check row (`D= R= I= C=` as `OK`, `DIFF` or `UNK`). A base that is zero, misaligned or wrapping, or that the memory map calls RAM or firmware, is not read: the row says `GICD REFUSED: <reason>` and the verdict is UNKNOWN, never FAIL | the MADT describes a working GIC | that interrupts are delivered |
-| T06 PCIe/NVMe | Configuration reads at the **MCFG** windows, the root port's link status, and, only if the endpoint's BAR is justified (decode on at both ends, inside the bridge's window, not RAM in the memory map), NVMe CAP, VS, CC and CSTS; `CC.EN` and `CSTS` are read, never written. A refused window shows `W<n> REFUSED: <reason>` or `NVME BAR0 REFUSED: <reason>` | the link state and whether firmware left the controller enabled | that the controller works; no register is written |
+| T06 PCIe/NVMe | Third version ([SP11-X2-V3.md](SP11-X2-V3.md)): before ExitBootServices the firmware's own PCI I/O says where its NVMe is; at EL2 configuration reads in the **one MCFG window** of that segment only (the device-path root UID must equal the segment and exactly one MCFG entry must carry it; otherwise nothing is read), the root port's link status, and, only if the endpoint is the function the firmware saw and its BAR is justified (decode on at both ends, inside the bridge's window, not RAM in the memory map), NVMe CAP, VS, CC, CSTS, AQA, ASQ and ACQ, each next to the firmware's own reading (`PRE` and `EL2`); CAP and VS must be equal. The page is held for 8 s before the first read of the window and again before the first read of BAR0 (`PHOTO NOW`). Nothing is written. A refused window shows `W<n> REFUSED: <reason>` or `NVME BAR0 REFUSED: <reason>`. The second version walked every MCFG window and stopped on segment 3 | the link state and whether the firmware left the controller enabled, with its queue registers | that the controller works; no register is written |
 | T07 PCIe SMMU | SMMUv3 identification, CR0/CR0ACK, GBPA and GERROR at the **IORT** nodes (a node with a bad base shows `SMMUV3 BASE BAD` or `SMMU<n> REFUSED`) | the translation state the monitor will inherit (bypass, abort or enabled) | the stream table contents |
 | T08 ADSP/GLINK | Nothing is touched: no address can be justified from ACPI, so the result is UNKNOWN with label UNIMPL | only that there is no address source yet | any liveness. A later change must supply an address from the DSDT dumped on the stick |
 | T09 DRAM | The UEFI memory map's RAM extents against the monitor's IPA limit (2^36 unless the descriptor says otherwise) | the RAM the firmware reports fits the monitor's stage-2 | the physical DRAM population |
