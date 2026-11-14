@@ -12,7 +12,12 @@
  *                        (OBSERVED on the Surface Pro 11 X1E80100: its
  *                        Secure-Launch SMC sequence runs inside slbounce's
  *                        ExitBootServices hook), this hook's own CurrentEL check
- *                        takes the SKIP branch and runs none of them here;
+ *                        takes the SKIP branch and runs none of them here.
+ *                        On every platform, at EL2 or not, it first reads the
+ *                        firmware's own PCI I/O view (pciio.c: read-only, through
+ *                        the firmware's protocol) and writes it to the stick as
+ *                        pciio.txt; T06 reads only a root complex that view shows
+ *                        an NVMe controller at;
  *   tests_hook_post_ebs  in place of the probe's post-exit stage: first,
  *                        whichever of the four above did not already run in
  *                        phase A (screen only: nothing may reach the stick after

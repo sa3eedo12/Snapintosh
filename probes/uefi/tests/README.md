@@ -37,13 +37,14 @@ changed `hook.c` and the tests after that, on purpose (see "The second version" 
 | Guarded-access policy | `guard.[ch]` |
 | ACPI parsers (MADT, MCFG, IORT) and the read windows | `acpix.[ch]`, `env.[ch]` |
 | The tests | `t_misc.c` (T01 to T04, T08, T09), `t_gic.c`, `t_pcie.c`, `t_smmu.c` |
+| The firmware's PCI I/O view, collected before ExitBootServices (T06 reads only where it shows an NVMe) | `pciio.[ch]` |
 | Report, layout, countdown | `report_x.[ch]` |
 | USB result writer | `stick.[ch]` |
 | Privileged instructions (the only place) | `sys_aarch64.c`, `vectors_aarch64.c`, `sys.h` |
 | Entry hooks | `hook.c`, `tests_hook.h` |
 | Board descriptor cross-check | `desc.h`, `desc_none.c` (generated `desc_data.c` for hardware) |
 | Declared-ranges table and its check (`declared` variant only) | `ebs_ranges.[ch]` |
-| Host tests | `test/test_x_*.c`, `test/suite_x.py`, `test/suite_x_ebs.py`, `test/suite_x_v2.py`, `host/audit.py`, `host/nv2screen.py`, `../../../tools/test-uefi-tests-logic.c` |
+| Host tests | `test/test_x_*.c`, `test/xt06.h`, `test/xhook_v3.h`, `test/suite_x.py`, `test/suite_x_ebs.py`, `test/suite_x_v2.py`, `test/suite_x_v3.py`, `host/audit.py`, `host/nv2screen.py`, `host/pciio_text.py`, `../../../tools/test-uefi-tests-logic.c` |
 
 ## Safety design
 
@@ -234,6 +235,38 @@ the NV2 record, its 13 lines and its CRC rules not at all. **Hardware status: NO
   has (twelve GICC structures with GICR bases, a GICD of version 4, one GIC ITS frame, no type 0x0E)
   and the older layout.
 
+## The third version (T06 reads only the root complex of the firmware's NVMe)
+
+Made after boot 3 on the unit (OBSERVED, [docs/SP11-X2-V3.md](../../../docs/SP11-X2-V3.md)): T06 walked
+every MCFG window and the read of segment 3 never returned. It changes both variants and T06 only, and
+the NV2 record, the REGIME row, T01 to T05, T07 to T09 and the declared range not at all.
+**Hardware status: NOT RUN.**
+
+* **Before ExitBootServices** `pciio.c` asks the firmware's own `EFI_PCI_IO_PROTOCOL` where each PCI
+  function is and what it holds, with `GetLocation`, 32-bit `Pci.Read` and, for an NVMe function
+  (class 0x010802), `Mem.Read` of seven controller registers: never a write, a mapping, a flush or an
+  attribute change. The structure in `pciio.h` pins every member's offset and types only the three
+  reads, so any other call is a compile error; `host/audit.py` pins the spelling too. The table lives
+  in `.bss` (inside the declared range) and is written to the stick as `pciio.txt`, last in the one
+  stick call of phase A, so a file already there never blocks the K1 record.
+* **T06** reads an ECAM window only for a segment where that table shows an NVMe function, and only if
+  the ACPI UID of the root bridge in its device path equals the segment and exactly one MCFG entry has
+  the segment and starts at bus 0; with no such segment it says `NO FIRMWARE NVME: NOTHING TOUCHED` and
+  reads nothing. The window policy is the old one (alignment, the memory map, the allow list); there is
+  no 2^36 rule. The walk inside a window is the old one. It then compares what EL2 reads (ids, class,
+  BAR0, and CAP, VS, CC, CSTS, AQA, ASQ, ACQ) with the firmware's reading: CAP and VS must be equal, the
+  rest is shown as `PRE` and `EL2` values.
+* **A photograph before the risk.** Before the first read of an ECAM window and again before the first
+  read of the NVMe BAR0 window, the image draws the finished page and waits
+  `TESTS_PHOTOGRAPH_WAIT_SECONDS` (8) on the physical counter, with the footer `PHOTO NOW: T06 ECAM
+  <address> IN <n> S`; if the wait cannot be measured nothing is read (`PHOTOGRAPH WAIT FAILED: CODE=n`).
+  T06 never waits when it has nothing to touch.
+* **Tests.** The native sections `pciio collect`, `pciio helpers`, `pciio text`, `t06 *`, `hook: pciio
+  record` and `hook: photograph before risk` (a device model that records every address read, a fake
+  PCI I/O protocol whose every other member fails the test, a fake counter), and
+  `test/suite_x_v3.py` (the audit's pins, `pciio.txt` against an independent decoder, 46 seeded mutants,
+  QEMU with EDK2's own PCI I/O and the machine's NVMe).
+
 ## Public facts used
 
 Linux v6.12 (tag commit `adc218676eef25575469234709c2d87185ca223a`, GPL-2.0-only,
@@ -243,7 +276,9 @@ read for facts only; no code or text is copied): `arch/arm64/include/asm/vncr_ma
 `arch/arm64/tools/sysreg` (ID register fields), `include/linux/irqchip/arm-gic-v3.h`,
 `include/linux/nvme.h`, `include/uapi/linux/pci_regs.h`,
 `drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.h`, and `include/acpi/actbl2.h` (MADT,
-MCFG, IORT layouts). Each source file names the lines it took a fact from.
+MCFG, IORT layouts). Each source file names the lines it took a fact from. The UEFI Specification
+2.10 (section 14.4, `EFI_PCI_IO_PROTOCOL`; section 10.3.3, the ACPI device path node) is the source of
+the layouts in `pciio.h`.
 
 ## What is EXPERIMENTAL
 

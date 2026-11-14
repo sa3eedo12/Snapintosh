@@ -16,7 +16,7 @@
  */
 #include <setjmp.h>
 
-#include "xtests.h"
+#include "xt06.h"
 
 #include "cpu.h"
 #include "regs.h"
@@ -97,6 +97,27 @@ static int h_restore_drops_result;     /* an NV2 restore that loses its own fail
 static int h_vncr_present;
 static int h_clobber_on_read;          /* the first register read stands for an exception */
 static unsigned h_resets;              /* tests_hook_post_ebs reached g_hc->reset_system */
+/* The physical counter the image polls. Every read adds h_counter_step, so a wait of N seconds is
+ * N * h_freq / h_counter_step polls, and a test can make the counter stop or run backwards. */
+static uint64_t h_counter;
+static uint64_t h_counter_step;
+static uint64_t h_freq;
+static int h_scope_test; /* the test whose vector scope is entered, 0 outside any */
+static int h_stall_test; /* the counter does not advance while this test's scope is entered */
+/* Every third read of the counter returns this many ticks below it, as a read satisfied out of
+ * order can (the architecture does not order an MRS of the counter without an ISB). */
+static uint64_t h_jitter;
+static unsigned h_counter_reads;
+/* The device model behind the guarded bus, or NULL when every read faults, and the counter at the
+ * moment of each read the model answered (index-aligned with the model's own log). */
+static const world *h_model;
+static uint64_t h_read_time[MAX_LOG];
+static unsigned h_read_n;
+/* The counter when each test's vector scope was entered and left, in the order the tests ran. */
+static uint64_t h_run_enter[TESTS_COUNT + 4], h_run_leave[TESTS_COUNT + 4];
+/* What the stick writer was given under the name pciio.txt. */
+static char h_stick_pciio[32768];
+static size_t h_stick_pciio_len;
 
 uint64_t probe_cpu_read_sysreg(int id)
 {
@@ -115,14 +136,19 @@ void probe_cpu_flush_dcache(void *ctx, const void *addr, size_t len)
 
 uint64_t probe_cpu_counter(void)
 {
-    static uint64_t t;
+    uint64_t v;
 
-    return t += 7;
+    if (h_stall_test == 0 || h_scope_test != h_stall_test)
+        h_counter += h_counter_step;
+    v = h_counter;
+    if (h_jitter != 0 && ++h_counter_reads % 3u == 0)
+        v -= h_jitter;
+    return v;
 }
 
 uint64_t probe_cpu_counter_freq(void)
 {
-    return 1000000;
+    return h_freq;
 }
 
 void probe_cpu_park(void)
@@ -169,7 +195,10 @@ unsigned tests_sys_fault_count(void)
 
 int tests_sys_scope_leave(void)
 {
+    if (h_scope_leaves < sizeof h_run_leave / sizeof h_run_leave[0])
+        h_run_leave[h_scope_leaves] = h_counter;
     h_scope_leaves++;
+    h_scope_test = 0;
     return tests_scope_leave(&h_scope, &h_wops);
 }
 
@@ -216,7 +245,12 @@ static int h_rd_sys(void *ctx, int id, uint64_t *v)
 static int h_rd32(void *ctx, uint64_t addr, uint32_t *v)
 {
     (void)ctx;
-    (void)addr;
+    if (h_model != NULL) {
+        if (h_read_n < MAX_LOG)
+            h_read_time[h_read_n] = h_counter;
+        h_read_n++;
+        return h_model->bus.rd32(h_model->bus.ctx, addr, v);
+    }
     *v = 0xFFFFFFFFu;
     return -1;
 }
@@ -361,6 +395,11 @@ int hook_stub_stick_write(efi_system_table *st, efi_handle image, unsigned run,
     for (unsigned i = 0; i < n && i < 16; i++) {
         strncpy(h_stick_names[i], files[i].name, sizeof h_stick_names[i] - 1);
         h_stick_names[i][sizeof h_stick_names[i] - 1] = 0;
+        if (strcmp(files[i].name, "pciio.txt") == 0 && files[i].len < sizeof h_stick_pciio) {
+            memcpy(h_stick_pciio, files[i].data, files[i].len);
+            h_stick_pciio[files[i].len] = 0;
+            h_stick_pciio_len = files[i].len;
+        }
     }
     *written = n;
     return STICK_OK;
@@ -399,8 +438,11 @@ static unsigned h_run_seq_n;
 int tests_sys_scope_enter(void)
 {
     h_scope_enters++;
-    if (h_run_seq_n < sizeof h_run_seq / sizeof h_run_seq[0])
+    h_scope_test = g_current_test;
+    if (h_run_seq_n < sizeof h_run_seq / sizeof h_run_seq[0]) {
+        h_run_enter[h_run_seq_n] = h_counter;
         h_run_seq[h_run_seq_n++] = g_current_test;
+    }
     return tests_scope_enter(&h_scope, &h_wops, H_VECTORS);
 }
 
@@ -448,7 +490,20 @@ static void h_reset(void)
     h_resets = 0;
     h_run_seq_n = 0;
     memset(h_run_seq, 0, sizeof h_run_seq);
+    memset(h_run_enter, 0, sizeof h_run_enter);
+    memset(h_run_leave, 0, sizeof h_run_leave);
     memset(h_page, 0, sizeof h_page);
+    h_counter = 0;
+    h_counter_step = 7;
+    h_freq = 1000000;
+    h_scope_test = 0;
+    h_stall_test = 0;
+    h_jitter = 0;
+    h_counter_reads = 0;
+    h_model = NULL;
+    h_read_n = 0;
+    h_stick_pciio_len = 0;
+    h_stick_pciio[0] = 0;
 
     /* A plausible core: ID registers of a core with NV2, a counter that advances. */
     x_good_ids(&ids);
@@ -464,6 +519,8 @@ static void h_reset(void)
     memset(&g_tc, 0, sizeof g_tc);
     memset(&g_rep, 0, sizeof g_rep);
     memset(&g_rec, 0, sizeof g_rec);
+    memset(&g_pciio, 0, sizeof g_pciio);
+    memset(g_pciio_text, 0, sizeof g_pciio_text);
     g_have_rec = 0;
     g_post = 0;
     g_hc = NULL;
@@ -973,7 +1030,11 @@ void test_x_hook_phase_b_fallback(void)
     CHECK_EQ(ret, 0);
     CHECK_EQ(h_parked, 0);
     CHECK(con_has("SP11X2 SKIP REASON=NOT_EL2"));
-    CHECK_EQ(h_stick_calls, 0); /* phase A wrote nothing: there was nothing to write */
+    /* Phase A ran no test, so there is no result to write; the firmware's PCI I/O record is the
+     * one thing it has, and it is written even here. */
+    CHECK_EQ(h_stick_calls, 1);
+    CHECK_EQ(h_stick_files, 1);
+    CHECK_STR(h_stick_names[0], "pciio.txt");
     CHECK_EQ(h_run_seq_n, 0);   /* and ran nothing */
     for (unsigned i = 0; i < 4; i++)
         CHECK_EQ(g_res[order_a_normal_ids[i]].phase, 0);
@@ -981,13 +1042,19 @@ void test_x_hook_phase_b_fallback(void)
     run_post();
     CHECK_EQ(h_parked, 1);
     CHECK_EQ(h_resets, 1);
-    CHECK_EQ(h_stick_calls, 0); /* still nothing: no phase-B test may reach the stick */
+    CHECK_EQ(h_stick_calls, 1); /* still the one call: no phase-B test may reach the stick */
     CHECK_EQ(h_run_seq_n, 9);
     for (unsigned i = 0; i < 9; i++) {
         CHECK_EQ(h_run_seq[i], order_post_ids[i]);
         CHECK_EQ(g_res[order_post_ids[i]].phase, 2); /* ran in phase B this time */
-        CHECK(g_res[order_post_ids[i]].verdict != TV_NOT_RUN); /* a real result, not the bug's NOT-RUN */
+        /* A real result, not the bug's NOT-RUN. T06 alone is NOT-RUN here, for the right reason:
+         * these models give the firmware's PCI I/O no function, and T06 reads nothing then. */
+        if (order_post_ids[i] != T_PCIE)
+            CHECK(g_res[order_post_ids[i]].verdict != TV_NOT_RUN);
     }
+    CHECK_EQ(g_res[T_PCIE].verdict, TV_NOT_RUN);
+    CHECK(result_has_row(&g_res[T_PCIE], "NO FIRMWARE NVME: NOTHING TOUCHED"));
+    CHECK(result_has_row(&g_res[T_PCIE], "PCI I/O: NO BOOT SERVICES"));
     CHECK_EQ(g_res[T_NV2].verdict, TV_GO);
     /* tests_run_nv2 (t_misc.c) already appends tests_nv2rec_screen_rows()'s lines
      * to T02's own rows whenever it has a record, in either phase: no separate
@@ -1001,7 +1068,8 @@ void test_x_hook_phase_b_fallback(void)
     h_reset();
     h_facts.have_preebs_el = 0;
     CHECK_EQ(run_pre(&ret), 0);
-    CHECK_EQ(h_stick_calls, 0);
+    CHECK_EQ(h_stick_calls, 1);
+    CHECK_STR(h_stick_names[0], "pciio.txt");
     run_post();
     CHECK_EQ(h_parked, 1);
     for (unsigned i = 0; i < 9; i++)
@@ -1015,6 +1083,9 @@ void test_x_hook_phase_b_fallback(void)
     h_reset();
     CHECK_EQ(run_pre(&ret), 0);
     CHECK_EQ(h_stick_calls, 1); /* persisted once, in phase A, exactly as before */
+    CHECK_STR(h_stick_names[0], "x2-results.txt"); /* the record of K1 goes first ... */
+    CHECK(h_stick_files >= 3);
+    CHECK_STR(h_stick_names[h_stick_files - 1], "pciio.txt"); /* ... and the PCI I/O view last */
     CHECK_EQ(h_run_seq_n, 4);
     for (unsigned i = 0; i < 4; i++) {
         CHECK_EQ(h_run_seq[i], order_a_normal_ids[i]);
@@ -1151,3 +1222,6 @@ void test_x_hook_post_order(void)
     CHECK_EQ(g_res[T_PCIE].verdict, TV_NOT_RUN);
     CHECK(fb_lit_bytes() > 1000);
 }
+
+/* The hook tests of the third version (the PCI I/O record and the photograph before T06's reads). */
+#include "xhook_v3.h"

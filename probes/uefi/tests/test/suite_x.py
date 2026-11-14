@@ -52,7 +52,10 @@ X_SECTIONS = ("ids and nv classes", "faulty id images", "syndrome and hcr", "gua
               "stick writer",
               "hook: clean run", "hook: cleanup failures", "hook: console deferral",
               "hook: fatal page", "hook: phase b fallback", "hook: post-bounce order",
-              "ebs table layout", "ebs table bytes", "ebs range check", "ebs range model")
+              "ebs table layout", "ebs table bytes", "ebs range check", "ebs range model",
+              "pciio collect", "pciio helpers", "pciio text", "t06 firmware nvme", "t06 nothing touched",
+              "t06 two segments", "t06 window policy", "t06 view and registers", "t06 photograph",
+              "t06 verdicts", "hook: pciio record", "hook: photograph before risk")
 # Sources of the image that are not part of the host build: the entry hook and
 # the two files made of privileged instructions (audited as built, not run).
 NOT_NATIVE = {"hook.c", "sys_aarch64.c", "vectors_aarch64.c"}
@@ -575,13 +578,16 @@ FULL = "virt,virtualization=on,gic-version=3,iommu=smmuv3"
 
 
 @contextlib.contextmanager
-def machine(spec):
-    """QEMU with a GICv3, an SMMUv3 and an NVMe controller behind a PCIe root port."""
+def machine(spec, nvme=True):
+    """QEMU with a GICv3, an SMMUv3 and, unless nvme is False, an NVMe controller behind a PCIe
+    root port."""
     original = qemu_probe.qemu_command
 
     def patched(cfg, assets, vars_copy, stick, serial):
         cmd = original(cfg, assets, vars_copy, stick, serial)
         cmd[cmd.index("-machine") + 1] = spec
+        if not nvme:
+            return cmd
         disk = serial.parent / "nvme.img"
         disk.write_bytes(bytes(1 << 20))
         return cmd + ["-drive", f"if=none,id=nv0,format=raw,file={disk}",
@@ -595,9 +601,10 @@ def machine(spec):
         qemu_probe.qemu_command = original
 
 
-def scenario(name, variant, spec, capture, el2=True, until=None, capture_when=None, shell=False):
+def scenario(name, variant, spec, capture, el2=True, until=None, capture_when=None, shell=False, nvme=True):
     """`variant` is a key of the build tool's VARIANTS or the path of an image built elsewhere.
-    `shell`: boot the pinned UEFI Shell; a test-only STARTUP.NSH types the operator's command."""
+    `shell`: boot the pinned UEFI Shell; a test-only STARTUP.NSH types the operator's command.
+    `nvme`: attach the NVMe controller (False: the machine has none, which T06 must say)."""
     def build():
         launcher = kit.pinned_shell() if shell else None  # skips before anything is booted
         try:
@@ -610,7 +617,7 @@ def scenario(name, variant, spec, capture, el2=True, until=None, capture_when=No
                                    workdir=kit.work_dir(f"xq-{name}") / "run", capture_seconds=capture,
                                    el2=el2, smp=2, boot_timeout=300.0, pre_ebs_timeout=240.0,
                                    stop_when=until, capture_when=capture_when)
-        with machine(spec):
+        with machine(spec, nvme):
             return qemu_probe.run(cfg, assets, kit.font_table())
     return kit.once(("xqemu", name), build)
 
@@ -705,15 +712,20 @@ class XQemuTests(Base):
                    (re.match(r"^T0(\d) (.+) (INFO|PASS|FAIL|UNKNOWN|GO|NO-GO|INCONCL|NOT-RUN) "
                              r"(OBS-MODEL|OBSERVED|UNIMPL|INFERRED|EXPERIMENTAL|UNKNOWN)$", r) for r in rows)
                    if m}
-        want = {"1": "INFO", "2": "GO", "3": "PASS", "4": "PASS", "5": "PASS", "6": "INFO", "7": "INFO",
+        want = {"1": "INFO", "2": "GO", "3": "PASS", "4": "PASS", "5": "PASS", "6": "PASS", "7": "INFO",
                 "8": "UNKNOWN", "9": "PASS"}
         for tid, verdict in want.items():
             if summary.get(tid, (None, None))[1] != verdict:
                 problems.append(f"summary row of T0{tid}: {summary.get(tid)} (expected {verdict})")
-        for needle in ("K1 NV2: GO", "COUNTER ADVANCES=YES", "DC ZVA FAULTED=NO", "FAULTS=0"):
+        # T06 in its third version: the firmware's NVMe, seen by the firmware's PCI I/O before
+        # ExitBootServices and again at EL2, and what the QEMU machine has to show for it.
+        for needle in ("K1 NV2: GO", "COUNTER ADVANCES=YES", "DC ZVA FAULTED=NO", "FAULTS=0",
+                       "FW NVME FUNCTIONS=1", "SCANNED SEGMENTS=1 MCFG=1", "MATCHES FIRMWARE VIEW=YES",
+                       "CAP VS EQUAL=YES"):
             if needle not in rows:
                 problems.append(f"row {needle!r} is not on any page")
-        for needle in ("NVME CAP=", "GICD @", "SMMU0 @", "RAM TOTAL="):
+        for needle in ("CAP PRE=", "CAP EL2=", "VS PRE=", "CC PRE=", "CSTS PRE=", "AQA PRE=", "ASQ PRE=",
+                       "ACQ EL2=", "GICD @", "SMMU0 @", "RAM TOTAL="):
             if not any(r.startswith(needle) for r in rows):
                 problems.append(f"no row starts with {needle!r}")
         # The window policy against the real UEFI memory map of the machine: T05 to T07 each
@@ -740,9 +752,9 @@ class XQemuTests(Base):
             problems.append(f"the GOP marker does not say SEL=SAME: {gop and gop.fields}")
         problems += self.model_run_problems(out)
         files = {} if out.stick is None else out.stick.files
-        names = ("results.txt", "nv2.txt", "nv2.json", "nv2.bin")
-        problems += [f"SP11DUMP/RUN01/x2-{n} was not written" for n in names
-                     if f"SP11DUMP/RUN01/x2-{n}" not in files]
+        names = ("x2-results.txt", "x2-nv2.txt", "x2-nv2.json", "x2-nv2.bin", "pciio.txt")
+        problems += [f"SP11DUMP/RUN01/{n} was not written" for n in names
+                     if f"SP11DUMP/RUN01/{n}" not in files]
         pinned = kit.shell_pin_problem(files.get("EFI/BOOT/BOOTAA64.EFI", b""))
         if pinned:
             problems.append(f"EFI/BOOT/BOOTAA64.EFI is {pinned}")

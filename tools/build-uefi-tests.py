@@ -93,7 +93,7 @@ def _load(module_name, filename):
 bup = _load("build_uefi_probe", "build-uefi-probe.py")
 
 TESTS_SOURCES = (
-    "acpix.c", "decode.c", "env.c", "guard.c", "hook.c", "nv2.c", "nv2rec.c", "regs.c",
+    "acpix.c", "decode.c", "env.c", "guard.c", "hook.c", "nv2.c", "nv2rec.c", "pciio.c", "regs.c",
     "report_x.c", "stick.c", "sys_aarch64.c", "sysstate.c", "t_gic.c", "t_misc.c", "t_pcie.c",
     "t_smmu.c", "tests_types.c", "vectors_aarch64.c",
 )

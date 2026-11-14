@@ -104,6 +104,9 @@ typedef struct {
     uint8_t mmbuf[48 * 16];
     unsigned nmm;
     probe_memmap mm;
+    /* The firmware's pre-ExitBootServices record of its PCI functions (T06), installed by
+     * pcie_record(). */
+    tests_pciio pciio;
 } world;
 
 /* One EFI memory descriptor with a 48-byte stride, as firmware lays them out. */
@@ -134,6 +137,10 @@ typedef struct {
 uint64_t ecam_at(unsigned bus, unsigned dev, unsigned off);
 pcie_cfg good_pcie(void);
 void pcie_world(world *w, const pcie_cfg *p, unsigned start_bus);
+/* Installs the firmware record of the NVMe function pcie_world's model shows at 01:00.0 of
+ * segment 0: the healthy state, whatever configuration the test gives the model at EL2. T06 reads
+ * nothing without it. */
+void pcie_record(world *w);
 void smmu_regs(devmodel *d, uint64_t base, uint32_t cr0, uint32_t ack, uint32_t gbpa);
 int has_row(const tests_result *r, const char *needle);
 void iort_world(world *w, unsigned n);

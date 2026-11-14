@@ -322,10 +322,63 @@ def audit_cntpoff_read(root: Path) -> list:
     return problems
 
 
+# The firmware's PCI I/O protocol is used in one file, pciio.c, before ExitBootServices, and only to
+# read: GetLocation, Pci.Read and Mem.Read. T06's third version reads an ECAM window only for a
+# segment this protocol showed an NVMe function in, so a write through it (a config-space write, a
+# BAR write, a mapping, a flush, a changed attribute) would be a side effect on the very device the
+# test is there to keep undisturbed. The structure in pciio.h makes such a call a compile error
+# (every unused member is an untyped pointer) and pins the layout; this audit also refuses the
+# spelling of one, and the boot services pciio.c may call.
+PCIIO_FILE = "pciio.c"
+PCIIO_HEADER = "pciio.h"
+PCIIO_BOOT_SERVICES = frozenset({"locate_handle_buffer", "handle_protocol", "free_pool"})
+_PCIIO_FORBIDDEN_MEMBER = re.compile(
+    r"->\s*(?:poll_mem|poll_io|copy_mem|map|unmap|allocate_buffer|free_buffer|flush|attributes|"
+    r"get_bar_attributes|set_bar_attributes|rom_size|rom_image)\b")
+_PCIIO_GROUP_MEMBER = re.compile(r"->\s*(pci|mem|io)\s*\.\s*(\w+)")
+_PCIIO_BOOT_SERVICE = re.compile(r"\bbs\s*->\s*(\w+)")
+_PCIIO_ASSERT = re.compile(r"_Static_assert\s*\(\s*offsetof\s*\(\s*efi_pci_io\s*,")
+PCIIO_MEMBERS = 20  # the UEFI 2.10 structure from PollMem to RomImage, each member's slot pinned
+
+
+def audit_pciio_access(root: Path) -> list:
+    """pciio.c reads through the protocol and never writes; pciio.h pins every member's offset."""
+    problems = []
+    tests = root / "probes" / "uefi" / "tests"
+    code = _code_only((tests / PCIIO_FILE).read_text(encoding="utf-8"))
+    for n, line in enumerate(code.splitlines(), 1):
+        if _PCIIO_FORBIDDEN_MEMBER.search(line):
+            problems.append(f"{PCIIO_FILE}:{n}: a member of the PCI I/O protocol other than GetLocation, "
+                            f"Pci.Read and Mem.Read: {line.strip()}")
+        for group, member in _PCIIO_GROUP_MEMBER.findall(line):
+            if group == "io" or member != "read":
+                problems.append(f"{PCIIO_FILE}:{n}: {group}.{member} of the PCI I/O protocol is not a read: "
+                                f"{line.strip()}")
+        for name in _PCIIO_BOOT_SERVICE.findall(line):
+            if name not in PCIIO_BOOT_SERVICES:
+                problems.append(f"{PCIIO_FILE}:{n}: boot service {name}: only "
+                                f"{', '.join(sorted(PCIIO_BOOT_SERVICES))} may be called here")
+    header = (tests / PCIIO_HEADER).read_text(encoding="utf-8")
+    pins = len(_PCIIO_ASSERT.findall(_code_only(header)))
+    if pins != PCIIO_MEMBERS:
+        problems.append(f"{PCIIO_HEADER}: {pins} member offsets of efi_pci_io are pinned, expected {PCIIO_MEMBERS}")
+    if not re.search(r"_Static_assert\s*\(\s*sizeof\s*\(\s*efi_pci_io\s*\)\s*==\s*160\b", header):
+        problems.append(f"{PCIIO_HEADER}: the size of efi_pci_io is not pinned to 160 bytes")
+    body = re.search(r"struct efi_pci_io \{(.*?)\n\};", header, re.S)
+    if body is None:
+        problems.append(f"{PCIIO_HEADER}: struct efi_pci_io is not defined as expected")
+    else:
+        typed = re.findall(r"efi_pci_io_(?:mem_read|cfg_read|location)_fn\s+(\w+);", body.group(1))
+        if sorted(typed) != ["get_location", "read", "read"]:
+            problems.append(f"{PCIIO_HEADER}: typed members of efi_pci_io are {sorted(typed)}; only the "
+                            f"three reads may be callable")
+    return problems
+
+
 def audit_sources(root: Path) -> list:
     """No store through a volatile device pointer, no write member on the bus interface."""
     problems = (audit_state_model(root) + audit_verified_writes(root) + audit_variable_writes(root)
-                + audit_cntpoff_read(root))
+                + audit_cntpoff_read(root) + audit_pciio_access(root))
     tests = root / "probes" / "uefi" / "tests"
     for path in sorted(tests.glob("*.[ch]")):
         text = path.read_text(encoding="utf-8")

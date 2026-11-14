@@ -49,6 +49,15 @@ void test_x_ebs_model(void);
 #ifdef X_SLBOUNCE
 void test_x_ebs_slbounce(void);
 #endif
+/* The firmware's PCI I/O view (pciio.c) and T06 in its third version (t_pcie.c). */
+void test_x_pciio(void);
+void test_x_t06(void);
+void test_x_hook_pciio(void);
+void test_x_hook_photograph(void);
+
+/* `--emit-pciio`: the PCI I/O fixtures' raw dwords and the pciio.txt made of them, for the Python
+ * reader probes/uefi/tests/host/pciio_text.py to decode independently. */
+int x_emit_pciio(void);
 
 /* `--ebs-cases`: reads declared-range cases from standard input and prints what the table
  * builder made of each, for the differential run against tools/sp11_ebs_sweep_model.py. */

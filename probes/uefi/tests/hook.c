@@ -98,6 +98,13 @@ static char g_nv2_text[1024];
 static char g_nv2_json[1024];
 static uint8_t g_nv2_bin[TESTS_NV2_BIN_SIZE];
 
+/* The firmware's PCI I/O view (pciio.c), collected before ExitBootServices and kept for T06, which
+ * runs after it. Static storage: the image's range covers it in the declared variant, and nothing
+ * is allocated for it. 64 functions at about 220 bytes a line, and an NVMe line for each, fit. */
+#define PCIIO_TEXT_BYTES (32u * 1024u)
+static tests_pciio g_pciio;
+static char g_pciio_text[PCIIO_TEXT_BYTES];
+
 /* ---- Console (before ExitBootServices only) ---- */
 
 static void emit_console(const char *s)
@@ -356,6 +363,8 @@ static uint32_t build_id_number(const char *id)
     return v;
 }
 
+static int photograph_wait(void *ctx, const char *text, unsigned seconds);
+
 static void ensure_init(const tests_hook_ctx *c)
 {
     if (g_hc != NULL)
@@ -373,8 +382,10 @@ static void ensure_init(const tests_hook_ctx *c)
     g_tc.model = TESTS_MODEL_BUILD;
     g_tc.require_mmio_map = TESTS_REQUIRE_MMIO_IN_MAP;
     g_tc.read_cntpoff = TESTS_READ_CNTPOFF;
+    g_tc.pciio = &g_pciio;
     g_tc.acpi_buf = g_acpi_buf;
     g_tc.progress = progress;
+    g_tc.photograph = photograph_wait;
     tests_sys_set_fatal(fatal_draw);
 }
 
@@ -549,10 +560,31 @@ static void put_result_text(probe_sb *sb, const tests_result *r)
     }
 }
 
-static void persist_phase_a(void)
+/* The firmware's PCI I/O view, read before ExitBootServices (pciio.c): which segments hold an NVMe
+ * function decides which ECAM windows T06 may read afterwards. Reads only. The marker carries
+ * the outcome, and the table is written to the stick with the rest of phase A (persist_pre_ebs),
+ * whether or not this platform is at EL2 yet: on the Surface Pro 11 it is not, and this is then
+ * the one thing phase A has to record. */
+static void collect_pciio(const tests_hook_ctx *c)
+{
+    char handles[12], nvme[12];
+    probe_sb sb;
+
+    tests_pciio_collect(c->st != NULL ? c->st->boot_services : NULL, &g_pciio);
+    probe_sb_init(&sb, handles, sizeof handles);
+    probe_sb_dec(&sb, g_pciio.located);
+    probe_sb_init(&sb, nvme, sizeof nvme);
+    probe_sb_dec(&sb, g_pciio.n_nvme);
+    marker("PCIIO", "STATE", tests_pciio_state_name(g_pciio.state), "HANDLES", handles, "NVME", nvme);
+}
+
+/* What phase A leaves on the stick: the results of the tests it ran (none where the platform is not
+ * at EL2 yet), the NV2 record, and pciio.txt. The K1 record goes first and pciio.txt last, so that
+ * a file already on the stick stops the less valuable one and never the record. */
+static void persist_pre_ebs(int tests_ran)
 {
     const probe_facts *f = g_hc->facts;
-    tests_file files[4];
+    tests_file files[5];
     unsigned nfiles = 0, written = 0;
     probe_sb sb;
     char num[8];
@@ -563,40 +595,48 @@ static void persist_phase_a(void)
         marker("STICK", "STATE", "NOT ATTEMPTED", "REASON", "NO DUMP RUN DIRECTORY", NULL, NULL);
         return;
     }
-    probe_sb_init(&sb, g_results_text, sizeof g_results_text);
-    probe_sb_puts(&sb, "# SP11X2 results v1 (tests run before ExitBootServices)\n");
-    probe_sb_puts(&sb, "build=");
-    probe_sb_puts(&sb, f->build_id);
-    probe_sb_puts(&sb, "\nkind=" KIND_TEXT "\n");
-    for (unsigned id = 1; id <= TESTS_COUNT; id++)
-        if ((TESTS_PHASE_A_MASK >> id) & 1u)
-            put_result_text(&sb, &g_res[id]);
-    files[nfiles].name = "x2-results.txt";
-    files[nfiles].data = g_results_text;
-    files[nfiles].len = sb.overflow ? 0 : sb.len;
-    nfiles++;
-    if (g_have_rec) {
-        len = tests_nv2rec_text(&g_rec, g_nv2_text, sizeof g_nv2_text);
-        if (len != 0) {
-            files[nfiles].name = "x2-nv2.txt";
-            files[nfiles].data = g_nv2_text;
-            files[nfiles].len = len;
-            nfiles++;
-        }
-        len = tests_nv2rec_json(&g_rec, g_nv2_json, sizeof g_nv2_json);
-        if (len != 0) {
-            files[nfiles].name = "x2-nv2.json";
-            files[nfiles].data = g_nv2_json;
-            files[nfiles].len = len;
-            nfiles++;
-        }
-        if (tests_nv2rec_pack(&g_rec, g_nv2_bin) == 0) {
-            files[nfiles].name = "x2-nv2.bin";
-            files[nfiles].data = g_nv2_bin;
-            files[nfiles].len = sizeof g_nv2_bin;
-            nfiles++;
+    if (tests_ran) {
+        probe_sb_init(&sb, g_results_text, sizeof g_results_text);
+        probe_sb_puts(&sb, "# SP11X2 results v1 (tests run before ExitBootServices)\n");
+        probe_sb_puts(&sb, "build=");
+        probe_sb_puts(&sb, f->build_id);
+        probe_sb_puts(&sb, "\nkind=" KIND_TEXT "\n");
+        for (unsigned id = 1; id <= TESTS_COUNT; id++)
+            if ((TESTS_PHASE_A_MASK >> id) & 1u)
+                put_result_text(&sb, &g_res[id]);
+        files[nfiles].name = "x2-results.txt";
+        files[nfiles].data = g_results_text;
+        files[nfiles].len = sb.overflow ? 0 : sb.len;
+        nfiles++;
+        if (g_have_rec) {
+            len = tests_nv2rec_text(&g_rec, g_nv2_text, sizeof g_nv2_text);
+            if (len != 0) {
+                files[nfiles].name = "x2-nv2.txt";
+                files[nfiles].data = g_nv2_text;
+                files[nfiles].len = len;
+                nfiles++;
+            }
+            len = tests_nv2rec_json(&g_rec, g_nv2_json, sizeof g_nv2_json);
+            if (len != 0) {
+                files[nfiles].name = "x2-nv2.json";
+                files[nfiles].data = g_nv2_json;
+                files[nfiles].len = len;
+                nfiles++;
+            }
+            if (tests_nv2rec_pack(&g_rec, g_nv2_bin) == 0) {
+                files[nfiles].name = "x2-nv2.bin";
+                files[nfiles].data = g_nv2_bin;
+                files[nfiles].len = sizeof g_nv2_bin;
+                nfiles++;
+            }
         }
     }
+    /* Text that did not fit is still valid text up to where it stops; it is written as it is. */
+    (void)tests_pciio_text(&g_pciio, f->build_id, KIND_TEXT, g_pciio_text, sizeof g_pciio_text, &len);
+    files[nfiles].name = "pciio.txt";
+    files[nfiles].data = g_pciio_text;
+    files[nfiles].len = len;
+    nfiles++;
     state = tests_stick_write(g_hc->st, g_hc->image, f->dump_run, files, nfiles, &written);
     probe_sb_init(&sb, num, sizeof num);
     probe_sb_dec(&sb, written);
@@ -628,8 +668,10 @@ int tests_hook_pre_ebs(const tests_hook_ctx *c)
     g_have_layout = 1;
     c->fb->flush = probe_cpu_flush_dcache;
     c->fb->flush_ctx = NULL;
+    collect_pciio(c);
     if (!c->facts->have_preebs_el || probe_currentel_decode(c->facts->preebs_el_raw) != 2) {
         marker("SKIP", "REASON", "NOT_EL2", NULL, NULL, NULL, NULL);
+        persist_pre_ebs(0);
         return 0;
     }
 #if TESTS_SELFTEST
@@ -647,7 +689,7 @@ int tests_hook_pre_ebs(const tests_hook_ctx *c)
 #endif
     if (tests_sysstate_cleanup_failed())
         cleanup_halt("BEFORE THE RESULTS ARE WRITTEN");
-    persist_phase_a();
+    persist_pre_ebs(1);
     return 0;
 }
 
@@ -684,6 +726,108 @@ static void wait_one_second(uint64_t freq)
     } else {
         spin_one_second();
     }
+}
+
+/* ---- The photograph before a risky read (T06, suite.h) ---- */
+
+/* CNTFRQ_EL0 is programmed by firmware (19.2 MHz on the Surface Pro 11, OBSERVED) and reads 0
+ * where nothing programmed it. The architectural frequencies of the generic timer lie between 1
+ * MHz and 1 GHz, so a value outside that is not a frequency and the unit's own is used instead.
+ * A wrong fallback only lengthens or shortens the window the operator has to photograph the page;
+ * it does not make any read less safe. */
+#define PHOTO_FREQ_MIN 1000000ull
+#define PHOTO_FREQ_MAX 1000000000ull
+#define PHOTO_FREQ_FALLBACK 19200000ull
+#define PHOTO_MAX_SECONDS 60u
+/* Polls of the counter in a row that bring no value above the highest seen, before it is taken for
+ * stopped: at 19.2 MHz it advances every 52 ns and a read takes a few ns, so a short run of equal
+ * values is normal and 2^24 of them is a counter that does not run. A wait that cannot be measured
+ * is not waited out: it fails, and T06 reads nothing. */
+#define PHOTO_STALL_READS (1u << 24)
+/* A poll may return a value a little below the highest seen. CNTPCT_EL0 is read with no ISB, and an
+ * MRS of the counter is not ordered against the instructions before it (Linux's arch_timer puts an
+ * ISB in front of its read for that reason), so two reads in program order can come back reversed
+ * by a tick or two: INFERRED for the unit, not observed there. A read under QEMU load, which the
+ * first version of this wait took for a broken counter, came back less than a millisecond behind
+ * (OBSERVED, model: five runs in five ended in "WAIT FAILED: CODE=2" until this was changed).
+ * Such a poll is ignored. One more than a second behind is not an ordering effect, and the wait is
+ * refused (TESTS_PHOTO_BACKWARDS). */
+#define PHOTO_BACKWARD_LIMIT_SECONDS 1u
+
+static uint64_t photo_frequency(void)
+{
+    uint64_t f = probe_cpu_counter_freq();
+
+    return (f >= PHOTO_FREQ_MIN && f <= PHOTO_FREQ_MAX) ? f : PHOTO_FREQ_FALLBACK;
+}
+
+/* "PHOTO NOW: <what T06 will read> IN <n> S", 37 characters for a 10-digit address: the footer is
+ * 38 columns wide. */
+static void photo_footer(probe_payload out, const char *text, unsigned left)
+{
+    probe_sb sb;
+
+    probe_sb_init(&sb, out, sizeof(probe_payload));
+    probe_sb_puts(&sb, "PHOTO NOW: ");
+    probe_sb_puts(&sb, text);
+    probe_sb_puts(&sb, " IN ");
+    probe_sb_dec(&sb, left);
+    probe_sb_puts(&sb, " S");
+}
+
+static void photo_draw_footer(const probe_payload ft)
+{
+    probe_draw_footer(g_hc->fb, &g_layout, ft);
+}
+
+/* Draws the page as it stands, with the address T06 is about to read as the footer, and returns
+ * only after `seconds` of the physical counter (polled: no sleeping primitive and no interrupt,
+ * which the vector scope masks) have elapsed. The page is the finished one of every other test plus
+ * the rows T06 has decided so far, so a photograph taken during the wait holds everything that is
+ * known before the read that may not return (OBSERVED, boot 3: the board reset itself within
+ * seconds of such a read). The footer counts the seconds down and ends as the plain address, which
+ * stays on the screen through the read. Runs no firmware code. Returns TESTS_PHOTO_OK after the
+ * full wait. Time is the highest counter value seen since the start. */
+static int photograph_wait(void *ctx, const char *text, unsigned seconds)
+{
+    probe_payload ft;
+    uint64_t freq, total, start, high, now, elapsed;
+    unsigned same = 0, shown, left;
+
+    (void)ctx;
+    if (!g_have_layout || g_hc == NULL || seconds == 0 || seconds > PHOTO_MAX_SECONDS)
+        return TESTS_PHOTO_REFUSED;
+    freq = photo_frequency();
+    total = (uint64_t)seconds * freq;
+    rebuild_report();
+    photo_footer(ft, text, seconds);
+    draw_page(0, 1, ft);
+    shown = seconds;
+    start = high = probe_cpu_counter();
+    for (;;) {
+        now = probe_cpu_counter();
+        if (now > high) {
+            high = now;
+            same = 0;
+        } else {
+            if (high - now > (uint64_t)PHOTO_BACKWARD_LIMIT_SECONDS * freq)
+                return TESTS_PHOTO_BACKWARDS;
+            if (++same >= PHOTO_STALL_READS)
+                return TESTS_PHOTO_STALLED;
+        }
+        elapsed = high - start;
+        if (elapsed >= total)
+            break;
+        left = seconds - (unsigned)(elapsed / freq);
+        if (left != shown) {
+            shown = left;
+            photo_footer(ft, text, left);
+            photo_draw_footer(ft);
+        }
+    }
+    tests_footer_text(ft, text);
+    photo_draw_footer(ft);
+    return TESTS_PHOTO_OK;
 }
 
 __attribute__((noreturn)) static void halt_not_el2(uint64_t raw)
@@ -753,7 +897,7 @@ __attribute__((noreturn)) void tests_hook_post_ebs(const tests_hook_ctx *c)
 
     rebuild_report();
     draw_page(0, 1, "PHASE B STARTING");
-    /* Nothing below may reach the stick: persist_phase_a() is phase-A-only and
+    /* Nothing below may reach the stick: persist_pre_ebs() is phase-A-only and
      * is never called from here. T_NV2's record still reaches the operator when
      * it runs here, through its own per-test rows: tests_run_nv2 (t_misc.c)
      * already appends tests_nv2rec_screen_rows()'s 13 "NV2R ..." lines to

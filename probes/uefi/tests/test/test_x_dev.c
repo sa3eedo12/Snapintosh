@@ -679,6 +679,11 @@ static void pcie_regs(devmodel *d, const pcie_cfg *p)
     dm_set(d, NVME_BAR + 0x08, 0x00010400);
     dm_set(d, NVME_BAR + 0x14, p->cc);
     dm_set(d, NVME_BAR + 0x1C, p->csts);
+    dm_set(d, NVME_BAR + 0x24, 0x001F001F);
+    dm_set(d, NVME_BAR + 0x28, 0xF6A00000);
+    dm_set(d, NVME_BAR + 0x2C, 0x00000001);
+    dm_set(d, NVME_BAR + 0x30, 0xF6A01000);
+    dm_set(d, NVME_BAR + 0x34, 0x00000001);
 }
 
 pcie_cfg good_pcie(void)
@@ -687,6 +692,40 @@ pcie_cfg good_pcie(void)
 
     /* Bridge memory window 0x70000000..0x700FFFFF; BAR0 is a 64-bit memory BAR. */
     return p;
+}
+
+void pcie_record(world *w)
+{
+    pcie_cfg good = good_pcie();
+    tests_pciio_fn *f = &w->pciio.f[w->pciio.n++];
+
+    w->pciio.state = TESTS_PCIIO_OK;
+    w->pciio.located = w->pciio.n;
+    f->located = 1;
+    f->segment = 0;
+    f->bus = 1;
+    f->base_ok = 1;
+    f->cfg_ok = 1;
+    f->bars_read = 6;
+    f->id = 0x00101B36u;
+    f->cmd_status = (0x0010u << 16) | good.ep_cmd;
+    f->class_rev = 0x01080201u;
+    f->bar[0] = good.bar0;
+    f->have_root = 1;
+    f->root_hid = TESTS_PCIIO_HID_PCIE_ROOT;
+    f->root_uid = 0;
+    f->is_nvme = 1;
+    f->regs_state = TESTS_PCIIO_REGS_OK;
+    f->bar0_base = tests_pciio_bar_base(good.bar0, 0);
+    f->cap = 0x004008200107FFFFull;
+    f->vs = 0x00010400u;
+    f->cc = good.cc;
+    f->csts = good.csts;
+    f->aqa = 0x001F001Fu;
+    f->asq = 0x00000001F6A00000ull;
+    f->acq = 0x00000001F6A01000ull;
+    w->pciio.n_nvme++;
+    w->ctx.pciio = &w->pciio;
 }
 
 void pcie_world(world *w, const pcie_cfg *p, unsigned start_bus)
@@ -699,6 +738,7 @@ void pcie_world(world *w, const pcie_cfg *p, unsigned start_bus)
     t_seal(&t);
     w_table(w, 1, "MCFG", &t);
     pcie_regs(&w->dm, p);
+    pcie_record(w);
 }
 
 void test_x_pcie(void)
@@ -713,20 +753,24 @@ void test_x_pcie(void)
     p = good_pcie();
     pcie_world(w, &p, 0);
     tests_run_pcie(&w->ctx, &r);
-    CHECK_EQ(r.verdict, TV_INFO);
+    CHECK_EQ(r.verdict, TV_PASS);
     CHECK_EQ(r.overflow, 0);
     CHECK_EQ(stray_reads(&w->dm, wins, 2), 0);
     CHECK_EQ(w->dm.unlisted, 0);
     CHECK(x_rows_valid(&r));
     CHECK(read_at(&w->dm, NVME_BAR + 0x14)); /* CC and CSTS are read ... */
     CHECK(read_at(&w->dm, NVME_BAR + 0x1C));
+    CHECK(read_at(&w->dm, NVME_BAR + 0x24)); /* ... with AQA, ASQ and ACQ ... */
+    CHECK(read_at(&w->dm, NVME_BAR + 0x28));
+    CHECK(read_at(&w->dm, NVME_BAR + 0x34));
     CHECK(!read_at(&w->dm, NVME_BAR + 0x18)); /* ... and nothing else of the controller */
-    CHECK(!read_at(&w->dm, NVME_BAR + 0x24));
+    CHECK(!read_at(&w->dm, NVME_BAR + 0x20));
+    CHECK(!read_at(&w->dm, NVME_BAR + 0x38));
     CHECK(!read_at(&w->dm, NVME_BAR + 0x1000));
     CHECK(!read_at(&w->dm, ecam_at(0, 1, 0))); /* a root port: device 1 of the root bus is not read */
     cap_row = 0;
     for (unsigned i = 0; i < r.nrows; i++)
-        cap_row |= strstr(r.rows[i], "NVME CAP=") != NULL;
+        cap_row |= strstr(r.rows[i], "CAP PRE=004008200107FFFF") != NULL;
     CHECK(cap_row);
     {
         int link = 0;
@@ -786,30 +830,41 @@ void test_x_pcie(void)
     CHECK_EQ(r.verdict, TV_UNKNOWN);
     w_free(w);
 
-    /* An ECAM window that does not start at bus 0 is not read at all. */
+    /* An ECAM window that does not start at bus 0 is not read at all, and says why. */
     pcie_world(w, &p, 1);
     tests_run_pcie(&w->ctx, &r);
     CHECK_EQ(w->dm.nlog, 0);
-    CHECK_EQ(r.verdict, TV_UNKNOWN);
+    CHECK_EQ(r.verdict, TV_NOT_RUN);
+    CHECK(has_row(&r, "NVME0 SKIP: MCFG START BUS NOT 0"));
     w_free(w);
-    /* No MCFG. */
+    /* No MCFG, with and without the firmware's record of an NVMe function. */
     w_init(w);
     tests_run_pcie(&w->ctx, &r);
     CHECK_EQ(w->dm.nlog, 0);
-    CHECK_EQ(r.verdict, TV_UNKNOWN);
+    CHECK_EQ(r.verdict, TV_NOT_RUN);
+    CHECK(has_row(&r, "NO FIRMWARE NVME: NOTHING TOUCHED"));
+    pcie_record(w);
+    tests_run_pcie(&w->ctx, &r);
+    CHECK_EQ(w->dm.nlog, 0);
+    CHECK_EQ(r.verdict, TV_NOT_RUN);
+    CHECK(has_row(&r, "NO USABLE MCFG: NOTHING TOUCHED"));
     w_free(w);
 
     /* A generic host bridge (a type 0 device at 00:00.0): other root-bus devices
-     * are read too, nothing beyond device 7, nothing outside the ECAM window. */
+     * are read too, nothing beyond device 7, nothing outside the ECAM window. No bridge, so no
+     * endpoint behind one: the firmware's NVMe was not found at EL2. */
     p = good_pcie();
     pcie_world(w, &p, 0);
     dm_set(&w->dm, ecam_at(0, 0, 0x0C), 0); /* header type 0 */
     dm_set(&w->dm, ecam_at(0, 0, 0x08), 0x06000000);
-    dm_set(&w->dm, ecam_at(0, 3, 0x00), 0xFFFFFFFF);
+    for (unsigned d = 1; d < 8; d++)
+        dm_set(&w->dm, ecam_at(0, d, 0x00), 0xFFFFFFFF); /* nothing else on the root bus */
     tests_run_pcie(&w->ctx, &r);
     CHECK(read_at(&w->dm, ecam_at(0, 3, 0)));
     CHECK(!read_at(&w->dm, ecam_at(0, 8, 0)));
     CHECK_EQ(stray_reads(&w->dm, wins, 2), 0);
+    CHECK_EQ(r.verdict, TV_FAIL);
+    CHECK(has_row(&r, "WHY: NO ENDPOINT AT EL2"));
     w_free(w);
     free(w);
 }

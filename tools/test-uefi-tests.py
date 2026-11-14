@@ -40,6 +40,22 @@ structures, T02's REGIME row):
     XV2QemuTests         the model image under QEMU with EDK2: the console order of phase A, T03's row,
                          the REGIME row, the redistributor layout of the QEMU machine
 
+and, for the third version (probes/uefi/tests/test/suite_x_v3.py: T06 reads an ECAM window only for a
+root complex in which the firmware's own PCI I/O showed an NVMe, and photographs the page and waits
+before the first read of a window and of the controller):
+
+    XV3SourceTests       the source audit's pin on what pciio.c may do through the firmware's PCI I/O
+                         protocol, the one call site and one named constant of the wait, and T06's
+                         window policy, against defective sources
+    XV3PciioTests        pciio.txt against an independent decoder of the raw dwords it was made from
+    XV3MutantTests       seeded bugs in the collector, T06's policy, verdict and photograph, and the
+                         hook, which the native C tests must reject
+    XV3BuildTests        the image names the stager takes, the defines of the machine images, the
+                         photograph text in the bytes
+    XV3QemuTests         the model image under QEMU with EDK2: T06 with EDK2's PCI I/O and the NVMe
+                         of the machine, pciio.txt against the page, the photograph footers and their
+                         eight seconds, and a machine with no NVMe
+
 It reuses the probe's test kit (probes/uefi/test/uefi_testkit.py) with its own
 work directory, build/uefi/tests-work.
 
@@ -81,8 +97,9 @@ kit.WORK = ROOT / "build" / "uefi" / "tests-work"
 import suite_x  # noqa: E402
 import suite_x_ebs  # noqa: E402
 import suite_x_v2  # noqa: E402
+import suite_x_v3  # noqa: E402
 
-SUITE_MODULES = (suite_x, suite_x_ebs, suite_x_v2)
+SUITE_MODULES = (suite_x, suite_x_ebs, suite_x_v2, suite_x_v3)
 
 
 def iter_tests(suite):

@@ -25,13 +25,15 @@
  *       probes/uefi/tests/test/test_x_report.c probes/uefi/tests/test/test_x_hook.c \
  *       probes/uefi/tests/test/test_x_ebs.c \
  *       probes/uefi/tests/test/test_x_v2.c \
+ *       probes/uefi/tests/test/test_x_pciio.c \
+ *       probes/uefi/tests/test/test_x_t06.c \
  *       probes/uefi/tests/tests_types.c \
  *       probes/uefi/tests/nv2rec.c probes/uefi/tests/regs.c probes/uefi/tests/decode.c \
  *       probes/uefi/tests/nv2.c probes/uefi/tests/sysstate.c probes/uefi/tests/guard.c \
  *       probes/uefi/tests/acpix.c probes/uefi/tests/env.c probes/uefi/tests/t_misc.c \
  *       probes/uefi/tests/t_gic.c probes/uefi/tests/t_pcie.c probes/uefi/tests/t_smmu.c \
  *       probes/uefi/tests/report_x.c probes/uefi/tests/stick.c probes/uefi/tests/desc_none.c \
- *       probes/uefi/tests/ebs_ranges.c \
+ *       probes/uefi/tests/ebs_ranges.c probes/uefi/tests/pciio.c \
  *       probes/uefi/logic.c probes/uefi/acpi.c probes/uefi/fbtext.c probes/uefi/font6x8.c \
  *       probes/uefi/report.c probes/uefi/sysreg.c \
  *       -o build/test-uefi-tests-logic && build/test-uefi-tests-logic
@@ -97,6 +99,8 @@ int main(int argc, char **argv)
         return x_emit_records();
     if (argc > 1 && strcmp(argv[1], "--ebs-cases") == 0)
         return x_ebs_cases();
+    if (argc > 1 && strcmp(argv[1], "--emit-pciio") == 0)
+        return x_emit_pciio();
 
     printf("sanitizers: %s\n", BUILT_WITH_ASAN ? "AddressSanitizer + UndefinedBehaviorSanitizer"
                                               : "none (plain build)");
@@ -134,6 +138,10 @@ int main(int argc, char **argv)
 #ifdef X_SLBOUNCE
     test_x_ebs_slbounce();
 #endif
+    test_x_pciio();
+    test_x_t06();
+    test_x_hook_pciio();
+    test_x_hook_photograph();
     section_done();
 
     printf("%s: %u checks, %u failures\n", g_failures ? "FAIL" : "PASS", g_checks, g_failures);

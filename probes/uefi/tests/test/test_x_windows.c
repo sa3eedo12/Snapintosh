@@ -454,13 +454,14 @@ static void windows_pcie(world *w)
         w_init(w);
         t = mcfg_of(bad_ecam[i].base, 0, bad_ecam[i].end_bus);
         w_table(w, 1, "MCFG", &t);
+        pcie_record(w); /* the firmware's NVMe is in segment 0: the entry is the one to read */
         dm_set(&w->dm, bad_ecam[i].base + 0x00, 0x01201234);
         dm_set(&w->dm, bad_ecam[i].base + 0x08, 0x06040001);
         tests_run_pcie(&w->ctx, &r);
         CHECK_EQ(r.verdict, TV_UNKNOWN);
         CHECK_EQ(w->dm.nlog, 0);
         CHECK(has_row(&r, bad_ecam[i].row));
-        CHECK(!has_row(&r, "NO NVME ENDPOINT FOUND")); /* nothing was looked at */
+        CHECK(!has_row(&r, "MATCHES FIRMWARE VIEW")); /* nothing was looked at, so nothing compared */
         CHECK(x_rows_valid(&r));
         w_free(w);
     }
@@ -494,7 +495,7 @@ static void windows_pcie(world *w)
     CHECK(has_row(&r, "NVME BAR0 REFUSED: NOT MMIO IN MAP"));
     w_map(w, 11, NVME_BAR, 1);
     tests_run_pcie(&w->ctx, &r);
-    CHECK_EQ(r.verdict, TV_INFO);
+    CHECK_EQ(r.verdict, TV_PASS);
     CHECK(read_at(&w->dm, NVME_BAR + 0x14));
     CHECK(has_row(&r, "MAP STRICT MMIO=2 REFUSED=0"));
     w_free(w);
@@ -502,7 +503,7 @@ static void windows_pcie(world *w)
     /* The default policy says how many windows the map did not describe. */
     pcie_world(w, &p, 0);
     tests_run_pcie(&w->ctx, &r);
-    CHECK_EQ(r.verdict, TV_INFO);
+    CHECK_EQ(r.verdict, TV_PASS);
     CHECK(has_row(&r, "MAP MMIO=0 UNLISTED=2 REFUSED=0"));
     CHECK(x_rows_valid(&r));
     w_free(w);
