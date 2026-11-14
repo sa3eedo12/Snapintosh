@@ -565,8 +565,9 @@ autorun paragraph of `SP11\README.TXT` and lists all of it in the manifest. It
 refuses a base tree that is not `COMPLETE`, a missing or mismatching source, and
 anything outside a short table: the slbounce builds `SLBOUNCE.EFI`,
 `SLBOUNCE-DEVHE.EFI`, `SLBOUNCE-DEVHE-MARK.EFI` and `SLBOUNCE-DRYRUN.EFI`, and the
-applications `Q1N1.EFI` (no argument, or exactly `--el2`), `Q1N1-STK.EFI` (exactly
-`--el2`, see below), `TESTS.EFI`, `TESTS-DECL.EFI` and `PROBE.EFI` (no argument).
+applications `Q1N1.EFI` (no argument, or exactly `--el2`), `Q1N1-STK.EFI` and
+`Q1N1-PAYLOAD.EFI` (each exactly `--el2`, see below), `TESTS.EFI`, `TESTS-DECL.EFI` and
+`PROBE.EFI` (no argument).
 `--boot`, `--uart-proxy`, `--uart`, `--fault-test` and `SLBOUNCE-OLD-NOSWEEP.EFI` are
 refused by name, and the script contains no command the generator does not write.
 `verify` accepts the one `startup.nsh` that the plan in `PLAN.TXT` generates and still
@@ -590,6 +591,53 @@ the pinned Shell in QEMU like the others (the `survey` scenario of
 `tools/test-sp11-autorun-qemu.py`, EXPERIMENTAL). A built survey image passed the
 tool's image checks (arm64, EFI application) when staged and verified, but it has not
 been booted: hardware NOT RUN.
+
+`Q1N1-PAYLOAD.EFI` is the third q1n1 image, the stick payload runner (`docs/SP11-PAYLOAD.md`
+in the q1n1 fork). It runs as `Q1N1-PAYLOAD.EFI --el2` after the same `load`, and at run time
+it reads `\SP11\PAYLOAD.MAN` from the volume it started from, loads each file the manifest
+lists, checks their sizes and SHA-256 and calls file 0 at EL2. The manifest and the files are
+data that the application reads, not images the script runs, so the script never names them
+and `--file` cannot stage them: `--data NAME PATH SHA256`, repeated once per file, does, and
+only for a plan with a step that runs the runner. The q1n1 fork's
+`python3 tools/sp11_payload_manifest.py --out-dir <directory under build/> <state.bin> [data ...]`
+writes the manifest and the capitalised 8.3 copies, then:
+
+```sh
+python3 tools/stage-sp11-boot-media.py autorun --dest <staged-directory> --name payload-a \
+    --file SLBOUNCE-DEVHE-MARK.EFI <slbounce-build> <sha256> --file Q1N1-PAYLOAD.EFI <q1n1-payload.efi> <sha256> \
+    --data PAYLOAD.MAN <directory>/SP11/PAYLOAD.MAN <sha256> --data STATE.BIN <directory>/SP11/STATE.BIN <sha256> \
+    --step "SLBOUNCE-DEVHE-MARK.EFI Q1N1-PAYLOAD.EFI --el2"
+```
+
+Checked when the tree is staged, because a boot is expensive; a plan that fails any of it is
+refused before anything is written, and the tree is left as it was:
+
+- the runner takes exactly `--el2`: no argument, every banned argument and anything else is refused;
+- `--data` only with a runner step; `PAYLOAD.MAN` among the data files, and at most five others;
+- each name is capitals and 8.3 (`[A-Z0-9_-]{1,8}.[A-Z0-9_-]{1,3}`) and no name of a step file, of the
+  table, of the tool or of the base tree (`PLAN.TXT`, `README.TXT`, a `DONE<k>.TXT` marker, ...);
+- each source is a plain file of 1 byte to 256 MiB that hashes to the SHA-256 given;
+- the manifest, which the tool parses itself and does not take from the q1n1 repository: the
+  `Q1N1PLD1` magic, version 1, entry size 296, 1 to 5 entries, the exact length, every path
+  `\SP11\NAME` in canonical printable ASCII with an 8.3 name and never the manifest itself,
+  no duplicate in any letter case, every size 1 byte to 256 MiB;
+- the manifest's entries are exactly the staged data files other than itself: each names one,
+  with the staged size and SHA-256, and none is left out.
+
+`PLAN.TXT` records the data files (name, size, SHA-256) in a data section. `verify` re-hashes
+them and parses the manifest again, so a changed file, or a manifest that no longer matches the
+files, is a FAIL even when the stick tree's manifest was regenerated to agree. `--remove` deletes
+the data files with the rest; `--clear` deletes only the markers. The tool stages what you hashed
+and does not look inside the runner or the payload. The runner's name is not 8.3, so the stick
+holds it as a long name entry, like `SLBOUNCE-DEVHE-MARK.EFI`; the data files are 8.3 by rule.
+
+Status. Hardware: NOT RUN. QEMU: OBSERVED with a stand-in image named `Q1N1-PAYLOAD.EFI` and
+manifest and payload files staged by this command (the `payload` and `payload-ls` scenarios of
+`tools/test-sp11-autorun-qemu.py`, EXPERIMENTAL): under the pinned Shell the script loads the
+slbounce stand-in and runs `SP11\Q1N1-PAYLOAD.EFI --el2` once per boot, and the Shell lists the data
+files on the volume; the stand-in does not open them, so that the real runner reads them is
+not shown here. A real runner image, and a manifest written by the q1n1 fork's tool, were staged and
+verified on the host (`tools/test-sp11-autorun-payload-tree.py` with `Q1N1_DIR`), not booted.
 
 A boot with an autorun stick:
 

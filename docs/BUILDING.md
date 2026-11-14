@@ -267,7 +267,9 @@ python3 tools/test-sp11-boot-media.py           # boot-media staging; SP11_SHELL
 python3 tools/test-sp11-boot-media-hardening.py # the stager: destination guard, pins file, validated bytes
 python3 tools/test-sp11-autorun.py              # the opt-in autorun script generator: golden text, bans, line checker, control-flow model
 python3 tools/test-sp11-autorun-tree.py         # the stager's autorun subcommand: default path unchanged, verify, clear, remove, refusals; SP11_SLBOUNCE_EFI with SP11_Q1N1_EFI (or SP11_Q1N1_STK_EFI for the survey image) enable the real-image tests
-python3 tools/test-sp11-autorun-mutants.py      # seeds banned arguments and other bugs into the generator and stager; both suites must fail
+python3 tools/test-sp11-autorun-payload.py      # the payload runner in autorun: golden script and PLAN.TXT, the manifest parser (manifests written with struct.pack), the data rules
+python3 tools/test-sp11-autorun-payload-tree.py # `autorun --data` on staged trees: stage, verify a tampered tree, clear, remove, refusals; Q1N1_DIR (a q1n1 checkout) enables the interop test with its manifest tool, SP11_Q1N1_PAYLOAD_EFI and SP11_PAYLOAD_STATE_BIN (files inside this tree) the real-image test
+python3 tools/test-sp11-autorun-mutants.py      # seeds banned arguments, manifest and data bugs into the generator and stager; the four host suites must fail for each
 python3 tools/test-sp11-autorun-qemu.py         # the stick's startup.nsh under the pinned Shell in QEMU (clang, lld-link, qemu-system-aarch64, EDK2 and SP11_UEFI_SHELL; SKIPs without)
 python3 tools/test-uefi-probe.py                # EFI state probe: build, native checks, QEMU; UEFI_PROBE_SKIP_QEMU=1 skips the emulator
 python3 tools/test-uefi-tests.py                # X2 test image: build, native checks, instruction audit, QEMU; UEFI_PROBE_SKIP_QEMU=1 skips the emulator
@@ -459,7 +461,9 @@ without it, as digests taken before it existed show) adds a one-step-per-boot
 `EFI/BOOT/startup.nsh`, `SP11/PLAN.TXT` and the named experiment files to a
 directory that `stage` made and `verify` accepts, under the same destination
 refusals, so it never touches a mounted stick; `--clear` and `--remove` undo it
-in that directory. The plan rules, the allow-lists and the generator are in
+in that directory. `--data` stages the manifest and files that
+`Q1N1-PAYLOAD.EFI` reads, and the tool parses that manifest itself. The plan rules,
+the allow-lists and the generator are in
 `tools/sp11_autorun.py`; the operator procedure and the evidence labels are in
 [RUNNING.md](RUNNING.md#optional-run-planned-experiments-from-the-stick-autorun).
 `tools/test-sp11-autorun-qemu.py` needs `clang`, `lld-link`, `qemu-system-aarch64`,
