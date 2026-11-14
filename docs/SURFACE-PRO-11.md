@@ -1199,7 +1199,7 @@ the study's S1.5 is needed only if the stick cannot be plugged in directly: the 
 byte-identical to the commit before the survey (`tools/test-q1n1-sp11-entry.py` in the fork).
 
 **Stick payload runner (EXPERIMENTAL; hardware NOT RUN).** The fork's third image, `Q1N1-PAYLOAD.EFI` (gate
-`Q1N1_SP11_PAYLOAD`; `docs/SP11-PAYLOAD.md` there; commits `4a01c31` to `28f4a50` on `sa3eedo12-sp11-boot`), loads reviewed
+`Q1N1_SP11_PAYLOAD`; `docs/SP11-PAYLOAD.md` there; commits `4a01c31` to `2e50548` on `sa3eedo12-sp11-boot`), loads reviewed
 EL2 test code from the volume it started from before ExitBootServices, checks each file against a manifest, declares the
 pages to slbounce's scoped sweep, and after the bounce hashes the payload again and calls it at EL2 through a small ABI
 (print, hex, a guarded 32-bit load, the counter; deliberately no store). The next measurements (secondary CPUs through PSCI,
@@ -1212,11 +1212,22 @@ call; the chain stops at one that no longer verifies or that overwrote its stack
 by the last line. The first payload, `state`, only executes `MRS` (the ID registers and the EL2 translation state). The
 second, `psci`, asks the firmware's PSCI implementation by SMC (the FADT says PSCI_COMPLIANT=1 and PSCI_USE_HVC=0; the
 conduit is SMC) which functions exist and which of the 12 cores it believes are on: five query function ids and nothing
-that changes the machine (the ids of CPU_ON, CPU_OFF and SYSTEM_RESET appear only as the argument of PSCI_FEATURES). What
+that changes the machine (the ids of CPU_ON, CPU_OFF and SYSTEM_RESET appear only as the argument of PSCI_FEATURES). The
+third, `timer`, reads the generic timer and counter registers with `MRS` only and prints a line before each hazardous read
+(`CNTVOFF_EL2`, then `CNTPOFF_EL2` only where ECV is 2 or more), to isolate the access that stalled the X2 test image's T03
+five times: the last line on the panel names it. The fourth, `usbsmmu` (stage S0b of [SP11-STICK-LOG.md](SP11-STICK-LOG.md)),
+reads with loads only the USB controllers, the firmware's xHCI structures (the event ring tail that may show why the xHC
+reports HCE) and the SMMU context bank the stick's DMA goes through, and walks that bank's stage-1 tables in software for a
+few probe addresses, to decide whether an EL2 xHCI driver may give the xHC DMA memory of its own and where; every device read
+is inside three fixed windows and every RAM read is checked against the UEFI memory map. A bank it does not model (stage 2,
+nested, all zero) is UNKNOWN, not a stop. A payload that may stall or reset the board goes last in a chain, in order of
+increasing risk, so the unit's chain is `psci usbsmmu timer`: 83 of the 89 rows the page layout gives it. What
 stays UNKNOWN until the unit runs them:
 whether its firmware maps `EfiLoaderCode` executable (the runner allocates payloads there, as `q1n1.efi` itself runs from
-it), whether the sweep takes the extra declared ranges, whether the allocation is still mapped after the bounce, and
-whether the firmware answers an SMC from EL2 after the bounce at all.
+it), whether the sweep takes the extra declared ranges, whether the allocation is still mapped after the bounce, whether the
+firmware answers an SMC from EL2 after the bounce at all, whether reading an SMMU context bank hangs or resets the board
+(nothing recovers it; the last line, `NEXT CB<n>`, would name it), what that bank maps, and whether `CNTVOFF_EL2` and
+`CNTPOFF_EL2` read, fault or stall. Hardware NOT RUN for all four payloads.
 
 ### WS-C: monitor core on Oryon v1
 
