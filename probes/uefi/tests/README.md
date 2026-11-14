@@ -22,8 +22,9 @@ The default probe build is untouched: `probe_main.c` has additive hooks under
 only because they hash the source). The tests image is produced only by
 `tools/build-uefi-tests.py`. The `declared` variant adds one more block, under
 `PROBE_TESTS_IMAGE && TESTS_DECLARE_EBS_RANGES`; with that gate off, which is every other
-variant, `probe_main.c` and `hook.c` preprocess to exactly the text they had before the gate
-existed (see "The `declared` variant" below).
+variant, `probe_main.c` preprocesses to exactly the text it had before the gate existed and the gate
+is not named in `hook.c` (see "The `declared` variant" below). The second version of the image
+changed `hook.c` and the tests after that, on purpose (see "The second version" below).
 
 ## Layout
 
@@ -42,7 +43,7 @@ existed (see "The `declared` variant" below).
 | Entry hooks | `hook.c`, `tests_hook.h` |
 | Board descriptor cross-check | `desc.h`, `desc_none.c` (generated `desc_data.c` for hardware) |
 | Declared-ranges table and its check (`declared` variant only) | `ebs_ranges.[ch]` |
-| Host tests | `test/test_x_*.c`, `test/suite_x.py`, `test/suite_x_ebs.py`, `host/audit.py`, `host/nv2screen.py`, `../../../tools/test-uefi-tests-logic.c` |
+| Host tests | `test/test_x_*.c`, `test/suite_x.py`, `test/suite_x_ebs.py`, `test/suite_x_v2.py`, `host/audit.py`, `host/nv2screen.py`, `../../../tools/test-uefi-tests-logic.c` |
 
 ## Safety design
 
@@ -53,12 +54,14 @@ existed (see "The `declared` variant" below).
   call (OBSERVED, twice, on a Surface Pro 11 X1E80100: `tests_hook_pre_ebs`'s own
   CurrentEL check there decoded to EL1 both times, because the Secure-Launch SMC
   sequence runs inside slbounce's ExitBootServices hook) instead runs the same
-  four, in the same order, at the start of phase B (`tests_hook_post_ebs`),
-  screen only: `g_res[id].phase` (tracked per test) says which ones phase A
+  four in phase B (`tests_hook_post_ebs`), screen only. After the bounce one
+  list, `order_post` in `hook.c`, orders every test: T01, T02, T04, T09, T05, T07,
+  T08, T03, T06 (the reasons are the comment above it and "The second version"
+  below). `g_res[id].phase` (tracked per test) says which ones phase A
   already ran, so phase B runs exactly the rest and never repeats a test phase A
   did. The read-only device tests (T09, T05, T07, T06, T08) always run in phase
-  B, after any such fallback, and are always screen only: nothing may reach the
-  stick once ExitBootServices has returned.
+  B and are always screen only: nothing may reach the stick once
+  ExitBootServices has returned.
 * **No write path to a device.** `tests_bus` (`env.h`) has a guarded 32-bit read
   and a guarded system-register read, nothing else. A read is made only inside a
   window the test justified from ACPI (MADT, MCFG, IORT) or from a register it
@@ -189,6 +192,47 @@ not in the reviewed set. The default `sp11-el2-tests.efi` is unchanged: the gate
   compiles the fork's own validator and range rule against the builder (SKIP when unset).
 
 **Hardware status of this variant: NOT RUN.**
+
+## The second version (post-bounce order, T03, T05, T02's REGIME row)
+
+Made after run 5 on the unit (OBSERVED; [docs/SP11-X2-TESTS.md](../../../docs/SP11-X2-TESTS.md),
+"Run 5"): K1 NV2: GO again, then the page froze on T03's footer. It changes both variants, and
+the NV2 record, its 13 lines and its CRC rules not at all. **Hardware status: NOT RUN.**
+
+* **Order after the bounce.** `order_post` in `hook.c`: T01, T02, T04, T09, T05, T07, T08, T03,
+  T06; a test phase A already ran is skipped. Phase A's own order (T01, T03, T04, T02) is
+  untouched. The reasons are in the comment above the list. `test_x_hook_post_order` runs the
+  real `hook.c` over models and pins the sequence in both flows, T06 last, T03 second to last, and
+  a freeze at T03 leaving the earlier verdicts on the page. QEMU cannot show this order: nothing
+  is printed after ExitBootServices, so its console shows only phase A's order.
+* **T03 does not read `CNTPOFF_EL2`** unless the image is built with `TESTS_READ_CNTPOFF=1`
+  (`--cntpoff` of `tools/build-uefi-tests.py`, refused for every image for the machine, allowed
+  for the emulator builds so that the read stays tested). The row is `CNTPOFF_EL2 NOT READ
+  (ECV=n)`; the verdict comes from the rest as before. Why: with `ID_AA64MMFR0_EL1.ECV` of 2 that
+  read can be taken to EL3 if `SCR_EL3.ECVEn` is clear, and a monitor that does not handle it can
+  hang (INFERRED, not tested). The `.rdata` tag `SP11X2-CNTPOFF=` names the choice, and
+  `host/audit.py` pins that exactly one `TR_CNTPOFF_EL2` read exists, directly behind the
+  `read_cntpoff` test, and that only `hook.c` sets it. A deliberate, isolated test of that read
+  does not belong in this image.
+* **T05 per-CPU frames.** With no GICR discovery range (type 0x0E, kept or dropped) in the MADT and
+  a GICD of version 3 or later, the redistributor frames are the GICR Base Address (GICC offset 60)
+  of each GICC structure: one 0x40000-byte frame per CPU, in ACPI UID order, each admitted by the
+  window rules of every other window (the allow list holds 40 windows now) and read as before
+  (`GICR_PIDR2`, `GICR_TYPER`, `GICR_WAKER`), the Last bit not required. A refused frame shows
+  `GICC GICR<k> REFUSED: <reason>`; a frame that faults or is not a redistributor stops the reading
+  and the verdict is UNKNOWN. A MADT with a discovery range is read as before. `GICC BASE DIFF`
+  compares a GICC-given base with the address the frame carrying that CPU's affinity was found at:
+  in the discovery layout that address comes from the walk, in the per-CPU layout from the GICC
+  structures themselves, so there it counts frames found at an address other than their CPU's own.
+* **T02's last row** is screen only: `REGIME <16 hex> E2H=<0|1> TGE=<0|1>`, the `HCR_EL2` read
+  through `tests_nv2_ops.real_hcr` before `prepare()` built the stub's; `REGIME NOT READ` if it
+  could not be read. A test builds records under different entry values and finds the same bytes.
+* **Tests.** `test/suite_x_v2.py` (source pins, the `--cntpoff` rules and the images' tags, 30 seeded
+  mutants of the four changes that the native tests must reject, and QEMU runs) and the native
+  sections `nv2 regime`, `t03 cntpoff`, `t05 gicc layout` and `hook: post-bounce order` of
+  `test/test_x_v2.c`, `test_x_nv2.c` and `test_x_hook.c`; the synthetic MADTs have the shape the unit's
+  has (twelve GICC structures with GICR bases, a GICD of version 4, one GIC ITS frame, no type 0x0E)
+  and the older layout.
 
 ## Public facts used
 
