@@ -1183,17 +1183,24 @@ a device behind a hub, so the study's S1.5 or the survey's firmware-slot walk is
 byte-identical to the commit before the survey (`tools/test-q1n1-sp11-entry.py` in the fork).
 
 **Stick payload runner (EXPERIMENTAL; hardware NOT RUN).** The fork's third image, `Q1N1-PAYLOAD.EFI` (gate
-`Q1N1_SP11_PAYLOAD`; `docs/SP11-PAYLOAD.md` there; commits `4a01c31` and `58fca84` on `sa3eedo12-sp11-boot`), loads reviewed
+`Q1N1_SP11_PAYLOAD`; `docs/SP11-PAYLOAD.md` there; commits `4a01c31` to `28f4a50` on `sa3eedo12-sp11-boot`), loads reviewed
 EL2 test code from the volume it started from before ExitBootServices, checks each file against a manifest, declares the
 pages to slbounce's scoped sweep, and after the bounce hashes the payload again and calls it at EL2 through a small ABI
 (print, hex, a guarded 32-bit load, the counter; deliberately no store). The next measurements (secondary CPUs through PSCI,
 the monitor's first pieces) then need a new file on the stick and not a new q1n1, and no host link. The runner opens one
 volume (the image's own), connects no controller, writes nothing, and every refusal returns to the Shell before any
 bounce. `tools/stage-sp11-boot-media.py autorun --data` stages the manifest and the files it lists and refuses a plan
-whose manifest and files disagree, because a boot is expensive ([RUNNING.md](RUNNING.md)). The first payload, `state`,
-only executes `MRS` (the ID registers and the EL2 translation state). What stays UNKNOWN until the unit runs it: whether
-its firmware maps `EfiLoaderCode` executable (the runner allocates the payload there, as `q1n1.efi` itself runs from it),
-whether the sweep takes the extra declared ranges, and whether the allocation is still mapped after the bounce.
+whose manifest and files disagree, because a boot is expensive ([RUNNING.md](RUNNING.md)). A manifest may list several
+payloads (entries named `*.BIN`), which the runner calls in manifest order in one boot, each hashed again right before its
+call; the chain stops at one that no longer verifies or that overwrote its stack guard, and a payload that hangs is named
+by the last line. The first payload, `state`, only executes `MRS` (the ID registers and the EL2 translation state). The
+second, `psci`, asks the firmware's PSCI implementation by SMC (the FADT says PSCI_COMPLIANT=1 and PSCI_USE_HVC=0; the
+conduit is SMC) which functions exist and which of the 12 cores it believes are on: five query function ids and nothing
+that changes the machine (the ids of CPU_ON, CPU_OFF and SYSTEM_RESET appear only as the argument of PSCI_FEATURES). What
+stays UNKNOWN until the unit runs them:
+whether its firmware maps `EfiLoaderCode` executable (the runner allocates payloads there, as `q1n1.efi` itself runs from
+it), whether the sweep takes the extra declared ranges, whether the allocation is still mapped after the bounce, and
+whether the firmware answers an SMC from EL2 after the bounce at all.
 
 ### WS-C: monitor core on Oryon v1
 
