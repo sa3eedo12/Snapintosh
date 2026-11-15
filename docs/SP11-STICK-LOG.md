@@ -883,7 +883,8 @@ stick through the firmware, before ExitBootServices, as every run of it does).
 
 **The `cpuon` lines, decoded (boot 7 and step 3 of the restart probe, so OBSERVED twice on one unit: boot 7's lines after
 the first pause were read from a photograph taken at an angle, with some blur; step 3's whole 45-line panel was read from
-a video with every line legible, and it confirms or refines every value that boot 7 gave; Appendix E).**
+a video with every line legible, and it confirms or refines every value that boot 7 gave; step 2's mid-chain
+photograph, crisp, shows phase 1 a third time; Appendix E).**
 
 | # | Question | Panel line | What the unit showed | Label |
 | --- | --- | --- | --- | --- |
@@ -918,7 +919,9 @@ in microseconds, and differs between the boots; `~` marks a boot 7 value read fr
 
 The `VBAR_EL2` values are step 3's. In boot 7 the first start's and `0x10200`'s were an upper-half address ending in
 `2800` with some digits not legible, and the second start's an address inside that boot's payload image (`0xCEA8B...`).
-The vector table that the stub installs sits at the payload image base plus `0x800`: base `0xCE60A000` in step 3,
+Step 2's mid-chain photograph, taken at the second pause and crisp, shows phase 1 only: core `0x100`'s first start with
+`DT_US` 47, `SCTLR_EL2` `0x30000000`, `HCR_EL2` `0x1488000038` and `VBAR_EL2` `0xFFFFFFB460602800`. The vector table that
+the stub installs sits at the payload image base plus `0x800`: base `0xCE5E5000` in step 2, `0xCE60A000` in step 3 and
 `0xCEA8B000` in boot 7 (allocations of one boot each, not constants).
 
 - **`MIDR_EL1` differs by cluster (OBSERVED twice).** The boot CPU and cluster 0 read `0x512F0011`; every line that shows
@@ -931,19 +934,21 @@ The vector table that the stub installs sits at the payload image base plus `0x8
   Seven cores (`0x200`, `0x300`, `0x10000`, `0x10100`, `0x10300`, `0x20000`, `0x20100`) came up with `HCR_EL2`
   `0x80000000` (RW only, E2H clear) and `VBAR_EL2` 0. Core `0x100` at its first start and core `0x10200` came up with
   `HCR_EL2` `0x1488000038` (E2H, TGE, RW, TERR, AMO, IMO and FMO set: arithmetic on the printed value) and with the same
-  16-digit high-half `VBAR_EL2` (2 KiB aligned) within a boot. That value differs from boot to boot (boot 7's digits were
-  only partly legible, step 3's is `0xFFFFFF9CEA002800`, step 2's was not read). INFERRED, untested: an EL2 image at a high
-  virtual address, in the VHE regime (E2H and TGE set), ran on those two cores earlier; which software is not
-  established. The entry state of `0x20200` and `0x20300` is UNKNOWN: their register lines were dropped by the line
-  budget in both boots.
+  16-digit high-half `VBAR_EL2` (2 KiB aligned) within a boot (step 3: both cores). That value differs from boot to
+  boot (OBSERVED, two crisp values: step 2's mid-chain photograph read `0xFFFFFFB460602800` for core `0x100`'s first
+  start, step 3's `0xFFFFFF9CEA002800` there and on `0x10200`; boot 7's digits were only partly legible,
+  `0xFFFFFF...2800`, the same shape). INFERRED, untested, and only the reason: an EL2 image at a high virtual address,
+  in the VHE regime (E2H and TGE set), ran on those two cores earlier, at an address that differs per boot (randomised,
+  INFERRED); which software is not established. The entry state of `0x20200` and `0x20300` is UNKNOWN: their register
+  lines were dropped by the line budget in both boots.
 - **`HCR_EL2` and `VBAR_EL2` of core `0x100` survived its own `CPU_OFF` and `CPU_ON` (OBSERVED, step 3; boot 7's blurred
   photograph agrees).** On its second start the core read `HCR_EL2` `0x1488000038` and `VBAR_EL2` `0xCE60A800`, which is
   that boot's payload base plus `0x800`: the vector table that the stub itself installed on its first start, where the
   first start had read the high-half address. So this unit keeps or restores at least those two EL2 registers of a core
   across `CPU_OFF` and `CPU_ON`; whether it does for the others, or for another core, was not read.
-- **Start latency.** 45 us for the single phase 1 start in both boots. Of the ten printed phase 2 values, eight lie
-  between 263 and 456 us in boot 7 and between 288 and 476 us in step 3; `0x300` and `0x10300` took about 2 ms in both
-  (2001 and 1994 us in step 3).
+- **Start latency.** 45 us for the single phase 1 start in boot 7 and step 3, 47 us in step 2. Of the ten printed
+  phase 2 values, eight lie between 263 and 456 us in boot 7 and between 288 and 476 us in step 3; `0x300` and `0x10300`
+  took about 2 ms in both (2001 and 1994 us in step 3).
 
 **What this changes (the observations are in the tables above; the consequences below are INFERRED from them, and the
 plan is [SURFACE-PRO-11.md](SURFACE-PRO-11.md)).**
@@ -1022,7 +1027,7 @@ a video that runs through the restart gives its time directly, from the last `UP
 | Step | What ran | What was seen | Label |
 | --- | --- | --- | --- |
 | 1 | plain `Q1N1.EFI --el2` | The page was alive at `UPTIME 123 S` (photographed; the operator then power-cycled). A 30.5 s video, started at 21:38:28, covers its first seconds | OBSERVED |
-| 2 | `cpuon` | The operator reported that the board restarted by itself. All five photographs show `UPTIME 0 S` (the heartbeat does not update during the chain; the last was taken mid-chain, at `NEXT CPU_ON ALL AFTER 8 S`) and none shows the finished panel, so the report is of the screen going away, with no `UPTIME` | OBSERVED (operator report); the time UNKNOWN (INFERRED, weak: `UPTIME` about 41 S or earlier, below) |
+| 2 | `cpuon` | The operator reported that the board restarted by itself. All five photographs show `UPTIME 0 S` (the heartbeat does not update during the chain; the last was taken mid-chain, at `NEXT CPU_ON ALL AFTER 8 S`, and is crisp: base `0XCE5E5000`, phase 1 `DT_US=47`, `VBAR_EL2=0XFFFFFFB460602800`; Appendix E) and none shows the finished panel, so the report is of the screen going away, with no `UPTIME` | OBSERVED (operator report); the time UNKNOWN (INFERRED, weak: `UPTIME` about 41 S or earlier, below) |
 | 3 | `cpuon` | The operator reported that it stayed up, without a duration. A 42.5 s video, started at 21:42:47, shows the page from `UPTIME 0 S` through the chain (it returned at about `UPTIME 19 to 20 S`) and the finished panel at `UPTIME 32 S`, to the end of the video at about `UPTIME 36 S` (21:43:29.5), the finished page still on screen | OBSERVED alive through `UPTIME 36 S`; UNKNOWN beyond |
 
 **When did step 2 restart? (UNKNOWN; INFERRED, weak: `UPTIME` about 41 S or earlier).** The operator reported that it
@@ -1339,8 +1344,9 @@ characters per line: the runner's own notes, the payload's 40 lines (`LINES=40`)
 Boot 7's first block was read from two crisp photographs, taken at the two 8 s pauses (the last line of the block is
 the second pause); its later lines were read from a photograph taken at an angle, with some blur. Step 3 of the restart
 probe showed the whole panel again and it was read from a video with every line legible, so the values of the later
-lines below are crisp. The first block is boot 7's as transcribed; step 3's panel has the same lines, with the two
-differences given after it. EXPERIMENTAL in the q1n1 fork; OBSERVED twice on the unit.
+lines below are crisp. Step 2's mid-chain photograph, taken at the second pause, is crisp too and shows the panel up to
+the last line of the first block. The first block is boot 7's as transcribed; step 3's panel has the same lines, with the
+two differences given after it. EXPERIMENTAL in the q1n1 fork; OBSERVED twice on the unit.
 
 ```text
 PAYLOAD LOADED INDEX=0 BASE=0XCEA8B000 BYTES=18056 SHA=3B4BFDA7D59F923C TYPE=1
@@ -1361,9 +1367,13 @@ PAYLOAD CPUON P1 NORMAL
 PAYLOAD CPUON NEXT CPU_ON ALL AFTER 8 S
 ```
 
-The `...` in boot 7's `VBAR_EL2` line stands for six digits that were not legible (the value has 16 digits). In step 3 the
-`LOADED` line read `BASE=0XCE60A000` (that boot's allocation) and the same register line read
-`VBAR_EL2=0XFFFFFF9CEA002800`.
+The `...` in boot 7's `VBAR_EL2` line stands for six digits that were not legible (the value has 16 digits). In step 2's
+mid-chain photograph (crisp) the `LOADED` line read `BASE=0XCE5E5000`, the phase 1 report `DT_US=47`, the register line
+`SCTLR_EL2=0X30000000 HCR_EL2=0X1488000038 VBAR_EL2=0XFFFFFFB460602800` and the last line `NEXT CPU_ON ALL AFTER 8 S`. In
+step 3 the `LOADED` line read `BASE=0XCE60A000` and the same register line read `VBAR_EL2=0XFFFFFF9CEA002800`. The three
+bases (boot 7 `0XCEA8B000`, step 2 `0XCE5E5000`, step 3 `0XCE60A000`) are allocations of one boot each. The two crisp
+`VBAR_EL2` values differ (OBSERVED), and boot 7's partly legible one has the same shape; why they differ is not
+established (section 14).
 
 After that line phase 2 follows (the `P2` lines), in this form:
 
