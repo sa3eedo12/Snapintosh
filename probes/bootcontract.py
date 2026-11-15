@@ -432,6 +432,27 @@ def _descriptor_expectations(board):
                          cpu_count, board.affinity_mask, mpidrs, ecam)
 
 
+def _gicr_ranges_from_gicc(enabled, stride):
+    """Redistributor ranges for a MADT without a GICR structure. ACPI then gives each CPU interface its own redistributor
+    base in the GICC structure (OBSERVED in every dump of the one unit); every enabled CPU must carry one on a frame of its
+    own, and frames that follow each other make one range. A gap stays a gap for the caller's contiguity check."""
+    bases = []
+    for cpu in enabled:
+        if not cpu.gicr_base:
+            _refuse('gicr-mismatch', f'MADT has no GIC Redistributor structure and GICC UID {cpu.uid} carries no '
+                    'redistributor base, so descriptor gic.gicr cannot be confirmed')
+        bases.append(cpu.gicr_base)
+    ranges = []
+    for base in sorted(bases):
+        if ranges and base < ranges[-1].base + ranges[-1].length:
+            _refuse('gic-overlap', f'two GICC entries place a redistributor at or inside the frame at {base:#x}')
+        if ranges and base == ranges[-1].base + ranges[-1].length:
+            ranges[-1] = Gicr(ranges[-1].base, ranges[-1].length + stride)
+        else:
+            ranges.append(Gicr(base, stride))
+    return ranges
+
+
 def _cross_check(want, facts):
     notes = list(facts.notes)
 
@@ -475,7 +496,8 @@ def _cross_check(want, facts):
     stride = want.gicr_stride
     ranges = sorted(facts.gicr)
     if not ranges:
-        _refuse('gicr-mismatch', 'MADT has no GIC Redistributor structure, so descriptor gic.gicr cannot be confirmed')
+        ranges = _gicr_ranges_from_gicc(enabled, stride)
+        notes.append('MADT has no GIC Redistributor structure; the redistributor range was taken from the per-CPU GICC bases')
     for base, length in ranges:
         if not length or length % stride:
             _refuse('gicr-mismatch', f'MADT GICR range {base:#x}+{length:#x} is not a nonzero multiple of the '
