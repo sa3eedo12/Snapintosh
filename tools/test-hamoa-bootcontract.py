@@ -605,12 +605,20 @@ class TableRefusals(Base):
 
     def test_known_madt_structures_have_exact_lengths(self):
         cases = (('gicc', I_CPU0, gicc(0, MPIDRS[0]), (75, 77, 79, 81, 83, 4)),
-                 ('gicd', I_GICD, gicd(GICD_BASE), (23, 25, 4)), ('gicr', I_GICR, gicr(GICR_BASE, GICR_SIZE), (15, 17, 4)),
+                 ('gicd', I_GICD, gicd(GICD_BASE), (23, 26, 4)), ('gicr', I_GICR, gicr(GICR_BASE, GICR_SIZE), (15, 17, 4)),
                  ('its', I_ITS, its(ITS_BASE), (19, 21, 4)))
         for label, index, entry, sizes in cases:
             for size in sizes:
                 with self.subTest(label=label, size=size):
                     self.refused('table-structure', good(swap(baseline_entries(), index, resized(entry, size))))
+
+    def test_the_units_padded_gicd_structure_is_accepted_and_no_other_padding_is(self):
+        padded = resized(gicd(GICD_BASE), 25)      # OBSERVED in every dump of the one unit: extra byte zero
+        self.accepted(good(swap(baseline_entries(), I_GICD, padded)))
+        for pad in (1, 0x80, 0xff):
+            with self.subTest(pad=pad):
+                exc = self.refused('table-structure', good(swap(baseline_entries(), I_GICD, padded[:24] + bytes([pad]))))
+                self.assertIn('zero final byte', exc.reason)
 
     def test_the_madt_walk_has_a_bound(self):
         spare = 4096 - len(baseline_entries())

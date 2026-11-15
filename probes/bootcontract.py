@@ -149,6 +149,10 @@ MADT_MAX_ENTRIES = 4096
 MADT_GICC, MADT_GICD, MADT_GICR, MADT_ITS = 0xB, 0xC, 0xE, 0xF
 GICC_LENGTHS = (76, 80, 82)      # the ACPI 5.1/6.0, 6.3 and 6.5 revisions of the structure
 GICD_LENGTH, GICR_LENGTH, ITS_LENGTH = 24, 16, 20
+# OBSERVED in every dump of the one unit (RUN10 to RUN12, rev 5 MADT): the firmware writes its GICD structure one byte longer
+# than ACPI's 24, the extra byte zero, and the ITS structure starts right after it. Only that exact form is accepted besides
+# the standard one; any other length, or a nonzero extra byte, is refused as before.
+GICD_PADDED_LENGTH = 25
 MCFG_FIXED_BYTES = 44            # header and 8 reserved bytes
 MCFG_ALLOCATION_BYTES = 16
 MCFG_MAX_ALLOCATIONS = 16        # bounds the overlap search; a descriptor holds at most 4
@@ -304,8 +308,9 @@ def _madt_entries(tables):
             gicr_base, mpidr = struct.unpack_from('<QQ', entry, 60)
             gicc.append(Gicc(uid, cpu_interface, bool(flags & 1), gicr_base, mpidr))
         elif kind == MADT_GICD:
-            if size != GICD_LENGTH:
-                _refuse('table-structure', f'MADT GICD entry has length {size}, expected {GICD_LENGTH}')
+            if size not in (GICD_LENGTH, GICD_PADDED_LENGTH) or any(entry[GICD_LENGTH:]):
+                _refuse('table-structure', f'MADT GICD entry has length {size}, expected {GICD_LENGTH} (or {GICD_PADDED_LENGTH} '
+                        f'with a zero final byte)')
             gicd.append(Gicd(struct.unpack_from('<Q', entry, 8)[0], entry[20]))
         elif kind == MADT_GICR:
             if size != GICR_LENGTH:
