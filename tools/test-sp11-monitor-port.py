@@ -22,9 +22,11 @@ Conventions the document follows and this test enforces (stated here because the
   claims     statements that were wrong once and must not come back (the restart section): a restart time or UPTIME
              budget read off the page's `UPTIME 16 S`, which was only the first heartbeat after the cpuon chain; an
              UPTIME window derived from the DONE marker gap, which holds the operator's power cycle; a plan that "runs
-             unattended" across a self-restart, after which the firmware does not return to the stick. The restart
-             numbers, the order of the restart survey, the EL2 entry state of the secondaries, and the unit's DFR0 and
-             ISAR0 values (X1 probe page) with everything the document decodes from them are pinned.
+             unattended" across a self-restart, after which the firmware does not return to the stick; the read-only
+             runner flow "observed only to UPTIME 10 S", since the restart control kept it alive to UPTIME 224 S and
+             268 S. The restart numbers, the survey (WI 10, needed before SMP work only, so the M1 run does not wait
+             for it), the EL2 entry state of the secondaries, and the unit's DFR0 and ISAR0 values (X1 probe page)
+             with everything the document decodes from them are pinned.
 
 What always runs: size, ASCII and hygiene, the section list, "NOT RUN" for the port, the label rules, the table and claim
 checks, the citations into this repository, the work-plan graph, and arithmetic the document quotes (recomputed from the
@@ -56,13 +58,15 @@ PATH = r'((?:q1n1:)?[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_.+-]+)+\.[A-Za-z0-9]+)'
 CITE = re.compile(r'`' + PATH + r':(\d+)(?:-(\d+))?`')
 QUOTE = re.compile(r'`([^`\n]+)`\[' + PATH + r':(\d+)(?:-(\d+))?\]')
 BARE = re.compile(r'`' + PATH + r'`(?!\[)')
-SOURCE_OF_OBSERVED = re.compile(r'\bboots? \d|restart probe|X1 probe|\bsteps? [123]\b|operator report|\bT0\d|\bX2\b|\bdump\b|\bboot-\d',
-                                re.I)
+SOURCE_OF_OBSERVED = re.compile(r'\bboots? \d|restart (?:probe|control)|X1 probe|\bsteps? [123]\b|operator report|\bT0\d|\bX2\b'
+                                r'|\bdump\b|\bboot-\d', re.I)
 SEPARATOR = re.compile(r'^\|(\s*:?-{3,}:?\s*\|)+\s*$')
 # Statements that were wrong once. UPTIME is q1n1's page counter, started before the payload runner, so the cpuon chain
 # (two 8 s waits) is inside it: `UPTIME 16 S` on boot 7's last photograph was the first heartbeat after the chain, not
 # the time of the restart. The 90 s between the DONE2 and DONE3 markers holds the operator's power cycle, and a
-# self-restart ends the stick's plan: the firmware boots its own order, so no plan runs unattended.
+# self-restart ends the stick's plan: the firmware boots its own order, so no plan runs unattended. The restart control
+# (2026-11-16) photographed the read-only runner flow alive at UPTIME 224 S and 268 S: it is no longer observed only to
+# UPTIME 10 S (boot 5).
 REFUTED = (
     (r'(?:under|below|within|inside|at most|less than)\s+(?:that\s+|the\s+|about\s+)?(?:16|30)\s*s\b',
      'a 16 s or 30 s UPTIME budget has no basis'),
@@ -72,6 +76,8 @@ REFUTED = (
     (r'\b40 to 60 ?s\b', 'the DONE2 to DONE3 gap holds the operator\'s power cycle: no UPTIME window follows from it'),
     (r'unattended plan|one unattended|writes? the next marker|restarts? produces? the next marker',
      'after a self-restart the firmware does not return to the stick'),
+    (r'(?:unobserved|not observed|observed only|only observed|restarts?)\b[^.|]{0,60}\bUPTIME 10 S',
+     'the restart control observed the read-only runner flow alive at UPTIME 224 S and 268 S, not only to UPTIME 10 S'),
     (r'U5 DFR0|values not in my sources|(?:DFR0|ISAR0)[^.|]{0,40}T01 page only|ISAR0 \(RNDR\), FGT and AMU values',
      'DFR0, ISAR0, FGT and AMU are known since the X1 probe page; only the OS lock, MDCR_EL2, ICC_SRE_EL2, DFR1 and ISAR2 are not'),
 )
@@ -84,9 +90,10 @@ FIELDS = {'DebugVer': (DFR0, 0), 'BRPs': (DFR0, 12), 'WRPs': (DFR0, 20), 'RNDR':
 STATED = ('DebugVer', 'BRPs', 'RNDR', 'APA')      # fields the document must state; the others are checked when it does
 COUNT_WORDS = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8}
 # Phrases the restart section and the survey must keep (matched on whitespace-collapsed text).
-REQUIRED = ('first heartbeat after the chain', 'not at one fixed UPTIME', 'UPTIME 123 S', 'UPTIME 36 S', 'UPTIME 10 S',
-            '2 of 3 cpuon boots', 'creationdate', 'Volume-Down + Power', 'no plan runs unattended',
-            'M1 starts no secondary (x4 = 0)')
+REQUIRED = ('first heartbeat after the chain', 'not at one fixed UPTIME', 'UPTIME 123 S', 'UPTIME 36 S',
+            'UPTIME 224 S and 268 S', '2 of 3 cpuon boots', 'creationdate', 'Volume-Down + Power', 'no plan runs unattended',
+            'M1 starts no secondary (x4 = 0)', 'INFERRED, strongly', 'correlation over five boots', 'about 11 %',
+            'WI 10 is off the path')
 SECONDARY_STATE = ('0X200', '0X300', '0X10000', '0X10100', '0X10300', '0X20000', '0X20100', '0x80000000', '0X100',
                    '0X10200', '0x1488000038', 'survived its own CPU_OFF and CPU_ON', '0X20200 and 0X20300 UNKNOWN',
                    'must not assume VBAR_EL2 or HCR_EL2 are reset')
@@ -316,14 +323,24 @@ def check_claims(text):
     problems += [f'missing: {needle}' for needle in REQUIRED if needle not in flat]
     if len(re.findall(r'20 s of UPTIME', flat)) < 3:
         problems.append('the 20 s UPTIME budget must stand in sections 10, 14 and 15')
+    if len(re.findall(r'precaution of low weight', flat)) < 3:
+        problems.append('the 20 s UPTIME budget is a precaution of low weight in section 10, stop rule 4 and D5')
     if len(re.findall(r'UPTIME 17 S', flat)) < 2:
         problems.append('the earliest plausible restart, UPTIME about 17 S, must stand in sections 10 and 15')
-    row = plan_rows(text).get(10, {})
+    restart = squash(section(text, 10))
+    if 'UPTIME 224 S and 268 S' not in restart:
+        problems.append('section 10 must give the restart control: the read-only runner flow alive at UPTIME 224 S and 268 S')
+    rows = plan_rows(text)
+    row = rows.get(10, {})
     survey = (row.get('Work', '') + ' ' + row.get('Acceptance (can fail)', '')).strip()
-    if not re.search(r'operator in the loop.*\(a\).*psci-only.*150 s.*twice.*\(b\).*cpuon.*video.*\(c\).*P1 only.*left running'
-                     r'.*CPU_OFF omitted.*2 of 3', survey, re.S):
-        problems.append('work item 10 must list, in order: (a) the psci-only read-only chain held 150 s twice, (b) cpuon '
-                        'under continuous video, (c) variants; operator in the loop; cpuon at 2 of 3')
+    if not re.search(r'before SMP work.*M1 does not need.*operator in the loop.*DONE.*psci-only.*UPTIME 224 S and 268 S'
+                     r'.*\(a\).*cpuon page until it restarts.*\(b\).*ONE core only.*\(c\).*cores running.*2 of 3',
+                     survey, re.S):
+        problems.append('work item 10 must say: before SMP work only (M1 does not need it), operator in the loop; the '
+                        'psci-only control DONE at UPTIME 224 S and 268 S; left, in order: (a) film a cpuon page until '
+                        'it restarts, (b) one core only, (c) cores left running; cpuon at 2 of 3')
+    if re.search(r'\b10\b', rows.get(11, {}).get('Depends', '')):
+        problems.append('the M1 run (WI 11) must not wait for the restart survey (WI 10): M1 starts no secondary')
     secondaries = squash(section(text, 7))
     problems += [f'section 7 lacks: {needle}' for needle in SECONDARY_STATE if needle not in secondaries]
     return problems
@@ -424,6 +441,8 @@ class Claims(unittest.TestCase):
     def test_the_restart_probe_is_a_source_for_observed_rows(self):
         table = '| Item | Label |\n| --- | --- |\n| entry state | OBSERVED (restart probe, step 3) |\n'
         self.assertEqual(check_labels(table), [])
+        self.assertEqual(check_labels(table.replace('restart probe, step 3', 'restart control')), [])
+        self.assertTrue(check_labels(table.replace('restart probe, step 3', 'a restart')))
 
 
 class Arithmetic(unittest.TestCase):
@@ -536,6 +555,21 @@ class Arithmetic(unittest.TestCase):
                        'video through UPTIME 36 S'):
             self.assertIn(needle, flat)
 
+    def test_the_restart_control_numbers(self):
+        """Facts of the restart control (2026-11-16) from the coordinator's fact file, not from this repository: the
+        read-only chain was photographed alive at UPTIME 224 S and 268 S in two boots, while cpuon was followed by a restart
+        in 2 of 3 boots. Had the runner flow itself restarted 2 of 3 boots, both control boots would have survived with
+        probability (1/3)^2. Marker times are local; each page starts about 4 s after its marker."""
+        from datetime import datetime, timedelta
+        clock = lambda text: datetime.strptime(text, '%H:%M:%S')
+        self.assertEqual(round(100 * (1 - 2 / 3) ** 2), 11)
+        self.assertEqual(clock('00:16:06') + timedelta(seconds=224), clock('00:19:50'))   # step 1's photograph
+        self.assertLess(clock('00:19:50'), clock('00:20:42'))                           # before DONE2, the next stick boot
+        self.assertEqual(clock('00:20:46') + timedelta(seconds=268), clock('00:25:14'))   # step 2's photograph
+        flat = squash(TEXT)
+        for needle in ('UPTIME 224 S and 268 S', 'about 11 %', 'correlation over five boots', 'INFERRED, strongly'):
+            self.assertIn(needle, flat)
+
 
 class SeededBad(unittest.TestCase):
     """Deliberately damaged copies: the checkers must say no."""
@@ -621,15 +655,14 @@ class SeededBad(unittest.TestCase):
         self.assertTrue([p for p in check_claims(thirty) if p.startswith('refuted')])
 
     def test_an_unattended_plan_is_refused(self):
-        bad = self.damaged('operator in the loop, one boot per sample (a restart ends the run; every stick boot is started by hand):'
-                           ' (a) the read-only runner chain (psci-only manifest) held 150 s, twice, as the control;',
-                           'one unattended plan of four cpuon steps and one plain control step (each self-restart writes the next marker);')
+        bad = self.damaged('operator in the loop, one boot per sample.',
+                           'one unattended plan of four cpuon steps and one plain control step (each self-restart writes the next marker).')
         problems = check_claims(bad)
         self.assertTrue([p for p in problems if p.startswith('refuted')])
         self.assertTrue([p for p in problems if 'work item 10' in p])
 
     def test_a_reordered_survey_and_a_lost_entry_state_are_refused(self):
-        reordered = self.damaged('(c) variants', '(a) variants')
+        reordered = self.damaged('(c) a variant that leaves cores running', '(a) a variant that leaves cores running')
         self.assertTrue([p for p in check_claims(reordered) if 'work item 10' in p])
         assumed = self.damaged('must not assume VBAR_EL2 or HCR_EL2 are reset on a restarted core',
                                'may assume the EL2 state is reset on a restarted core')
@@ -655,6 +688,21 @@ class SeededBad(unittest.TestCase):
         self.assertTrue([p for p in check_id_registers(absent) if p.startswith('RNDR 0')])
         moved = self.damaged('0x000F01F010305719', '0x000F01F010304719')
         self.assertTrue([p for p in check_id_registers(moved) if 'ID_AA64DFR0_EL1' in p])
+
+    def test_the_read_only_runner_flow_observed_only_to_uptime_10_is_refused(self):
+        # the restart control photographed it alive at UPTIME 224 S and 268 S; boot 5's UPTIME 10 S is no longer its limit
+        bad = self.damaged('was photographed alive at UPTIME 224 S and 268 S in two boots, one crisp photograph each',
+                           'was observed only to UPTIME 10 S (boot 5)')
+        problems = check_claims(bad)
+        self.assertTrue([p for p in problems if p.startswith('refuted') and 'UPTIME 224 S and 268 S' in p])
+        self.assertTrue([p for p in problems if 'section 10 must give the restart control' in p])
+
+    def test_the_m1_run_waiting_for_the_restart_survey_or_a_budget_without_its_low_weight_is_refused(self):
+        waiting = self.damaged('| 11 | **M1 run** | 5, 8, 9 |', '| 11 | **M1 run** | 5, 8, 9, 10 |')
+        self.assertTrue([p for p in check_claims(waiting) if p.startswith('the M1 run (WI 11)')])
+        bound = self.damaged('as a precaution of low weight (earliest plausible restart, in a cpuon run,',
+                             'as a bound (earliest plausible restart, in a cpuon run,')
+        self.assertTrue([p for p in check_claims(bound) if 'precaution of low weight' in p])
 
     def test_the_unknowns_that_the_x1_probe_page_closed_stay_closed(self):
         reopened = self.damaged('U5 OS lock, MDCR_EL2, ICC_SRE_EL2, DFR1, ISAR2', 'U5 DFR0, OS lock')
