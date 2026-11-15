@@ -3,8 +3,9 @@
 **Design study with host-side groundwork. The writer (S1 to S6) is UNIMPLEMENTED. Hardware status: NOT RUN for the writer;
 the read-only survey S0 ran once on the unit (section 12), and its follow-up S0b, a payload, in two boots (section 13).
 Two later boots (6 and 7 of 2026-11-15, section 14) ran the third X2 test image and a payload that starts and stops the
-secondary cores, and a three-step restart probe the same evening (section 14.1) ran a plain q1n1 page and that payload
-twice more; none of them read or wrote the stick's USB controller at EL2.**
+secondary cores, a three-step restart probe the same evening (section 14.1) ran a plain q1n1 page and that payload
+twice more, and a two-step restart control the next night ran only a read-only payload through the same runner; none
+of them read or wrote the stick's USB controller at EL2.**
 Nothing of the writer ran on a Surface Pro 11. When the study
 was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as an opt-in, read-only survey in
 the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`) and has run
@@ -84,15 +85,17 @@ guarded log writer, and their tests (section 8).
     link up from reset (INFERRED; PHY and repeater bring-up UNIMPLEMENTED, M3 not measured). Context bank 3 is nested with
     stage 1 off, so the S0b walk is `UNSUPPORTED NESTED`: UNKNOWN, and SC2 is neither triggered nor cleared. A1 and A2 stay
     NOT granted.
-11. **Boots 6 and 7 and the restart probe did not touch the stick's controller (OBSERVED, one unit, one boot each;
-    section 14).** Boot 6 ran the third X2 image (T06 passed: the NVMe's PCIe root answers at EL2 and the firmware left
-    its controller running; the image wrote its dump through the firmware before ExitBootServices, as every run of it
-    does). Boot 7 ran a payload that started the eleven secondary cores with PSCI `CPU_ON` and stopped them with
-    `CPU_OFF`; the board restarted by itself afterwards (operator report; the time was not recorded and the cause is
-    UNKNOWN). A restart probe the same evening ran a plain q1n1 page (alive at `UPTIME 123 S`) and that payload twice
-    more: the board restarted by itself in one of those runs (operator report; no time recorded) and was filmed alive
-    to `UPTIME` about 36 S in the other (UNKNOWN beyond). The panel is still the only log channel, so whatever it
-    showed after the last photograph is lost. A1 and A2 stay NOT granted.
+11. **Boots 6 and 7, the restart probe and the restart control did not touch the stick's controller (OBSERVED, one
+    unit, one boot each; section 14).** Boot 6 ran the third X2 image (T06 passed: the NVMe's PCIe root answers at EL2
+    and the firmware left its controller running; the image wrote its dump through the firmware before ExitBootServices,
+    as every run of it does). Boot 7 ran a payload that started the eleven secondary cores with PSCI `CPU_ON` and
+    stopped them with `CPU_OFF`; the board restarted by itself afterwards (operator report; the time was not recorded
+    and the cause is UNKNOWN). A restart probe the same evening ran a plain q1n1 page (alive at `UPTIME 123 S`) and that
+    payload twice more: the board restarted by itself in one of those runs (operator report; no time recorded) and was
+    filmed alive to `UPTIME` about 36 S in the other (UNKNOWN beyond). A restart control the next night ran only the
+    read-only `psci` payload through the same runner, in two boots: both pages were photographed alive, at `UPTIME 224 S`
+    and `268 S`, and no restart was reported (the state after each photograph is unknown). The panel is still the only
+    log channel, so whatever it showed after the last photograph is lost. A1 and A2 stay NOT granted.
 
 ## 2. The problem and the requirements
 
@@ -848,14 +851,15 @@ same PCI-style node as S0's, `Pci(0x80,0x0)`, which makes `usb_1_ss0` likely, IN
 and `0x1460`; any DMA by the xHC; PHY, repeater and retimer state; whether a controller or port reset brings a link up at EL2; DRAM
 retention. Boot 4 gave no `usbsmmu` values at all.
 
-## 14. Result of boots 6 and 7 and of the restart probe on the unit (OBSERVED, one unit, one boot each)
+## 14. Result of boots 6 and 7, the restart probe and the restart control on the unit (OBSERVED, one unit, one boot each)
 
 **What ran.** On 2026-11-15 the autorun plan `morning-nvme-smp` ran two steps, one per boot, with nothing typed, both
 under the de-VHE slbounce build `SLBOUNCE-DEVHE-MARK.EFI` (SHA-256 prefix `4107c28c`). Ten photographs were taken: four
 of boot 6's page; for boot 7 two of the console before the bounce, one of q1n1's EL2 page and three of the panel. The
 stick was read again afterwards: `DONE1.TXT` and `DONE2.TXT` say `AUTORUN morning-nvme-smp STEP 1 STARTED` and `STEP 2
 STARTED`, which show that each step started and nothing more. Boot 7's console shows `Pci(0x80,0x0)/USB(0x1,0x0)`: one
-USB node, the direct connection of boots 3 to 5. A third plan, `restart-probe`, ran the same evening (section 14.1). A1
+USB node, the direct connection of boots 3 to 5. A third plan, `restart-probe`, ran the same evening and a fourth,
+`restart-control`, the next night (section 14.1). A1
 and A2 were not exercised by any of these steps. None read or wrote an xHC register or a stick sector at EL2, and
 `cpuon` issued PSCI `CPU_ON`, `CPU_OFF` and `AFFINITY_INFO` only (boot 6's image wrote its dump and `pciio.txt` to the
 stick through the firmware, before ExitBootServices, as every run of it does).
@@ -991,19 +995,22 @@ the page showed after that photograph is lost.
   reading the fork's source; it says nothing about what the firmware does).
 - Earlier, a plain q1n1 EL2 page stayed up for about 40 minutes with no restart (operator report, B1 attempt 4, the VHE
   state, an older build). In the de-VHE state a plain page was alive at `UPTIME 123 S` (step 1 of the restart probe,
-  14.1), and boot 5's page, after a chain of read-only payloads, was photographed at `UPTIME 3 S` and `UPTIME 10 S`
-  with no restart reported. Boot 6 also ended in a restart, which is the X2 image's designed reset (INFERRED from the
-  page's `RESET IN` countdown).
+  14.1). Boot 5's page, after a chain of read-only payloads, was photographed at `UPTIME 3 S` and `UPTIME 10 S`, and the
+  restart control's pages, with only the read-only `psci` payload, at `UPTIME 224 S` and `268 S` in two boots (14.1);
+  no restart was reported for any of them. Boot 6 also ended in a restart, which is the X2 image's designed reset
+  (INFERRED from the page's `RESET IN` countdown).
 - So the restart is new, and it coincides with the `cpuon` payload, the first that issued `CPU_ON` and `CPU_OFF`: it
   was reported after two of its three boots (boot 7 and step 2; the time of neither was recorded) and not observed in
-  the third (step 3, filmed alive through `UPTIME 36 S`; its state beyond that is UNKNOWN: 14.1). A delayed reaction
-  of a watchdog, or of another firmware agent, to the core power cycles is a hypothesis (INFERRED, untested); the
-  runner path alone is not excluded either. Nothing here establishes it.
+  the third (step 3, filmed alive through `UPTIME 36 S`; its state beyond that is UNKNOWN: 14.1). The read-only control
+  makes it INFERRED, strongly (evidence, not proof), that the runner flow alone is not what restarts the board, and the
+  restart is associated with the `cpuon` payload, that is with its `CPU_ON` and `CPU_OFF` of the secondary cores
+  (INFERRED: a correlation over five boots, not a cause). A delayed reaction of a watchdog, or of another firmware
+  agent, to the core power cycles is a hypothesis (INFERRED, untested). The cause is UNKNOWN.
 - What would separate them: the exact uptime at the restart (film a `cpuon` page until it restarts: the last `UPTIME`
-  in the video, with its `creationdate`, gives the time; 14.1); a chain of the read-only payloads only, held for
-  minutes (control); and cores left running instead of powered off.
+  in the video, with its `creationdate`, gives the time; 14.1); a `cpuon` variant that starts and stops only one core;
+  and a variant that leaves the cores running instead of powering them off. The read-only control has run (14.1).
 
-### 14.1 The restart probe (three steps, 2026-11-15; OBSERVED, one boot per step)
+### 14.1 The restart probe (three steps, 2026-11-15) and its control (two steps, 2026-11-16); OBSERVED, one boot per step
 
 **What ran.** The plan `restart-probe` ran three steps, one per boot, each preceded by the de-VHE slbounce build
 `SLBOUNCE-DEVHE-MARK.EFI`: step 1, `Q1N1.EFI --el2`, plain q1n1 (SHA-256 prefix `82b63938`), as the control for the page
@@ -1035,31 +1042,61 @@ did, and no time was recorded. No photograph shows the page after the chain: the
 `DONE2` is 90 s, plus or minus 2 s, and that gap holds three things: the time from step 2's marker to its restart; the
 operator noticing it and holding Power; and the operator's Volume-Down with Power, the firmware's boot, the Shell's
 countdown and the marker write of step 3. The last two took 45 s once, between step 1 and step 2 (from the photograph
-at `UPTIME 123 S`, taken at about 21:40:35, to `DONE2` at 21:41:20, the same actions; OBSERVED once). If the operator
-needed at least as long this time, step 2's restart came no later than about 45 s after `DONE2`, that is at about
-`UPTIME 41 S` or earlier (its page started about 3.5 s after the marker). It may have come much earlier, even before
-the chain ended: the page's `UPTIME` stays 0 S during the chain, which lasts about 20 s. Both the assumed pace and the
-one-sided bound make this weak. For boot 7 see section 14 (INFERRED about `UPTIME 17 to 25 S`; no number recorded).
+at `UPTIME 123 S`, taken at about 21:40:35, to `DONE2` at 21:41:20, the same actions; OBSERVED once), and 52 s between
+the two steps of the restart control (below). If the operator needed at least as long this time, step 2's restart came
+no later than about 45 s after `DONE2`, that is at about `UPTIME 41 S` or earlier (its page started about 3.5 s after
+the marker). It may have come much earlier, even before the chain ended: the page's `UPTIME` stays 0 S during the
+chain, which lasts about 20 s. Both the assumed pace and the one-sided bound make this weak. For boot 7 see section 14
+(INFERRED about `UPTIME 17 to 25 S`; no number recorded).
+
+**The restart control (2026-11-16; plan `restart-control`, two steps; OBSERVED, one boot per step).** It used the same
+runner (`Q1N1-PAYLOAD.EFI --el2`) and the same slbounce build (`SLBOUNCE-DEVHE-MARK.EFI`) as boot 7 and steps 2 and 3,
+but its manifest listed only `PSCI.BIN`, the read-only `psci` payload of boot 5 (4,285 bytes, SHA-256 prefix `d391a9c8`;
+the panel shows `SHA=D391A9C8CBEECD00`): it calls `PSCI_VERSION`, `PSCI_FEATURES`, `AFFINITY_INFO` and `SMCCC_VERSION`,
+and no `CPU_ON` and no `CPU_OFF`. The markers `DONE1.TXT` and `DONE2.TXT` (`AUTORUN restart-control STEP n STARTED`) read
+00:16:02 and 00:20:42 (local time, FAT resolution 2 s). The operator photographed each page once and powered off; two
+short videos (22.6 s from 00:16:00 and 12.6 s from 00:20:43, `creationdate` metadata) cover only the first seconds of
+each page. No restart was reported. A1 and A2 stay NOT granted; no device register or stick sector was written.
+
+| Control step | What ran | What was seen | Label |
+| --- | --- | --- | --- |
+| 1 | the runner, `psci` only | A crisp photograph shows the page at `UPTIME 224 S` (about 00:19:50 on the wall clock: the page started about 4 s after its marker), with the payload's 15 lines and `DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=0 FAULTS=0 REFUSED=0 LINES=15 DROPPED=0`; the answers are boot 5's (`PSCI_VERSION` `0x10001`, the eleven secondaries OFF) | OBSERVED once; alive at 224 S, the state afterwards unknown |
+| 2 | the same | A crisp photograph at `UPTIME 268 S` (about 00:25:14), with the same 15 lines | OBSERVED once; alive at 268 S, the state afterwards unknown |
+
+So the runner flow with a read-only payload kept the page up to `UPTIME 224 S` and `268 S` in two boots, far past the
+17 to 25 S and 41 S or earlier at which the `cpuon` restarts are estimated (INFERRED, weak), while `cpuon` was followed
+by a restart in two of three boots. INFERRED, strongly (evidence, not proof): the runner flow alone is not what restarts
+the board. If it did so in two boots of three, the chance that both read-only boots survived is about 11 %, that is
+(1/3) x (1/3), a rough figure that treats the boots as independent and takes the two in three from only three `cpuon`
+boots. INFERRED: the restart is associated with the `cpuon` payload, that is with its `CPU_ON` and `CPU_OFF` of the
+secondary cores, a correlation over five boots and not a cause; the `cpuon` payload also differs from `psci` in its
+two 8 s waits and in the code the secondaries run, so the association is with its whole sequence until a variant takes
+it apart. The cause is UNKNOWN and so are the restart times.
 
 **What is solid, and what is not.**
 
-- A plain q1n1 page was alive at `UPTIME 123 S` (step 1, the de-VHE state, one boot), past every restart estimate above:
-  in that boot the page itself did not restart.
+- A plain q1n1 page was alive at `UPTIME 123 S` (step 1 of the restart probe, the de-VHE state, one boot), past every
+  restart estimate above: in that boot the page itself did not restart.
+- The runner with only the read-only `psci` payload was photographed alive at `UPTIME 224 S` and `268 S` in two boots of
+  the restart control (OBSERVED once each; the state after each photograph is unknown, and the operator reported no
+  restart). So the read-only runner flow is no longer unobserved beyond `UPTIME 10 S` (boot 5).
 - A restart was reported after two of the three `cpuon` boots (boot 7 and step 2); the time of neither was recorded
   (UNKNOWN). Step 3 was OBSERVED alive through `UPTIME 36 S` (video; the operator's "stayed up" has no duration), and
   its state beyond that is UNKNOWN.
 - INFERRED, and weak: the restart is not at one fixed `UPTIME`. Step 3 was alive through 36 S, step 2's restart is
   estimated at 41 S or earlier and boot 7's at 17 to 25 S; one common time would have to fall between 36 and 41 S,
   which boot 7's estimate does not allow. Both estimates rest on the operator's wording and pace.
-- The runner flow with read-only payloads has no observation beyond `UPTIME 10 S` (boot 5), so the runner flow alone is
-  not excluded.
-- The cause is UNKNOWN.
+- INFERRED, strongly (evidence, not proof): the runner flow alone is not what restarts the board, because both
+  read-only boots were alive at 224 S and 268 S (the 11 % chance above).
+- INFERRED: the restart is associated with the `cpuon` payload, that is with its `CPU_ON` and `CPU_OFF` of the
+  secondary cores (a correlation over five boots: two restarts in three `cpuon` boots, none reported in two read-only
+  boots). The cause is UNKNOWN, and so are the restart times.
 
-**What would settle it next (NOT RUN).** Film a `cpuon` page from its start until it restarts, or for minutes if it does
-not, keeping the video's `creationdate`: the last `UPTIME` the video shows is the time of the restart. Do the same for a
-chain of read-only payloads only (the control for the runner flow) and for a `cpuon` variant that leaves the cores
-running instead of powering them off. Each is a boot of its own, started by the operator and needing the operator's
-decision like every boot; none writes to a device, and A1 and A2 stay NOT granted.
+**What would settle it next (NOT RUN).** The read-only control is done (above). Next: film a `cpuon` page from its start
+until it restarts, or for minutes if it does not, keeping the video's `creationdate`: the last `UPTIME` the video shows
+is the time of the restart. Run a `cpuon` variant that starts and stops only one core, and a variant that leaves the
+cores running instead of powering them off. Each is a boot of its own, started by the operator and needing the
+operator's decision like every boot; none writes to a device, and A1 and A2 stay NOT granted.
 
 ### 14.2 Logging, the stick, and what is not shown
 
@@ -1082,8 +1119,11 @@ window (INFERRED by elimination). `0x0A800000`, the window of `usb_1_ss1`, is no
 of them at EL2 in these boots.
 
 **What these runs do not show.** The cause of the restarts and their times (UNKNOWN for boot 7 and step 2; the
-estimates of 14.1 and section 14 are INFERRED and weak); whether step 3 restarted after `UPTIME 36 S`; what the panel
-showed after the last photograph of boot 7; repeatability beyond three `cpuon` boots on one unit; the arrival state of
+estimates of 14.1 and section 14 are INFERRED and weak); whether step 3 restarted after `UPTIME 36 S`; what the
+restart control's pages did after their photographs at `UPTIME 224 S` and `268 S` (the operator powered them off); which
+part of the `cpuon` sequence goes with the restarts (`CPU_ON`, the code the secondaries run, `CPU_OFF` or the 8 s
+waits); what the panel showed after the last photograph of boot 7; repeatability beyond three `cpuon` boots and two
+control boots on one unit; the arrival state of
 cores `0x20200` and `0x20300` (their lines were dropped from both panels); `TCR_EL2`, `TTBR0_EL2`, `MAIR_EL2` and
 `DCZID_EL0` on a secondary; anything about a secondary with the MMU on, interrupts or the guest; why the PCIe SMMU
 registers fault at EL2; why `MIDR_EL1` and the entry state differ between cores, or why the high-half `VBAR_EL2` differs
