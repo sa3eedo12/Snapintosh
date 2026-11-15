@@ -15,9 +15,12 @@ reproduced K1 GO under the reviewed slbounce and froze on T03 once more. The sec
 image that follows from it (the order of the tests, T03, T05, T02's REGIME row) ran once on the unit, in
 run 6 (below; `declared` variant, one unit, one boot): T03, T04, T05 and T09 PASS, T07 UNKNOWN, K1 NV2: GO
 again with `E2H` clear, and T06 never finished, because its read of an ECAM window did not return and the
-board reset itself. Items 9-13 are still NOT RUN, and so is the `hardware` variant of the second
-version. A third version, in which T06 reads only the NVMe's own PCIe root, exists
-([SP11-X2-V3.md](SP11-X2-V3.md)); it has not run on the unit. Evidence
+board reset itself. The third version, in which T06 reads only the NVMe's own PCIe root
+([SP11-X2-V3.md](SP11-X2-V3.md)), ran once on the unit, in run 7 (below; `declared` variant, one unit, one
+boot, 2026-11-15): T06 PASSED (OBSERVED once: the NVMe's root complex answered at EL2, its link is up at
+Gen4 x4, and the firmware left the controller enabled and ready with its own queues), T07 is UNKNOWN again,
+T01 to T05 and T09 read as in run 6, and K1 stays GO. Items 9-13 are still NOT RUN, and so are the
+`hardware` variants of the second and third versions. Evidence
 labels: VERIFIED (reproduced by a test here), OBSERVED (read on
 the machine that ran the image), INFERRED (follows from other results),
 EXPERIMENTAL (written, emulator-tested only), UNIMPLEMENTED, UNKNOWN. The image
@@ -82,7 +85,14 @@ does. Candidates, all INFERRED and none tested: the guarded-read machinery's exc
 interrupts left unmasked after the hook (q1n1 masks all of DAIF at entry; this hook's state is unrecorded); an access
 to a timer register that wedges the core, with the reset then a watchdog bite (T03 touches `CNTVOFF_EL2`, which
 Linux treats as broken on Oryon X1, E17); the no-sweep slbounce variant itself. q1n1's page reads `CNTFRQ_EL0` once and
-polls `CNTPCT_EL0` continuously at EL2 without trouble, so those two registers are not the cause.
+polls `CNTPCT_EL0` continuously at EL2 without trouble, so those two registers are not the cause. That 40-minute
+page was in the VHE state (no de-VHE gate); the earlier photographs of a q1n1 page in the de-VHE state show an uptime of
+at most 20 s (boot 2 of 2026-11-14), and a plain page of 2026-11-15 was photographed at `UPTIME 123 S` (restart-probe
+step 1, one boot). Also on 2026-11-15 the board restarted by itself after two of three boots of a q1n1 page that had just
+run a payload which started and stopped the eleven secondary cores (operator reports; the times were not recorded and the
+cause is UNKNOWN; the third boot was filmed alive through `UPTIME 36 S`: [SP11-STICK-LOG.md](SP11-STICK-LOG.md) sections
+14 and 14.1, which also explain why boot 7's last photograph's `UPTIME 16 S` is not a measure of how long the page stayed
+up).
 
 ## Run 4: K1 decided — GO
 
@@ -304,7 +314,7 @@ version is for. T06 reads the MCFG windows in table order, so the windows before
 (read or refused) when it stopped; which, and what they returned, is not known (their rows were never
 drawn). The third version of the image leaves segment 3's window alone: it reads only the root complex in
 which the firmware's own PCI I/O showed the NVMe, and holds the page for 8 s before each risky read
-([SP11-X2-V3.md](SP11-X2-V3.md); EXPERIMENTAL: host and QEMU tested, hardware NOT RUN).
+([SP11-X2-V3.md](SP11-X2-V3.md)); its first run on the unit is Run 7, below (T06 PASS).
 
 **T07: UNKNOWN again (OBSERVED).** The read of the SMMUv3 at `0x15400000` faulted. The fault was guarded and
 recoverable (the image went on) and T07 shows `NO STATE`. The IORT gives this one SMMUv3 to all eight PCIe
@@ -328,7 +338,7 @@ each:
 | 3 | `0x740000000` | 0-1 | where T06 stopped |
 | 4 | `0x7c000000` | 0-1 | equal to the DBI base of `pcie4`, the Wi-Fi controller (plan, Appendix A) |
 | 5 | `0x7e000000` | 0-1 | |
-| 6 | `0x70000000` | 0-1 | the NVMe's segment (INFERRED, below); equal to the DBI base of `pcie6a` (plan, E14) |
+| 6 | `0x70000000` | 0-1 | the NVMe's segment (INFERRED here; OBSERVED in Run 7); equal to the DBI base of `pcie6a` (plan, E14) |
 | 7 | `0x74000000` | 0-1 | |
 
 The firmware's block device path for the NVMe is `PcieRoot(0x6)/Pci(0x0,0x0)/Pci(0x0,0x0)/NVMe(...)` (the
@@ -338,14 +348,180 @@ node at `0x15400000`, with output base `0xn0000`; the NVMe, at bus 1, device 0, 
 `0x60100` (INFERRED). These agree with the device-tree values of the plan (`pcie6a` DBI `0x70000000` and
 stream window `0x60000`, E14 and E24; `pcie4` DBI `0x7c000000` and the Wi-Fi's stream `0x40100`, Appendix A),
 which they would if segments 4 and 6 were those controllers (INFERRED). Segment 3 is not the NVMe's window
-(INFERRED); T06 reached it because it reads the windows in table order.
+(INFERRED); T06 reached it because it reads the windows in table order. Run 7, below, turned the segment, the
+ECAM base and the bus, device and function into observations (segment 6, `0x70000000`, 01:00.0), which also
+puts the firmware's NVMe outside segment 3; the stream number stays INFERRED.
 
 **What this changes.** T03, T04, T05 and T09 are the first hardware results for items 3 (boot CPU only), 4
 (at EL2), 5 and 8 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.3. None bears on K1, which stays GO,
 now with its regime read. Still open: whether `CNTPOFF_EL2` works (no read of it has been seen to return),
 `CNTVOFF_EL2` on the other cores, the state of the NVMe and of the PCIe SMMU at EL2 (T06 stopped the board,
 T07 faulted) and the ADSP (T08 is UNIMPL). T06 of the second version stopped the board at segment 3's window
-on this unit (OBSERVED once); the third version does not read that window (hardware NOT RUN).
+on this unit (OBSERVED once); the third version does not read that window, and its first run passed T06 (Run 7,
+below).
+
+## Run 7: the third version of the image on the unit: T06 passes
+
+OBSERVED (operator photographs read against enlarged crops, then the stick read again; one unit, one boot, 2026-11-15;
+X1E80100 Surface Pro 11; build `DDE4BC575316`, the `declared` variant of section 10; image SHA-256 `b592f741...`,
+126,464 bytes). This is the first hardware run of the third version of the image
+([SP11-X2-V3.md](SP11-X2-V3.md)); its `hardware` variant is still NOT RUN. It was step 1 of the autorun plan
+`morning-nvme-smp` (nothing typed), started under the de-VHE slbounce build `SLBOUNCE-DEVHE-MARK.EFI`
+([SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 14); the page title shows `B=DDE4BC575316`, so the staged image is
+the one that ran. Four photographs of the page exist (one inside the first countdown, two inside the second, one of
+the finished page); there is no console photograph of this boot. The stick was read again afterwards. Its run
+directory for this boot (`SP11DUMP/RUN12`, written before ExitBootServices) holds the probe's dump (the ACPI tables,
+the memory map of 231 descriptors, `summary.txt`) and `pciio.txt`, the firmware's own PCI I/O record that the third
+version adds; it holds no `x2-results.txt` and no `x2-nv2.*`, because the Surface is still at EL1 before
+ExitBootServices (`preebs_currentel=0x4`), so phase A runs no test there (section 2) and every test result exists on
+the page only. Every T06 value below was read from the photographs, and each one the file also holds (the endpoint's
+BAR0 and the firmware's own `PRE` readings of CAP, VS, CC, CSTS, AQA, ASQ and ACQ) equals it. The image only reads
+device registers; the files it wrote to the stick went through the firmware, before ExitBootServices, as in every run.
+
+| Test | Verdict | What the page showed |
+| --- | --- | --- |
+| T01 ID dump | INFO | As in run 6: `MIDR_EL1` `0x512F0011`, `NV` 2, `E2H0` 0, `ECV` 2. |
+| T02 NV2 | FUNC GO | `REGIME 0000000088000010 E2H=0 TGE=1` again; `K1 NV2: GO`. |
+| T03 timer | PASS | As in run 6, with `CNTPOFF_EL2 NOT READ (ECV=2)`. |
+| T04 DC ZVA | PASS | `DCZID_EL0` block 64 bytes, as in run 6. |
+| T05 GIC | PASS | `GICD` `0x17000000`, `ARCH=4`; 12 of 12 redistributor frames, as in run 6. |
+| T06 PCIe and NVMe | PASS | The block below. |
+| T07 PCIe SMMU | UNKNOWN | The read of the SMMUv3 at `0x15400000` faulted (guarded and recoverable): `NO STATE`. |
+| T08 ADSP | UNIMPL | Nothing touched, as designed (`UNKNOWN`, label `UNIMPL`). |
+| T09 DRAM | PASS | RAM total 32289 MiB in 7 extents, as in run 6. |
+
+Every summary row but T08's carried the label OBSERVED, and the K1 line read `K1 NV2: GO`.
+
+**T06: the NVMe's root complex answers at EL2, and the firmware left the controller running (OBSERVED once).** The
+T06 block of the finished page (`PAGE 1/1`), verbatim, read from a 3x crop with every digit legible:
+
+```
+== T06 PCIE NVME ==
+FW NVME FUNCTIONS=1
+NVME0 SEG=6 UID=6 01:00.0
+SCANNED SEGMENTS=1 MCFG=8
+W6 00:00.0 V=17CB D=0111 C=060400
+W6 LINK GEN4 X4 DLLLA=1
+W6 01:00.0 V=144D C=010802
+EP CMD=0006 BAR0=0070300000 IN WIN
+MATCHES FIRMWARE VIEW=YES
+CAP VS EQUAL=YES
+CAP PRE=000000303C0301FF
+CAP EL2=000000303C0301FF
+VS PRE=00010400 EL2=00010400
+CC PRE=00460001 EL2=00460001
+CSTS PRE=00000001 EL2=00000001
+AQA PRE=00010001 EL2=00010001
+ASQ PRE=00000000CF3E7000
+ASQ EL2=00000000CF3E7000
+ACQ PRE=00000000CF3E8000
+ACQ EL2=00000000CF3E8000
+MAP MMIO=0 UNLISTED=2 REFUSED=0
+FAULTS=0
+P: FW NVME SEEN AT EL2 AS FW SAW IT
+N: OTHER ROOTS, DMA OR NVME I/O
+```
+
+What the page states:
+
+* The firmware's PCI I/O showed one NVMe function, behind the root with `_UID` 6 (`NVME0 SEG=6 UID=6 01:00.0`). The
+  MCFG has exactly one entry for segment 6, starting at bus 0, and only that window was read (`SCANNED SEGMENTS=1
+  MCFG=8`; `W6` is the MCFG entry index). So the run-time cross-check passed, and `_UID` = `_SEG` is an observation
+  for this unit, not an inference: the NVMe is behind PCIe segment 6, ECAM base `0x70000000`, at bus 1, device 0,
+  function 0.
+* Root port 00:00.0: vendor `0x17CB`, device `0x0111`, class `0x060400` (PCI-to-PCI bridge). Endpoint 01:00.0:
+  vendor `0x144D`, class `0x010802` (NVM Express); its device id is not on the page, which has no room for it
+  (`pciio.txt` has it: `0xA80B`). The link at EL2 is Gen4 x4 with `DLLLA=1` (data link layer link active). The root
+  complex and the endpoint answered after ExitBootServices and the bounce. The firmware's own reads of the controller
+  before ExitBootServices returned the same values (`pciio.txt`), so the link was up then as well; the image only reads.
+* Endpoint command register `0x0006` (memory space and bus master on); BAR0 `0x70300000`, inside the bridge's window.
+* `MATCHES FIRMWARE VIEW=YES`: ids, class and BAR0 are what the firmware's PCI I/O saw. Every register read at EL2
+  (CAP, VS, CC, CSTS, AQA, ASQ, ACQ) equals the firmware's reading from before ExitBootServices.
+* `MAP MMIO=0 UNLISTED=2 REFUSED=0`: neither window (the ECAM window and the 4 KiB BAR0 window) is in the UEFI memory
+  map, and both were read under the default window policy (section 1). `FAULTS=0`: no guarded read faulted.
+
+Arithmetic on the printed values (not further readings):
+
+| Register | Value | Decoded |
+| --- | --- | --- |
+| CAP | `0x303C0301FF` | `MQES` `0x1FF`, `CQR` 1, `TO` `0x3C`, `DSTRD` 0, `NSSRS` 1, NVM command set, `MPSMIN` 0 (4 KiB) |
+| VS | `0x00010400` | NVMe 1.4.0 |
+| CC | `0x00460001` | `EN` 1, `IOSQES` 6 (64 bytes), `IOCQES` 4 (16 bytes) |
+| CSTS | `0x1` | `RDY` 1, `CFS` 0, `SHST` 0 |
+| AQA | `0x00010001` | `ASQS` 1 and `ACQS` 1: each admin queue has 2 entries |
+| ASQ, ACQ | `0xCF3E7000`, `0xCF3E8000` | the admin queues, in RAM (below) |
+
+ASQ and ACQ are allocations of this one boot, not constants. This boot's memory map (`memmap.txt` of the run, 231
+descriptors, read from the stick) has one BootServicesData extent, `0xCF2D3000` to `0xCF57E000` (attribute `0x100F`),
+around both addresses; it has the same bounds as the extent in the map of an earlier boot of the probe. So the queues
+lie in boot-services memory (OBSERVED, one boot); that the firmware's NVMe driver allocated them is INFERRED from that.
+The UEFI specification frees boot-services memory to the OS after ExitBootServices, so while the controller stays
+enabled with these queues, that memory must not be given to anything else (INFERRED). The conclusion for the NVMe:
+the firmware left the controller enabled and ready (`CC.EN` 1, `CSTS.RDY` 1), with its own two-entry admin queues, and
+nothing at EL2 had to bring the PCIe root up. That is the first row of the table in section 8 of
+[SP11-X2-V3.md](SP11-X2-V3.md).
+
+**What it means for a takeover (INFERRED from `compat/nvme-host.c`; nothing was written).** `nvmeh_adopt` accepts a
+controller only if `CC.EN` and `CSTS.RDY` are 1, `CSTS.CFS` is 0, `AQA` is `(31 << 16) | 31` (32 entries) and
+ASQ and ACQ are the monitor's own queue pages (`dma_base` and `dma_base + 0x1000`). The first three hold here; the
+two-entry AQA and the firmware's queue addresses do not, so the monitor cannot adopt this controller as it is. q1n1's
+takeover has to quiesce it first (`CC.SHN`, `CC.EN` 0, then its own queues). That is a write to the system disk's
+controller: it was not done and is not authorised
+([SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md#71-what-the-x2-test-image-read-on-2026-11-15)).
+
+**What the stick adds (OBSERVED, `pciio.txt` of the run, one unit, one boot).** The file says `state=OK` and counts
+`located=8 kept=8 nvme=1 skipped=0 truncated=0`: eight instances in the firmware's PCI I/O view, one of them the NVMe.
+Four are functions behind two PCIe segments only, 4 and 6 (a root port and one endpoint each: the NVMe behind segment
+6, and behind segment 4 a function with vendor `0x17CB`, device `0x1107`, class `0x028000`, which is the Surface's
+Wi-Fi module by class and ids, INFERRED); the other four are USB controller instances that the firmware's USB driver
+shows through its PCI I/O with no PCI location. No function was located behind segments 0 to 3, 5 or 7. The file was
+written although this platform runs no test before ExitBootServices. The values and their comparison with the
+prediction are in [SP11-X2-V3.md](SP11-X2-V3.md) section 13.
+
+**The photograph pauses worked (OBSERVED).** The image drew the page and held it before each risky read, as designed:
+
+* First countdown, footer `PHOTO NOW: T06 ECAM 0070000000 IN 5 S`. The page already held the summary rows of the
+  other eight tests. T06's own summary row read NOT-RUN there, by design (its verdict is set when T06 ends). The rows
+  T06 had decided so far were `FW NVME FUNCTIONS=1`, `NVME0 SEG=6 UID=6 01:00.0` and `SCANNED SEGMENTS=1 MCFG=8`.
+* Second countdown, footers `PHOTO NOW: T06 NVME 0070300000 IN 6 S` and `... IN 3 S` (two photographs). These pages
+  already showed the ECAM walk rows (`W6 ...`, `EP CMD=0006 BAR0=0070300000 IN WIN`).
+* The finished page (`PAGE 1/1`) with the image's own end-of-run footer `RESET IN 54 S`, the X2 image's designed reset.
+
+No hang and no reset happened inside T06, the test that stopped run 6. A photograph was taken inside each countdown;
+the 8 s start values and the total time of the run were not recorded.
+
+**T07: UNKNOWN again (OBSERVED).** The T07 block, verbatim:
+
+```
+== T07 PCIE SMMU ==
+MAP MMIO=0 UNLISTED=1 REFUSED=0
+SMMU0 @0015400000
+SMMU READ FAULTED: NO STATE
+DESC PCIE SMMU: DIFF
+FAULTS=1
+P: SMMUV3 ENABLE AND BYPASS STATE
+N: PER-STREAM TABLE CONTENTS
+```
+
+The guarded read of the SMMUv3 at `0x15400000` faulted at EL2, as in run 6, so the NVMe's DMA stream is still
+unobservable and T07 stays UNKNOWN. Why the window faults is UNKNOWN. `DESC PCIE SMMU: DIFF` is the board-descriptor
+cross-check, unchanged since run 6. The queue addresses the firmware programmed are RAM addresses, which is what a
+firmware driver programs when the NVMe's stream is in bypass or an identity mapping (INFERRED; it does not show that
+any command ran). Nothing was read from the SMMU, and its state at EL2 after the bounce is UNKNOWN.
+
+**What this changes.** T06 is the first hardware result for item 6 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md)
+section 6.3 (the NVMe's link, its BAR, `CC.EN` and `CSTS`); the SMMU half of item 6 is still not in (T07 faulted in
+two boots), item 7 is unchanged (T08 is UNIMPL) and K1 is untouched. Per-machine questions D2, D3, D4, D8 and D15
+of the plan's Appendix D are now answered once ([SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md#7-appendix-d-answered-the-per-machine-questions));
+D5 to D7 and D14 (the SMMU and the DMA window) are not. Nothing here concerns the other cores: the second step of
+the same autorun plan, a payload that started the eleven secondary cores, is in
+[SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 14 (the ten printed reports read `CNTVOFF_EL2` 0 at entry; the X2
+image itself is still boot CPU only).
+
+**What the run does not show.** That the controller works (no command was issued, nothing was written); DMA; the
+SMMU state; any segment other than 6, by design; that another boot reads the same BAR0 or queue addresses (the
+firmware assigned them in this boot); the console line `SP11X2 PCIIO STATE=...` (not photographed; the file says
+`state=OK`); the wall-clock cost of the two 8 s waits.
 
 ## 1. Before you start
 
@@ -493,7 +669,7 @@ before trusting `tools/nv2_record.py show`'s output.
 | T03 timer | CNTFRQ, CNTHCTL_EL2.ECV, CNTVOFF_EL2, that the counter advances and that CNTVCT + CNTVOFF lies between two physical reads. `CNTPOFF_EL2` is not read by the images for the machine (`CNTPOFF_EL2 NOT READ (ECV=n)`); an emulator build made with `--cntpoff` reads it, if ID ECV >= 2 | the boot CPU's counter and offsets are coherent | other cores (see the open gap below) |
 | T04 DC ZVA | The block size, then one `DC ZVA` into the middle third of an image-owned buffer: exactly one block zeroed, both neighbours untouched | DC ZVA works and the block size is what the monitor assumes (64 bytes) | behaviour on device or Device-type memory |
 | T05 GIC | GICD/GICR/ITS registers at the addresses the **MADT** gives, the redistributor frames (a walk of the MADT's GICR discovery ranges or, when it has none, the frame each GICC structure names: "Run 5"), and each MADT CPU against a redistributor frame; the board descriptor is shown as a cross-check row (`D= R= I= C=` as `OK`, `DIFF` or `UNK`). A base that is zero, misaligned or wrapping, or that the memory map calls RAM or firmware, is not read: the row says `GICD REFUSED: <reason>` and the verdict is UNKNOWN, never FAIL | the MADT describes a working GIC | that interrupts are delivered |
-| T06 PCIe/NVMe | Third version ([SP11-X2-V3.md](SP11-X2-V3.md)): before ExitBootServices the firmware's own PCI I/O says where its NVMe is; at EL2 configuration reads in the **one MCFG window** of that segment only (the device-path root UID must equal the segment and exactly one MCFG entry must carry it; otherwise nothing is read), the root port's link status, and, only if the endpoint is the function the firmware saw and its BAR is justified (decode on at both ends, inside the bridge's window, not RAM in the memory map), NVMe CAP, VS, CC, CSTS, AQA, ASQ and ACQ, each next to the firmware's own reading (`PRE` and `EL2`); CAP and VS must be equal. The page is held for 8 s before the first read of the window and again before the first read of BAR0 (`PHOTO NOW`). Nothing is written. A refused window shows `W<n> REFUSED: <reason>` or `NVME BAR0 REFUSED: <reason>`. The second version walked every MCFG window and stopped on segment 3 | the link state and whether the firmware left the controller enabled, with its queue registers | that the controller works; no register is written |
+| T06 PCIe/NVMe | Third version ([SP11-X2-V3.md](SP11-X2-V3.md)): before ExitBootServices the firmware's own PCI I/O says where its NVMe is; at EL2 configuration reads in the **one MCFG window** of that segment only (the device-path root UID must equal the segment and exactly one MCFG entry must carry it; otherwise nothing is read), the root port's link status, and, only if the endpoint is the function the firmware saw and its BAR is justified (decode on at both ends, inside the bridge's window, not RAM in the memory map), NVMe CAP, VS, CC, CSTS, AQA, ASQ and ACQ, each next to the firmware's own reading (`PRE` and `EL2`); CAP and VS must be equal. The page is held for 8 s before the first read of the window and again before the first read of BAR0 (`PHOTO NOW`). Nothing is written. A refused window shows `W<n> REFUSED: <reason>` or `NVME BAR0 REFUSED: <reason>`. The second version walked every MCFG window and stopped on segment 3. The third version's first run on the unit (Run 7, `declared` variant, one boot) read segment 6 only and passed | the link state and whether the firmware left the controller enabled, with its queue registers (Run 7: link Gen4 x4 up; `CC.EN` 1, `CSTS.RDY` 1, firmware's own two-entry admin queues) | that the controller works; no register is written |
 | T07 PCIe SMMU | SMMUv3 identification, CR0/CR0ACK, GBPA and GERROR at the **IORT** nodes (a node with a bad base shows `SMMUV3 BASE BAD` or `SMMU<n> REFUSED`) | the translation state the monitor will inherit (bypass, abort or enabled) | the stream table contents |
 | T08 ADSP/GLINK | Nothing is touched: no address can be justified from ACPI, so the result is UNKNOWN with label UNIMPL | only that there is no address source yet | any liveness. A later change must supply an address from the DSDT dumped on the stick |
 | T09 DRAM | The UEFI memory map's RAM extents against the monitor's IPA limit (2^36 unless the descriptor says otherwise) | the RAM the firmware reports fits the monitor's stage-2 | the physical DRAM population |
@@ -560,6 +736,11 @@ ExitBootServices and so ran T01, T03, T04 and T02 in phase A** (section 2):
 | `x2-nv2.json` | the same record as JSON |
 | `x2-nv2.bin` | the same record, 96 bytes with a CRC-32: the form the monitor's gate consumes |
 
+The third version ([SP11-X2-V3.md](SP11-X2-V3.md) section 3) adds `pciio.txt`, the firmware's PCI I/O view (what each
+PCI function is, and for an NVMe function its first registers). It is written last, before ExitBootServices, and also
+by a platform that is not at EL2 then, so it exists for the Surface Pro 11 where the four files above do not
+(OBSERVED in Run 7: `state=OK`).
+
 A platform that only reaches EL2 during or after ExitBootServices (OBSERVED,
 three times now, on a Surface Pro 11 X1E80100: section 2) runs these same four
 tests in phase B instead (in the order of section 2), and none of these four files exists
@@ -616,9 +797,9 @@ not only T05 to T09.
 
 ## 10. The `declared` image, for the reviewed scoped-sweep slbounce
 
-**Hardware status of this step: OBSERVED to work on the unit in runs 5 and 6 (one unit, one boot each).**
+**Hardware status of this step: OBSERVED to work on the unit in runs 5, 6 and 7 (one unit, one boot each).**
 Run 5 printed `EBSRANGES STATE=DECLARED RANGES=1 ... STATUS=0x0`, the scoped sweep accepted the range and
-the bounce was taken; run 6 reached EL2 as well. The host tests and the QEMU run below are models; they
+the bounce was taken; runs 6 and 7 reached EL2 as well. The host tests and the QEMU run below are models; they
 say nothing about the unit's firmware or about slbounce running on it.
 
 The image above never tells slbounce which memory it dirtied. The reviewed slbounce fork

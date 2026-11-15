@@ -240,7 +240,8 @@ the NV2 record, its 13 lines and its CRC rules not at all. **Hardware status: NO
 Made after boot 3 on the unit (OBSERVED, [docs/SP11-X2-V3.md](../../../docs/SP11-X2-V3.md)): T06 walked
 every MCFG window and the read of segment 3 never returned. It changes both variants and T06 only, and
 the NV2 record, the REGIME row, T01 to T05, T07 to T09 and the declared range not at all.
-**Hardware status: NOT RUN.**
+**Hardware status: the `declared` variant ran once on the unit (2026-11-15, one boot): T06 PASS, in
+[docs/SP11-X2-V3.md](../../../docs/SP11-X2-V3.md) section 13; the `hardware` variant is NOT RUN.**
 
 * **Before ExitBootServices** `pciio.c` asks the firmware's own `EFI_PCI_IO_PROTOCOL` where each PCI
   function is and what it holds, with `GetLocation`, 32-bit `Pci.Read` and, for an NVMe function

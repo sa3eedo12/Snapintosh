@@ -42,7 +42,7 @@ This is experimental software, written for one laptop model.
 | Wi-Fi (QCC2072) | Scanning, a WPA2 connection, DHCP and ping work through a host-proxy harness driven from the Mac. Joining from the macOS Wi-Fi menu does not work yet. |
 | Storage | macOS is installed on, and boots from, the internal NVMe. |
 | Other hardware | Audio, cameras, Bluetooth, sleep and external displays are not supported. |
-| Surface Pro 11 | A port is planned and is UNIMPLEMENTED. Only host-side groundwork exists (EXPERIMENTAL), and nothing has run on a Surface Pro. The plan is [docs/SURFACE-PRO-11.md](docs/SURFACE-PRO-11.md). |
+| Surface Pro 11 | A port is planned and is UNIMPLEMENTED. Only host-side groundwork exists (EXPERIMENTAL); the first gates have run on one unit (read-only EL2 measurements, q1n1 at EL2 and a PSCI start of the secondary cores, 2026-11-11 to 2026-11-15, OBSERVED, one boot each), and nothing beyond that has. The plan is [docs/SURFACE-PRO-11.md](docs/SURFACE-PRO-11.md). |
 
 [docs/STATUS.md](docs/STATUS.md) has the details, the known issues and the
 roadmap.
@@ -228,7 +228,7 @@ Snapintosh builds on the published work of others:
 | [docs/GUI-BOOT-ROADMAP.md](docs/GUI-BOOT-ROADMAP.md) | the path from the first kernel instruction to the desktop |
 | [docs/SURFACE-PRO-11.md](docs/SURFACE-PRO-11.md) | the plan and requirements for a Surface Pro 11 (X1E80100) port: UNIMPLEMENTED, with host-side groundwork only |
 | [docs/SP11-EL2-ENTRY.md](docs/SP11-EL2-ENTRY.md) | the EL2 entry decision (VHE host or de-VHE), timer-offset policy and `DC ZVA` study for the Surface Pro 11 |
-| [docs/SP11-X2-TESTS.md](docs/SP11-X2-TESTS.md) | the operator guide for the Surface Pro 11 X2 functional tests (EFI image, never run on hardware) |
+| [docs/SP11-X2-TESTS.md](docs/SP11-X2-TESTS.md) | the operator guide for the Surface Pro 11 X2 functional tests (EFI image; run on one unit, one boot per run, results in the guide) |
 | [probes/uefi/README.md](probes/uefi/README.md) | the Surface Pro 11 EFI state probe: build, images, screen and dump formats |
 | [docs/SP11-HOST-LINK-STUDY.md](docs/SP11-HOST-LINK-STUDY.md) | the Surface Pro 11 USB host link: the A16 inventory, Hamoa USB facts, the fallback ladder and a persistent-log design |
 | [docs/SP11-NVME-WINDOW.md](docs/SP11-NVME-WINDOW.md) | the Surface Pro 11 NVMe window: the audit of A16 assumptions, the safety contract and the per-machine questions |

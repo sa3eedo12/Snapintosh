@@ -77,9 +77,9 @@ EL1-named registers, programs `TCR_EL2`, `CNTHCTL_EL2` and `CPTR_EL2` in their n
 `HCR_EL2` that q1n1 sees on the A16, 0x88000010 (E2H clear, TGE set; q1n1 `docs/A16-Q1N1-PROXY.md`, OBSERVED on
 the A16).
 
-Secondaries differ. A PSCI CPU_ON target starts with the MMU off (VERIFIED: DEN0022F.b 6.4.3.4), and its `E2H` is
-UNKNOWN: `HCR_EL2` has an architecturally UNKNOWN value out of warm reset (VERIFIED: DDI 0601 HCR_EL2). The TLB
-contents are also UNKNOWN (VERIFIED: DDI 0487 D8.16.1).
+Secondaries differ. A PSCI secondary starts with the MMU off (VERIFIED: DEN0022F.b 6.4.3.4) and an `E2H` that is UNKNOWN:
+`HCR_EL2` is UNKNOWN out of warm reset (VERIFIED: DDI 0601; OBSERVED: E2H set on 2 of 11, clear on 7). The TLB is UNKNOWN
+too (VERIFIED: DDI 0487 D8.16.1).
 
 Two ways to reconcile the regimes:
 
@@ -285,8 +285,8 @@ Decision rule, for the X2 report:
 
 A read-back of `HCR_EL2.E2H` = 0 is conclusive only when `E2H0` is 0 (D8.13.1 CDMXB); M5 is conclusive either way.
 
-**Status, 2026-11-13.** Boot CPU of one unit: `E2H0` is 0 (X2 run 4) and `HCR_EL2.E2H` read back 0 after the trampoline, MMU
-on, q1n1 running (B1 attempt 7). Rule 1 stays open for M5 and the secondaries (M4); nothing contradicts A.
+**Status, 2026-11-15.** Boot CPU: `E2H0` is 0 (X2 run 4), `E2H` read back 0 after the trampoline (B1 attempt 7).
+Secondaries (M4, in part): MMU off, E2H set on 2, clear on 7 of 11. Rule 1 stays open for M5; nothing contradicts A.
 
 ### 2.10 The X1 and X2 evidence that settles it
 
@@ -300,7 +300,7 @@ a register is a hardware step that needs its own authorization.
 | M1 | `ID_AA64MMFR4_EL1.E2H0` (bits 27:24), `ID_AA64MMFR1_EL1.VH`, `ID_AA64MMFR0_EL1.ECV`, `MIDR_EL1`, on every CPU. Read only | X2 | `E2H0` = 0 | `E2H0` other than 0: rule 2 |
 | M2 | The boot CPU's `HCR`, `SCTLR`, `TCR`, `TTBR0`, `TTBR1`, `MAIR`, `VBAR`, `CPTR`, `CNTHCTL`, `MDCR` at slbounce's return; for A1 also the EL1 `TCR`, `TTBR0`, `MAIR`, `SCTLR` and `CPACR` images, read before the bounce, because those are what `tb_longjmp` restores | X1 | `HCR` = TGE and E2H, `M` = 1 | An E2H of 0 at arrival: the sequence's precondition changes, use `universal-devhe` |
 | M3 | Whether the code that runs the sequence (A2) or turns the MMU back on (A1), and everything it touches, is identity mapped, and no live mapping uses TTBR1 (`AT S1E2R` with `PAR_EL1` for each address; `TCR_EL2.EPD1` and `T1SZ`). Read only | X1 | PA equals VA; no TTBR1 mapping in use | A non-identity page: copy or remap the trampoline first (`MMU_TOGGLE_NOT_IDENTITY`) |
-| M4 | A PSCI secondary's `HCR`, `SCTLR`, `TCR`, `MAIR`, `TTBR0`, `CNTVOFF`, `CNTFRQ` and `DCZID` on arrival, all eleven, over three cold boots. The X1 probe in the plan records only that one arrives | X1 | MMU off, E2H either | MMU on at arrival: the secondaries use the boot sequence |
+| M4 | A PSCI secondary's `HCR`, `SCTLR`, `TCR`, `MAIR`, `TTBR0`, `CNTVOFF`, `CNTFRQ` and `DCZID` on arrival, all 11, over 3 cold boots. 2026-11-15, 2 boots: all but `TCR`, `MAIR`, `TTBR0`, `DCZID` | X1 | MMU off, E2H either | MMU on at arrival: the secondaries use the boot sequence |
 | M5 | The functional de-VHE test: run `universal-devhe` between framebuffer markers; read `HCR_EL2`; then write a distinct pattern through `CNTKCTL_EL1` and read `CNTHCTL_EL2` (and compare `SCTLR_EL1` with `SCTLR_EL2`). No redirection means E2H is clear (D8.13.2). Compare the final configuration across all CPUs with `el2m_cpus_consistent` | X2 | No redirection; all twelve CPUs identical | Rule 3 |
 | M6 | Per-core `CNTVOFF_EL2` behaviour (section 3.6) | X2 | see C3 | C3 policy |
 | M7 | `DCZID_EL0` and a functional DC ZVA test (section 4.6) | X2 | see C6 | C6 |
@@ -327,8 +327,8 @@ group or the `SCTLR_EL2` write, none of which the dry run ran (the next paragrap
 `HCR_EL2` 0x88000010 (E2H 0), `TCR_EL2` 0x80843514, `TTBR0_EL2` and `MAIR_EL2` unchanged, `CPTR_EL2` 0x22FF, `CNTHCTL_EL2` 0x3
 and `SCTLR_EL2` with M, C and I set: the values the trampoline writes, MMU on, q1n1 executing (M1, and M2 after the flip). The
 firmware-descriptor question that `test_observed_sp11` could not model did not show either: q1n1's pages kept executing under
-the non-VHE regime (OBSERVED for those pages; the XN-bit-54 reading is INFERRED). M8: X2's T02 gave K1 GO under this build (OBSERVED, 2026-11-14); a later X2 run's REGIME row read E2H 0, TGE 1 beside a GO (OBSERVED once). Not measured: M4, M5, the other EL2
-registers, repeatability, uptime (one photograph, at 4 s).
+the non-VHE regime (OBSERVED for those pages; the XN-bit-54 reading is INFERRED). M8: T02 gave K1 GO (OBSERVED, 2026-11-14); a later run's REGIME row read E2H 0, TGE 1 beside a GO (OBSERVED once). Not measured: M5, other EL2
+registers, repeatability; M4 in part (2026-11-15). Uptime: 4 s here, 123 s on 2026-11-15.
 
 ### 2.11 What the model does not prove
 

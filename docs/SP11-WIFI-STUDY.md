@@ -265,7 +265,8 @@ record it and carry on; never map it.
 
 **S0, boot services (no MMIO).** List every `EFI_PCI_IO_PROTOCOL` handle: segment, bus, device, function, and the first
 64 configuration bytes. A handle with vendor `0x17cb` and device `0x1107` means the firmware itself enumerated the module.
-If the firmware publishes no such handle, say so. This step writes nothing.
+If the firmware publishes no such handle, say so. This step writes nothing. (The third X2 test image's record of
+2026-11-15 is such a list, with the first configuration dwords and the BARs: it holds that handle, section 10.)
 
 **S1, the gates, in this order, stopping at the first that is off or unreadable.** Every block, offset and bit below is a
 Linux fact read at the pin (the GCC base `hamoa.dtsi:758-760`, the clock and GDSC definitions `gcc-x1e80100.c:3614-3627`,
@@ -618,16 +619,21 @@ settle, appended after the 1.0 layout.
 
 ## 10. Per-machine questions
 
-Nothing below was measured on a Surface Pro. "Gate" is where the plan would measure it.
+Nothing below was measured by the survey (X12a is NOT RUN). One firmware-side reading exists, taken by the third X2 test
+image on 2026-11-15 (OBSERVED, one unit, one boot; the last section of [SP11-X2-V3.md](SP11-X2-V3.md)): the firmware's own PCI I/O
+record lists a function `17CB:1107`, class `0x028000`, at segment 4, 01:00.0, under a Qualcomm root port, with BAR0
+`0x7C400000` (a 64-bit memory BAR) and its command register 0 (decode off). Its ECAM window is the MCFG entry of segment 4
+(`0x7C000000`); no test read it, and its state at EL2 is UNKNOWN. That this function is the module is INFERRED from the
+class and the ids. "Gate" is where the plan would measure it.
 
 | # | Question | Public evidence | Measurement (gate) | Expected | Label |
 | --- | --- | --- | --- | --- | --- |
 | W1 | Is the module a WCN7850? | WE1 to WE6 | C4 and the hardware-version major (X12a, X12b) | `0x110717cb`; major 2 | VERIFIED (tree); INFERRED (unit) |
-| W2 | Which segment, ECAM base and BDF? | domain 4 is Linux's number; `reg = <0x10000 ...>` | MCFG, then the root-port walk (X12a) | endpoint at bus 1, device 0, function 0 | INFERRED |
+| W2 | Which segment, ECAM base and BDF? | domain 4 is Linux's number; `reg = <0x10000 ...>` | MCFG, then the root-port walk (X12a) | endpoint at bus 1, device 0, function 0 | INFERRED; segment 4 and 01:00.0 in the firmware's PCI I/O view: OBSERVED once (above) |
 | W3 | Which subsystem ids? | the community's `17cb:1107` (one unit) | C8 (X12a) | `0x17cb`, `0x1107` | OBSERVED |
 | W4 | Is it powered? | the 3.3 V switch is `boot-on` | T1, T2, G1 to G4 (X12a) | GPIO 214 and 117 high | UNKNOWN |
 | W5 | Is the link trained? | none for the SP11 | C3 (X12a) | DLLLA set, Gen3 x2 | UNKNOWN |
-| W6 | Which BARs, and is memory decode on? | none | C5, C7 (X12a) | recorded | UNKNOWN |
+| W6 | Which BARs, and is memory decode on? | none | C5, C7 (X12a) | recorded | UNKNOWN at EL2; in the firmware's PCI I/O view BAR0 `0x7C400000` and decode off: OBSERVED once (above) |
 | W7 | Are PERST#, CLKREQ# and WAKE# on GPIO 146 to 148? | an unreferenced pin state names them (WE15) | T4 to T6 (X12a) | recorded | UNKNOWN |
 | W8 | What does the PCIe SMMU do for StreamID `0x40100`? | "Controlled by Gunyah"; the overlay's map (WE12) | S5 (X12a) | translate, bypass or abort | UNKNOWN |
 | W9 | Can a 64 MiB arena be reached by the card? | none | the S5 walk, then the arena check (X12b) | identity read/write below `1 << 36` | UNKNOWN |

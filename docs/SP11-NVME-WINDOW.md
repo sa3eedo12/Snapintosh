@@ -1,11 +1,15 @@
 # SP11 NVMe window: audit, safety contract and per-machine questions
 
-**Status: EXPERIMENTAL (host-tested only). Hardware status: NOT RUN.** Nothing here has touched a Surface Pro. This
+**Status: EXPERIMENTAL (host-tested only). Hardware status: the contract code is NOT RUN; five of the per-machine
+questions (D2, D3, D4, D8 and D15) were read once at EL2 by the X2 test image, read-only (OBSERVED, one unit, one
+boot, 2026-11-15; [section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15)).** Nothing of the contract in
+`compat/nvme-host.{c,h}` has touched a Surface Pro, and nothing was written to the SSD or its controller. This
 document is the evidence study for WS-D items S2 and S3 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) (section 7) and
 Appendix D of that plan. It records what the A16 NVMe takeover assumes, what the SP11-gated code in
 `compat/nvme-host.{c,h}` now refuses, what is still unknown, and exactly what must be measured at X2 and X6 to close
 each question. It authorizes no hardware operation (see [AGENTS.md](../AGENTS.md), section 5): every measurement below
-is a plan for a later, supervised and explicitly authorized session.
+that has not been read (section 7.1 lists the ones that have) is a plan for a later, supervised and explicitly
+authorized session.
 
 Labels are the ones in [SURFACE-PRO-11.md](SURFACE-PRO-11.md#reading-this-document): VERIFIED (read in this tree or a
 pinned public source; never "ran on a Surface"), OBSERVED, INFERRED, UNKNOWN, EXPERIMENTAL, UNIMPLEMENTED.
@@ -105,10 +109,10 @@ carries the value on the SP11, or the proposal in [section 4](#4-proposed-descri
 
 | # | A16 assumption | Where | On the SP11 | Field |
 | --- | --- | --- | --- | --- |
-| 1 | PCI segment 5 (`Acpi(PNP0A08, 5)`) | q1n1 `tools/nvme_m3.py:49` | Segment of the SSD's root complex is unknown. The pinned device tree puts the NVMe supply and slot on `pcie6a` (`linux,pci-domain = <6>` is Linux's number, not an ACPI segment). | `storage.nvme.segment` (proposed) |
-| 2 | ECAM from the ACPI MCFG at run time, never a constant | q1n1 `tools/nvme_m3.py:182-190` | Same method; MCFG not yet dumped. | `pcie.ecam` (exists, null in `sp11.json`) and the A5 cross-check |
-| 3 | Root port at 0:0.0, endpoint on its secondary bus at device 0 function 0 | q1n1 `tools/nvme_m3.py:192-215` | The device tree has one root port at device 0 (`hamoa.dtsi:3526-3529`). The bus number is firmware's. | `storage.nvme.endpoint` (proposed); re-proved by `nvmeh_sp11_prove_endpoint` |
-| 4 | Vendor `0x144D`, class `0x010802`, the A16 disk's EUI64 | q1n1 `tools/nvme_m3.py:51-53`; `tools/snapmac-partition-plan.py` (the A16 pins `DISK_BYTES`, `DISK_GUID` and `EUI`); `tools/qualify-nvme-writeback.py:75-76` | Class kept (`NVMEH_SP11_CLASS_NVME`). Vendor is not pinned. EUI64 is a per-run pin, never a constant. The A16 qualifier and plan cannot be reused as written. | per-run pins; `nvmeh_sp11_target.eui64` |
+| 1 | PCI segment 5 (`Acpi(PNP0A08, 5)`) | q1n1 `tools/nvme_m3.py:49` | Segment 6 on the unit (OBSERVED once, [section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15): it is the firmware's number, and here it equals Linux's domain number). The pinned device tree puts the NVMe supply and slot on `pcie6a` (`linux,pci-domain = <6>` is Linux's number, not an ACPI segment). | `storage.nvme.segment` (proposed) |
+| 2 | ECAM from the ACPI MCFG at run time, never a constant | q1n1 `tools/nvme_m3.py:182-190` | Same method. The MCFG entry of segment 6 is `0x70000000`, buses 0 to 1 (OBSERVED in the dumped tables, and read through at EL2 on 2026-11-15, section 7.1). | `pcie.ecam` (exists, null in `sp11.json`) and the A5 cross-check |
+| 3 | Root port at 0:0.0, endpoint on its secondary bus at device 0 function 0 | q1n1 `tools/nvme_m3.py:192-215` | The device tree has one root port at device 0 (`hamoa.dtsi:3526-3529`). The bus number is firmware's: root port 00:00.0 and endpoint 01:00.0 were read (OBSERVED once, section 7.1). | `storage.nvme.endpoint` (proposed); re-proved by `nvmeh_sp11_prove_endpoint` |
+| 4 | Vendor `0x144D`, class `0x010802`, the A16 disk's EUI64 | q1n1 `tools/nvme_m3.py:51-53`; `tools/snapmac-partition-plan.py` (the A16 pins `DISK_BYTES`, `DISK_GUID` and `EUI`); `tools/qualify-nvme-writeback.py:75-76` | Class kept (`NVMEH_SP11_CLASS_NVME`). Vendor is not pinned (the unit's endpoint reads vendor `0x144D` and class `0x010802`, OBSERVED once, section 7.1). EUI64 is a per-run pin, never a constant. The A16 qualifier and plan cannot be reused as written. | per-run pins; `nvmeh_sp11_target.eui64` |
 | 5 | SMMUv3 at `0x15480000` | q1n1 `tools/nvme_m3.py:50` | `pcie_smmu` is `arm,smmu-v3` at `0x15400000` (`hamoa.dtsi:8544-8546`). | `smmu[]` kind `smmu-v3` (exists) |
 | 6 | StreamID = `segment << 16 \| RID` | q1n1 `tools/nvme_m3.py:214-215` | The EL2 overlay maps `pcie6a` RIDs to StreamID `0x60000 + RID` (`x1-el2.dtso:47-49`), for Linux at EL2; the firmware's own map is UNKNOWN. | `storage.nvme.stream` (proposed) |
 | 7 | The SMMU is already bypass or an identity stage 2 that q1n1 may only read | q1n1 `tools/nvme_m3.py:220-257,704` | The SMMU is "Controlled by Gunyah" (`hamoa.dtsi:8555`) and an EL2 owner must configure it itself (`x1-el2.dtso:25-27`). State at hand-off UNKNOWN. | record `smmu_mode`, `DMA_PROVEN`; see D7 |
@@ -145,8 +149,8 @@ map. Descriptor files belong to platform-gate; this is a proposal, not an edit. 
 
 | Field | Value once measured | Label |
 | --- | --- | --- |
-| `segment` | the `pcie.ecam[].segment` that hosts the SSD | UNKNOWN until X2 |
-| `endpoint` | `{"bus": 1, "device": 0, "function": 0}` (INFERRED from the A16 and the device tree) | UNKNOWN until X2 |
+| `segment` | the `pcie.ecam[].segment` that hosts the SSD | OBSERVED once: 6 ([section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15)); the descriptor does not carry it (UNIMPLEMENTED) |
+| `endpoint` | `{"bus": 1, "device": 0, "function": 0}` (INFERRED from the A16 and the device tree) | OBSERVED once: 01:00.0 (section 7.1); the descriptor does not carry it (UNIMPLEMENTED) |
 | `smmu` | the `smmu[].name` that serves it, so ambiguity is stated, not guessed | UNKNOWN until X2 |
 | `stream` | `{"rid_base": "0x0", "rid_count": "0x10000", "stream_base": "0x60000"}` (the EL2 overlay's map, INFERRED to hold under the firmware) | UNKNOWN until X2 |
 
@@ -218,26 +222,79 @@ noted. A host test is not hardware evidence.
 
 Each question from [Appendix D](SURFACE-PRO-11.md#appendix-d-per-machine-hardware-questions), split so that every item
 is either answerable from cited public evidence or names the exact measurement and the value it should read. Nothing
-below was measured on a Surface Pro. "Gate" is where the plan measures it; X2 and X6 are in section 6 of the plan.
+below was measured on a Surface Pro except what [section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15) records
+(D2, D3, D4, D8 and D15, once, read-only). "Gate" is where the plan measures it; X2 and X6 are in section 6 of the plan.
 
 | # | Question | Public evidence | Hardware measurement (gate) | Expected | Label |
 | --- | --- | --- | --- | --- | --- |
 | D1 | Does the GPT match the Windows record? | none | Read-only GPT survey (q1n1 `gpt_survey.py`, plan S1) plus a Windows `Get-Partition` export and two more independent readers; they must agree on every entry, both GPT copies and the usable range (X6, before any change) | ESP about 260 MiB, reserved 16 MiB, Windows, recovery about 1.2 GiB | INFERRED (operator survey) |
-| D2 | Which PCIe segment hosts the SSD? | The Denali tree enables `pcie6a` with the 3.3 V NVMe supply and the root port at device 0 (`x1-microsoft-denali.dtsi:264-267,1015-1016,1031-1033`; `hamoa.dtsi:3434,3526`) | ACPI MCFG allocations, then config-space class `0x010802` per segment (X2 item 6, with the A5 adapter) | the segment of `pcie6a`; its number is firmware's, not Linux's `6` | UNKNOWN |
-| D3 | Which BDF? | Root port at device 0 with `bus-range 0x01 0xff` (`hamoa.dtsi:3526-3529`) | Walk from the root port to its secondary bus and read the endpoint header (X2 item 6) | endpoint at bus 1, device 0, function 0, RID `0x0100` | INFERRED |
-| D4 | Which ECAM base? | none: the device tree's `config` window (`hamoa.dtsi:3441`, `0x70100000`, 1 MiB) is Linux's, not an MCFG allocation | MCFG from the ACPI dump (X2 item 5, N6) | one allocation for the segment; value unknown | UNKNOWN |
+| D2 | Which PCIe segment hosts the SSD? | The Denali tree enables `pcie6a` with the 3.3 V NVMe supply and the root port at device 0 (`x1-microsoft-denali.dtsi:264-267,1015-1016,1031-1033`; `hamoa.dtsi:3434,3526`) | ACPI MCFG allocations, then config-space class `0x010802` per segment (X2 item 6, with the A5 adapter) | the segment of `pcie6a`; its number is firmware's, not Linux's `6` | OBSERVED once ([7.1](#71-what-the-x2-test-image-read-on-2026-11-15)): segment 6, which is also Linux's number here |
+| D3 | Which BDF? | Root port at device 0 with `bus-range 0x01 0xff` (`hamoa.dtsi:3526-3529`) | Walk from the root port to its secondary bus and read the endpoint header (X2 item 6) | endpoint at bus 1, device 0, function 0, RID `0x0100` | OBSERVED once (7.1): endpoint 01:00.0, so RID `0x0100` |
+| D4 | Which ECAM base? | none: the device tree's `config` window (`hamoa.dtsi:3441`, `0x70100000`, 1 MiB) is Linux's, not an MCFG allocation | MCFG from the ACPI dump (X2 item 5, N6) | one allocation for the segment; value unknown | OBSERVED once (7.1): `0x70000000`, buses 0 to 1 |
 | D5 | Which SMMU serves it? | `pcie_smmu` is `arm,smmu-v3` at `0x15400000`, size `0x80000` (`hamoa.dtsi:8544-8546`); `pcie6a` maps into it (`x1-el2.dtso:47-49`) | IORT from the ACPI dump; `SMMU_IDR0` read (X2 item 6) | `0x15400000`, SMMUv3 | VERIFIED (device tree); INFERRED (that firmware agrees) |
-| D6 | Which StreamID? | EL2 overlay: `iommu-map = <0 &pcie_smmu 0x60000 0x10000>` for `pcie6a` (`x1-el2.dtso:48`) | IORT ID mappings, then the stream table entry read for that SID (X2 item 6) | `0x60100` for RID `0x0100` if the overlay holds; the A16 formula would give another value | INFERRED |
-| D7 | Is the PCIe SMMU translating, bypassing or aborting at hand-off? | "Controlled by Gunyah" (`hamoa.dtsi:8555`); an EL2 owner "needs to configure it properly" (`x1-el2.dtso:25-27`) | `SMMU_CR0` (`+0x20`), `GBPA` (`+0x44`), `STRTAB_BASE` (`+0x80`), `STRTAB_BASE_CFG` (`+0x88`) and the stream's STE, read only, as q1n1 `nvme_m3.py:220-257` does (X2 item 6) | CR0.SMMUEN 1, STE Config 6 (stage 2 only), identity map over DRAM, as on the A16 | UNKNOWN (A16: VERIFIED) |
-| D8 | What state is the controller in after ExitBootServices? | none | CAP (MQES, DSTRD, MPSMIN, TO), VS, CC, CSTS, AQA, ASQ, ACQ, read only (X2 item 6) | CC.EN 1, CSTS.RDY 1, firmware admin queue in firmware memory, DSTRD 0, MPSMIN 4 KiB, MQES at least 64 | INFERRED (A16) |
+| D6 | Which StreamID? | EL2 overlay: `iommu-map = <0 &pcie_smmu 0x60000 0x10000>` for `pcie6a` (`x1-el2.dtso:48`) | IORT ID mappings, then the stream table entry read for that SID (X2 item 6) | `0x60100` for RID `0x0100` if the overlay holds; the A16 formula would give another value | INFERRED (the RID `0x0100` is now OBSERVED, D3; the stream mapping was not read) |
+| D7 | Is the PCIe SMMU translating, bypassing or aborting at hand-off? | "Controlled by Gunyah" (`hamoa.dtsi:8555`); an EL2 owner "needs to configure it properly" (`x1-el2.dtso:25-27`) | `SMMU_CR0` (`+0x20`), `GBPA` (`+0x44`), `STRTAB_BASE` (`+0x80`), `STRTAB_BASE_CFG` (`+0x88`) and the stream's STE, read only, as q1n1 `nvme_m3.py:220-257` does (X2 item 6) | CR0.SMMUEN 1, STE Config 6 (stage 2 only), identity map over DRAM, as on the A16 | UNKNOWN (A16: VERIFIED); the X2 image's read of the SMMUv3 at `0x15400000` faulted at EL2 in two boots (2026-11-14, 2026-11-15) |
+| D8 | What state is the controller in after ExitBootServices? | none | CAP (MQES, DSTRD, MPSMIN, TO), VS, CC, CSTS, AQA, ASQ, ACQ, read only (X2 item 6) | CC.EN 1, CSTS.RDY 1, firmware admin queue in firmware memory, DSTRD 0, MPSMIN 4 KiB, MQES at least 64 | OBSERVED once (7.1): every expected field matched; the queue memory being boot-services memory is INFERRED |
 | D9 | Identify facts | none | Identify controller and namespace 1 through q1n1's own queues: MDTS, NN, ONCS, VWC, HMPRE/HMMIN, NSZE/NCAP/NUSE, NLBAF, FLBAS, the LBAF table, DLFEAT, EUI64 and NGUID (X6, read only) | 512-byte current format, no metadata, EUI64 present; an SSD with NGUID only cannot be pinned by this contract and is refused | INFERRED |
 | D10 | Is the LBA format never switched? | By construction: Format NVM is on no list (`nvmeh_sp11_admin_verdict`) and a 4096-byte format is refused (I5, I6) | FLBAS identical before and after a whole session (X6) | unchanged | VERIFIED (host); UNKNOWN (device) |
 | D11 | Does Windows boot normally after q1n1 resets the controller? | A16 never ran this (H6 skipped: q1n1 `docs/A16-NVME-M3.md`, "Not checked"). The A16 SSD counted 80 unsafe shutdowns in 184 power cycles. | After a takeover and the documented quiesce (`CC.SHN`, `CC.EN` 0) and a reset, boot Windows from the firmware menu; compare SMART unsafe-shutdown and error counters read-only (X6, plan S3) | Windows boots; counters rise by at most the resets performed | UNKNOWN |
 | D12 | Which slot and attributes does Windows pick for the custom partition type? | none | After the operator creates exactly one entry with Windows' own partition manager, survey the GPT and record the entry index, type GUID and attribute bits (X6, plan S1) | any free slot; the monitor does not depend on slot or attributes, but `verify` must accept what Windows chose | UNKNOWN |
 | D13 | Does the path need interrupts? | No: queue 1 is polled (`compat/nvme-host.h:13`) | none | none | VERIFIED (design) |
 | D14 | Can the SSD reach the DMA window? | none | q1n1's reachability walk over the window against the SMMU state, `Smmu.reaches` (X6) with the DRAM map (X2 item 8) | every page identity-mapped read/write below `1 << 36` | UNKNOWN |
-| D15 | Is the link up and the SSD powered? | The 3.3 V supply is `regulator-boot-on` (`x1-microsoft-denali.dtsi:264-267,277`); firmware has trained the link to boot Windows | The endpoint header must read as a device, not all ones (X2 item 6); this code refuses `NO_DEVICE` otherwise | link up | INFERRED |
+| D15 | Is the link up and the SSD powered? | The 3.3 V supply is `regulator-boot-on` (`x1-microsoft-denali.dtsi:264-267,277`); firmware has trained the link to boot Windows | The endpoint header must read as a device, not all ones (X2 item 6); this code refuses `NO_DEVICE` otherwise | link up | OBSERVED once (7.1): Gen4 x4, data link layer link active, endpoint answering |
 | D16 | Volatile write cache, HMB | none | Identify controller VWC, HMPRE, HMMIN (X6); a DRAM-less SSD that Windows gave a host memory buffer runs without it after the reset | VWC present (writes use FUA and an explicit Flush); HMB state unknown | UNKNOWN |
+
+### 7.1 What the X2 test image read on 2026-11-15
+
+The third version of the X2 test image ([SP11-X2-V3.md](SP11-X2-V3.md); the page and its decoding are in
+[SP11-X2-TESTS.md](SP11-X2-TESTS.md), Run 7) read the SSD's PCIe root and controller at EL2, after ExitBootServices and
+the slbounce bounce, read-only: no configuration or controller register was written, no command was issued and
+nothing was mapped for DMA. OBSERVED, one unit, one boot: from four photographs of the page, and, for the firmware's
+own readings before ExitBootServices (the endpoint's ids, class, command, BAR0 and CAP, VS, CC, CSTS, AQA, ASQ, ACQ),
+also from the file `pciio.txt` that the image wrote to the stick, which equals the page's `PRE` values. The addresses
+were assigned by the firmware in that boot and are not constants: the ECAM base comes from the MCFG at run time (row 2
+of section 3) and BAR0 from the per-run record.
+
+| Item | Value | Label |
+| --- | --- | --- |
+| Segment (D2) | 6: MCFG entry 6; the root's `_UID` 6 equals it; exactly one MCFG entry, starting at bus 0 | OBSERVED |
+| ECAM base (D4) | `0x70000000`, buses 0 to 1 | OBSERVED |
+| Root port, endpoint (D3) | root port 00:00.0 (vendor `0x17CB`, device `0x0111`, class `0x060400`); endpoint 01:00.0, RID `0x0100` (vendor `0x144D`, device `0xA80B`, class `0x010802`, revision 2, header type 0; the device id, revision and header type are in `pciio.txt`, not on the page) | OBSERVED |
+| Endpoint command, BAR0 | command `0x0006` (memory space and bus master on); BAR0 `0x70300000` (a 64-bit memory BAR), inside the bridge's window | OBSERVED |
+| Link (D15) | Gen4 x4, data link layer link active, endpoint answering (no all-ones read) | OBSERVED |
+| Controller (D8) | CAP `0x303C0301FF` (MQES `0x1FF`, DSTRD 0, MPSMIN 0 = 4 KiB), VS `0x00010400` (NVMe 1.4.0), CC `0x00460001` (EN 1), CSTS `0x1` (RDY 1, CFS 0), AQA `0x00010001` (two entries in each admin queue), ASQ `0xCF3E7000`, ACQ `0xCF3E8000`; each the same at EL2 as in the firmware's own reading before ExitBootServices | OBSERVED (decoded fields: arithmetic on the printed values) |
+| Queue memory | both queue addresses lie in one BootServicesData extent of this boot's memory map, `0xCF2D3000` to `0xCF57E000` (attribute `0x100F`; the same bounds as in the map of an earlier boot); that the firmware's NVMe driver allocated them is INFERRED from the type | OBSERVED (the extent); INFERRED (the allocator) |
+| Memory map | neither the ECAM window nor the 4 KiB BAR0 window is listed in the UEFI memory map (the page's `MAP MMIO=0 UNLISTED=2`, and no descriptor of this boot's `memmap.txt` covers them) | OBSERVED |
+| PCIe SMMU (D5 to D7) | the guarded read of the SMMUv3 at `0x15400000` faulted, as on 2026-11-14; nothing of its state was read | OBSERVED (the fault); the state is UNKNOWN |
+
+The D8 expectation (CC.EN 1, CSTS.RDY 1, a firmware admin queue in firmware memory, DSTRD 0, MPSMIN 4 KiB, MQES at least
+64) matched in every field. The values are consistent with the pinned public device tree, which does not prove that the
+endpoint is on `pcie6a`: `pcie6a` has its DBI at `0x70000000` (the ECAM base above), its memory window starting at
+`0x70300000` (BAR0 above) and `num-lanes = <4>` (the link width above; VERIFIED by reading `hamoa.dtsi` at the Linux pin
+of section 2.2). The queue addresses the firmware programmed are RAM addresses, which is what a firmware driver programs
+when the NVMe's stream is in bypass or an identity mapping (INFERRED; it does not show that any command ran). Nothing was
+read from the SMMU, so D7 and D14 stay UNKNOWN. The takeover's reset (row 11 of section 3) needs MPSMIN at most 4 KiB,
+the NVM command set and MQES at least 64, and the doorbell stride (row 9) at most 4: the observed CAP meets all four
+(arithmetic on the printed value; DSTRD 0, MPSMIN 0, NVM command set, MQES `0x1FF`).
+
+**What the observed controller state means for the takeover (INFERRED from `compat/nvme-host.c`; nothing was written).**
+
+* `nvmeh_adopt` accepts a controller only if `CC.EN` and `CSTS.RDY` are 1, `CSTS.CFS` is 0, `AQA` is `(31 << 16) | 31`
+  (32 entries in each queue) and ASQ and ACQ are the monitor's own queue pages. The first three hold. The two-entry AQA
+  and the firmware's queue addresses do not, so the monitor cannot adopt this controller as it is (it would refuse with
+  `NVMEH_E_QUEUES`). It can adopt only a controller that q1n1's takeover has quiesced and given its own queues.
+* That takeover starts with the quiesce of row 11 of section 3 (`CC.SHN` normal shutdown, wait, `CC.EN` 0, its own queues,
+  `CC.EN` 1): a write to the system disk's controller. It was not done and is not authorised. D11 (does Windows boot
+  normally after a controller reset) is UNKNOWN and gates it; the hardware plan of section 10 and K4 apply.
+* Until it is quiesced the controller still holds the addresses of the firmware's two queue pages (`CC.EN` 1, ASQ and ACQ
+  as read). Those pages are boot-services memory of this boot, so the takeover must not hand them to anything else while
+  the controller is enabled.
+* What `nvmeh_sp11_prove_endpoint` checks from configuration space was met by what was read (class `0x010802`, command
+  bits `0x6`, header type 0, BAR0 inside the bridge's window). BAR0 is the firmware's assignment in one boot: the record
+  must carry it per run, and the endpoint proof compares it with the endpoint at each adoption.
+
+D1, D5 to D7, D9 to D12, D14 and D16 are unchanged: each needs the disk, the SMMU, a command on the controller, a
+controller reset or the operator.
 
 ## 8. Validation and what it does not show
 
@@ -273,7 +330,8 @@ D3 is the owner's explicit decision; the agents and tools never switch to it sil
 ## 10. Hardware plan (not authorized)
 
 In this order, each a separate supervised session with its own authorization, one hardware client at a time, AC power or
-at least 50% battery, no writes before step 6: (1) X2 read-only measurements D2 to D8, D15; (2) the S1 survey and the
+at least 50% battery, no writes before step 6: (1) X2 read-only measurements D2 to D8, D15 (partly done, once: D2 to D4,
+D8 and D15 were read on 2026-11-15, section 7.1; D5 to D7 were not, the SMMU read faulted); (2) the S1 survey and the
 operator's single GPT entry with a verified backup and the BitLocker key off the device; (3) four-reader agreement and
 verify-undo; (4) a read-only takeover and adoption with Windows still bootable, D9 to D14; (5) D11, Windows boots after the
 reset; (6) per-run write enable with persistence capture, which needs the explicit per-run authorization this contract

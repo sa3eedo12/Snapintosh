@@ -1,7 +1,10 @@
 # Surface Pro 11 stick log: reaching the boot stick from EL2 (B3, and the first step of B2)
 
 **Design study with host-side groundwork. The writer (S1 to S6) is UNIMPLEMENTED. Hardware status: NOT RUN for the writer;
-the read-only survey S0 ran once on the unit (section 12), and its follow-up S0b, a payload, in two boots (section 13).**
+the read-only survey S0 ran once on the unit (section 12), and its follow-up S0b, a payload, in two boots (section 13).
+Two later boots (6 and 7 of 2026-11-15, section 14) ran the third X2 test image and a payload that starts and stops the
+secondary cores, and a three-step restart probe the same evening (section 14.1) ran a plain q1n1 page and that payload
+twice more; none of them read or wrote the stick's USB controller at EL2.**
 Nothing of the writer ran on a Surface Pro 11. When the study
 was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as an opt-in, read-only survey in
 the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`) and has run
@@ -81,6 +84,15 @@ guarded log writer, and their tests (section 8).
     link up from reset (INFERRED; PHY and repeater bring-up UNIMPLEMENTED, M3 not measured). Context bank 3 is nested with
     stage 1 off, so the S0b walk is `UNSUPPORTED NESTED`: UNKNOWN, and SC2 is neither triggered nor cleared. A1 and A2 stay
     NOT granted.
+11. **Boots 6 and 7 and the restart probe did not touch the stick's controller (OBSERVED, one unit, one boot each;
+    section 14).** Boot 6 ran the third X2 image (T06 passed: the NVMe's PCIe root answers at EL2 and the firmware left
+    its controller running; the image wrote its dump through the firmware before ExitBootServices, as every run of it
+    does). Boot 7 ran a payload that started the eleven secondary cores with PSCI `CPU_ON` and stopped them with
+    `CPU_OFF`; the board restarted by itself afterwards (operator report; the time was not recorded and the cause is
+    UNKNOWN). A restart probe the same evening ran a plain q1n1 page (alive at `UPTIME 123 S`) and that payload twice
+    more: the board restarted by itself in one of those runs (operator report; no time recorded) and was filmed alive
+    to `UPTIME` about 36 S in the other (UNKNOWN beyond). The panel is still the only log channel, so whatever it
+    showed after the last photograph is lost. A1 and A2 stay NOT granted.
 
 ## 2. The problem and the requirements
 
@@ -697,7 +709,10 @@ The first two need the operator.
 5. **Q5. Gate name.** The model is gated by `SNAP_PLATFORM_SP11`; a runtime writer needs its own gate and a boot option. Name
    them before S0 code is written.
 6. **Q6. Camera.** Is a fixed camera, with a Mac-side decoder, worth setting up in parallel (alternative (v))? Still open:
-   boot 4's photographs did not frame the right-hand column of the page and its payload text was lost (section 13).
+   boot 4's photographs did not frame the right-hand column of the page and its payload text was lost (section 13);
+   boot 7's last photograph was taken at an angle and read with some blur, and the board restarted right after it. A
+   video does help: step 3 of the restart probe was filmed, its panel was crisp, and a video that runs through a
+   restart would time it (section 14.1).
 7. **Q7. Retention.** Is the M10 experiment to run now, since it is cheap and independent? Still open, with one new fact: after
    the automatic reboot of boot 4 the Surface booted something other than the stick (operator report; section 13), so a dump
    on the next stick boot would need the operator to select the stick again. DRAM retention across such a reset is UNKNOWN
@@ -832,6 +847,242 @@ reached: S1 has not started.
 same PCI-style node as S0's, `Pci(0x80,0x0)`, which makes `usb_1_ss0` likely, INFERRED); stage-2 translation for streams `0x1420`
 and `0x1460`; any DMA by the xHC; PHY, repeater and retimer state; whether a controller or port reset brings a link up at EL2; DRAM
 retention. Boot 4 gave no `usbsmmu` values at all.
+
+## 14. Result of boots 6 and 7 and of the restart probe on the unit (OBSERVED, one unit, one boot each)
+
+**What ran.** On 2026-11-15 the autorun plan `morning-nvme-smp` ran two steps, one per boot, with nothing typed, both
+under the de-VHE slbounce build `SLBOUNCE-DEVHE-MARK.EFI` (SHA-256 prefix `4107c28c`). Ten photographs were taken: four
+of boot 6's page; for boot 7 two of the console before the bounce, one of q1n1's EL2 page and three of the panel. The
+stick was read again afterwards: `DONE1.TXT` and `DONE2.TXT` say `AUTORUN morning-nvme-smp STEP 1 STARTED` and `STEP 2
+STARTED`, which show that each step started and nothing more. Boot 7's console shows `Pci(0x80,0x0)/USB(0x1,0x0)`: one
+USB node, the direct connection of boots 3 to 5. A third plan, `restart-probe`, ran the same evening (section 14.1). A1
+and A2 were not exercised by any of these steps. None read or wrote an xHC register or a stick sector at EL2, and
+`cpuon` issued PSCI `CPU_ON`, `CPU_OFF` and `AFFINITY_INFO` only (boot 6's image wrote its dump and `pciio.txt` to the
+stick through the firmware, before ExitBootServices, as every run of it does).
+
+- **Boot 6, step 1:** the third X2 test image, `declared` variant (`TESTS-DECL.EFI`, build id `DDE4BC575316`, SHA-256
+  prefix `b592f741`). Its page and the comparison with the prediction are in [SP11-X2-TESTS.md](SP11-X2-TESTS.md)
+  (Run 7) and [SP11-X2-V3.md](SP11-X2-V3.md) (section 13). In short (OBSERVED, read-only): T06 passed. The NVMe is
+  behind PCIe segment 6 (ECAM `0x70000000`) at 01:00.0, the link is Gen4 x4 and up at EL2, and the firmware left the
+  controller enabled and ready with its own two-entry admin queues in boot-services memory. T07 (the PCIe SMMU)
+  faulted again: UNKNOWN. T01 to T05 and T09 read as in the earlier run, and K1 stays GO. The two 8 s photograph pauses
+  worked, no hang and no reset happened inside T06, and the finished page counted down to the image's own designed
+  reset (`RESET IN 54 S`).
+- **Boot 7, step 2:** `Q1N1-PAYLOAD.EFI --el2` (q1n1 build `A9F00F9CCBB5`, runner SHA-256 prefix `c2057909`, the runner
+  of boots 4 and 5) with one payload, `cpuon` (`CPUON.BIN`, 18,056 bytes, SHA-256 prefix `3b4bfda7`; the panel shows
+  `SHA=3B4BFDA7D59F923C`; source and document `docs/SP11-PAYLOAD-CPUON.md` of the q1n1 fork, commit `d48b0af` of
+  branch `sa3eedo12-sp11-boot`). `cpuon` asks `AFFINITY_INFO` about the eleven secondary cores, starts one of them with
+  `CPU_ON` after an 8 s pause on the counter (so that the page can be photographed first), then the others after
+  another 8 s; each secondary reports the state it was entered with and powers itself off with `CPU_OFF`. The boot CPU
+  is never started and writes no system register; a secondary's stub writes its own `VBAR_EL2` and the DAIF masks and
+  nothing else, and nothing touches `CNTPOFF_EL2`. The runner declared four ranges (its image, its map copy, the
+  preload and the payload), each inside one descriptor (types 1 and 2, attribute `0x100F`), and printed `PAYLOAD READY
+  FILES=1 RANGES=4 CODE=1`; the bounce was taken and q1n1's EL2 page showed the de-VHE state seen before (`HCR_EL2`
+  `0x88000010`, E2H 0, TGE 1; `MPIDR_EL1` `0x80000000`; `CNTFRQ_EL0` `0x124F800`). The whole panel is in Appendix E.
+  The same file and runner ran twice more in the restart probe (14.1), whose step 3 gave a second, crisp panel.
+
+**The `cpuon` lines, decoded (boot 7 and step 3 of the restart probe, so OBSERVED twice on one unit: boot 7's lines after
+the first pause were read from a photograph taken at an angle, with some blur; step 3's whole 45-line panel was read from
+a video with every line legible, and it confirms or refines every value that boot 7 gave; Appendix E).**
+
+| # | Question | Panel line | What the unit showed | Label |
+| --- | --- | --- | --- | --- |
+| 1 | Are the secondaries OFF, as the `psci` payload found? | `AFFINITY` | All eleven targets answered OFF before any start, as in boot 5 | OBSERVED |
+| 2 | Does the firmware's PSCI start a core at an address the payload chose, called from EL2? | `P1 CPU_ON`, `P2 CPU_ON` | Yes. `CPU_ON` with an entry address inside the payload image (EfiLoaderCode, image base plus `0x1000`) returned `0x0:SUCCESS` for core `0x100` alone, then `ISSUED=11 SUCCESS=11` for all eleven back to back (core `0x100` a second time) | OBSERVED (both boots) |
+| 3 | What state does a secondary start in? | `EL=`, `SCTLR_EL2=`, `MPIDR=`, `FRQ=`, `CNTVOFF_EL2=` | The ten printed reports of each boot (the eleventh, `0x20300`, was dropped by the line budget; `REPORTED=11` counts it) read `EL=2`, `MPIDR=OK` (the MPIDR the MADT lists), `FRQ=SAME` (the boot CPU's `CNTFRQ_EL0`) and `CNTVOFF_EL2` 0. Every printed register line reads `SCTLR_EL2` `0x30000000`: M, C and I clear (MMU and caches off), only bits 29 and 28 set (arithmetic on the printed value) | OBSERVED (both boots, ten of eleven cores printed) |
+| 4 | Do the ID registers match the boot CPU's? | `IDS=` | `IDS=SAME` for the three cores of cluster 0 (`0x100`, `0x200`, `0x300`); `IDS=MIDR` for the cores of clusters 1 and 2, whose `MIDR_EL1` differs and whose other compared registers (`ID_AA64MMFR0_EL1`, `ID_AA64ISAR0_EL1`, `ID_AA64PFR0_EL1`) equal the boot CPU's | OBSERVED (both boots) |
+| 5 | What do `MIDR_EL1` and the entry state of the EL2 control registers look like per core? | `MIDR=`, `HCR_EL2=`, `VBAR_EL2=` | The next table and the bullets after it | OBSERVED (both boots; crisp in step 3) |
+| 6 | Does `CPU_OFF` work, and can a core be started again? | `P1 POWER_OFF`, `CORES` | Phase 1: `OFF=1 NOT_OFF=0`. At the end `STARTED=11 REPORTED=11 OFF=11`, the payload's own return was `RETURN=0X0` and its last summary line says `LEFT_RUNNING=0`: no core left running (`AFFINITY_INFO` said OFF for all eleven within the payload's wait). Core `0x100` was started twice | OBSERVED (both boots) |
+| 7 | Did anything fault or get refused? | `DONE` | `STACK=OK LOADS=0 FAULTS=0 REFUSED=0 LINES=40 DROPPED=0`. The 40-line budget suppressed six lines in both boots (`SUPPRESSED=6`: the last two lines of core `0x20200`, all three of `0x20300` and the phase 2 `POWER_OFF` line); the summary counts are not affected. The line that lists what was not done reads `NOT_DONE NO_SYSTEM_OFF_RESET_SUSPEND NO_CPU_SUSPEND BOOT_CPU_NO_MSR LEFT_RUNNING=0` (cut by the edge of boot 7's photograph, whole in step 3's video) | OBSERVED (both boots) |
+| 8 | Do the payload's cache rules work? | `NO_REPORT` | None of the eleven reports read `NO_REPORT` in either boot: cleaning the image and the slots to the point of coherency before `CPU_ON` and invalidating a slot before reading it were enough for these runs (QEMU, which is coherent, cannot show it) | OBSERVED (both boots) |
+
+**Per core (OBSERVED).** `HCR_EL2` and `VBAR_EL2` are what the stub found at entry (`SCTLR_EL2` was `0x30000000` on every
+printed core). The `MIDR_EL1` and entry-state columns are step 3's crisp values, and boot 7's agree with them where they
+were legible. `DT_US` is the secondary's first counter read minus the primary's read right after its `CPU_ON` returned,
+in microseconds, and differs between the boots; `~` marks a boot 7 value read from the blurred photograph.
+
+| Core (affinity) | Cluster | `MIDR_EL1` | `HCR_EL2` | `VBAR_EL2` | `DT_US`, boot 7 | `DT_US`, step 3 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `0x100`, first start (phase 1) | 0 | `0x512F0011`, the boot CPU's (`IDS=SAME`) | `0x1488000038` | `0xFFFFFF9CEA002800` | 45 | 45 |
+| `0x100`, second start (phase 2) | 0 | same | `0x1488000038` | `0xCE60A800` | ~330 | 294 |
+| `0x200` | 0 | same | `0x80000000` | `0x0` | 263 | 288 |
+| `0x300` | 0 | same | `0x80000000` | `0x0` | ~2006 | 2001 |
+| `0x10000` | 1 | `0x511F0011` | `0x80000000` | `0x0` | 369 | 476 |
+| `0x10100` | 1 | `0x511F0011` | `0x80000000` | `0x0` | 425 | 444 |
+| `0x10200` | 1 | `0x511F0011` | `0x1488000038` | `0xFFFFFF9CEA002800` | 452 | 458 |
+| `0x10300` | 1 | `0x511F0011` | `0x80000000` | `0x0` | ~1999 | 1994 |
+| `0x20000` | 2 | `0x511F0011` | `0x80000000` | `0x0` | 416 | 369 |
+| `0x20100` | 2 | `0x511F0011` | `0x80000000` | `0x0` | 442 | 428 |
+| `0x20200` | 2 | `IDS=MIDR`: differs from the boot CPU's (its `MIDR=` line was dropped) | not printed | not printed | 456 | 440 |
+| `0x20300` | 2 | not printed | not printed | not printed | not printed | not printed |
+
+The `VBAR_EL2` values are step 3's. In boot 7 the first start's and `0x10200`'s were an upper-half address ending in
+`2800` with some digits not legible, and the second start's an address inside that boot's payload image (`0xCEA8B...`).
+The vector table that the stub installs sits at the payload image base plus `0x800`: base `0xCE60A000` in step 3,
+`0xCEA8B000` in boot 7 (allocations of one boot each, not constants).
+
+- **`MIDR_EL1` differs by cluster (OBSERVED twice).** The boot CPU and cluster 0 read `0x512F0011`; every line that shows
+  a value for clusters 1 and 2 reads `0x511F0011` (six of those eight cores print it, the seventh flags `IDS=MIDR` and
+  the eighth was not printed, in both boots). The two values differ in the variant field only (variant 2 against variant
+  1; implementer `0x51`, architecture `0xF`, part `0x001` and revision 1 in both: arithmetic on the printed values). Why
+  is not established: it is what the cores report. The third-party profile of another X1E80100 machine lists the same
+  two values ([SURFACE-PRO-11.md](SURFACE-PRO-11.md), E26).
+- **The entry state of the EL2 control registers is not the same on every core (OBSERVED twice, crisp in step 3).**
+  Seven cores (`0x200`, `0x300`, `0x10000`, `0x10100`, `0x10300`, `0x20000`, `0x20100`) came up with `HCR_EL2`
+  `0x80000000` (RW only, E2H clear) and `VBAR_EL2` 0. Core `0x100` at its first start and core `0x10200` came up with
+  `HCR_EL2` `0x1488000038` (E2H, TGE, RW, TERR, AMO, IMO and FMO set: arithmetic on the printed value) and with the same
+  16-digit high-half `VBAR_EL2` (2 KiB aligned) within a boot. That value differs from boot to boot (boot 7's digits were
+  only partly legible, step 3's is `0xFFFFFF9CEA002800`, step 2's was not read). INFERRED, untested: an EL2 image at a high
+  virtual address, in the VHE regime (E2H and TGE set), ran on those two cores earlier; which software is not
+  established. The entry state of `0x20200` and `0x20300` is UNKNOWN: their register lines were dropped by the line
+  budget in both boots.
+- **`HCR_EL2` and `VBAR_EL2` of core `0x100` survived its own `CPU_OFF` and `CPU_ON` (OBSERVED, step 3; boot 7's blurred
+  photograph agrees).** On its second start the core read `HCR_EL2` `0x1488000038` and `VBAR_EL2` `0xCE60A800`, which is
+  that boot's payload base plus `0x800`: the vector table that the stub itself installed on its first start, where the
+  first start had read the high-half address. So this unit keeps or restores at least those two EL2 registers of a core
+  across `CPU_OFF` and `CPU_ON`; whether it does for the others, or for another core, was not read.
+- **Start latency.** 45 us for the single phase 1 start in both boots. Of the ten printed phase 2 values, eight lie
+  between 263 and 456 us in boot 7 and between 288 and 476 us in step 3; `0x300` and `0x10300` took about 2 ms in both
+  (2001 and 1994 us in step 3).
+
+**What this changes (the observations are in the tables above; the consequences below are INFERRED from them, and the
+plan is [SURFACE-PRO-11.md](SURFACE-PRO-11.md)).**
+
+1. **SMP through PSCI from EL2 works on this unit (OBSERVED twice: boot 7 and step 3).** `CPU_ON` is accepted for all
+   eleven secondaries,
+   they start at EL2 with the MMU off (in the ten printed reports), and `CPU_OFF` takes them down again. `CPU_ON` implemented was INFERRED from
+   `PSCI_FEATURES` in boot 5; it is now an observation. Measurement M4 of [SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md) is
+   partly answered: `SCTLR_EL2`, `HCR_EL2`, `VBAR_EL2`, `CNTVOFF_EL2`, `CNTFRQ_EL0` and three ID registers were read on
+   arrival, but not `TCR_EL2`, `TTBR0_EL2`, `MAIR_EL2` or `DCZID_EL0`, and the arrival of cores `0x20200` and `0x20300`
+   is not fully printed. The monitor's own start path, SMP with the MMU on, interrupts and the guest are untouched.
+2. **A secondary entry stub must establish all EL2 state itself.** Two cores arrived with `HCR_EL2.E2H` set and seven
+   with it clear (the other two are unknown), and `VBAR_EL2` was a high-half address on two of them and 0 on the seven,
+   so the model's "E2H UNKNOWN" arrival of a PSCI secondary (SP11-EL2-ENTRY.md, section 2.4) describes this unit. A
+   core that is started again can come back with the EL2 state it left (core `0x100`: `HCR_EL2` and `VBAR_EL2`), so a
+   stub must not assume that a restarted core is clean. The MMU is off on arrival, as the PSCI specification says.
+3. **The cores are not identical.** `MIDR_EL1` differs between clusters, so the monitor's ID-register normalisation
+   (`compat/oryon-idregs.c` records both values) and anything keyed on the MIDR are per-core questions (the NV2 record,
+   whose MIDR the gate compares exactly with the core it runs on, and the K1 result itself, which was measured on the
+   boot CPU, in cluster 0).
+4. **A1 and A2 are not affected.** Nothing here wrote an xHC register or a stick sector.
+
+**The board restarted by itself after boot 7 (OBSERVED, operator report; the cause is UNKNOWN, and so is the time).**
+After the photographs the operator reported that the second boot restarted right after the last photograph. The time
+was not recorded, and the still photographs carry no capture times (their EXIF data is stripped). What the page's
+`UPTIME` says has to be read correctly. In q1n1's heartbeat code (`platform/uefi/main.c` of the fork at `d48b0af`, lines
+1626 to 1655) `start` is read before the payload runner is called and the heartbeat's `last` begins equal to it, so the
+first heartbeat after the chain returns draws `(counter - start) / frequency`, which already includes the whole chain;
+the page shows `UPTIME 0 S` while the chain runs (boot 4's photographs, and step 2's, 14.1). The `cpuon` chain holds two
+8 s waits, so its first heartbeat reads about 16 to 20 S (in step 3 the chain returned at about `UPTIME 19 to 20 S`).
+The last photograph of boot 7 shows `UPTIME 16 S`: it is that first heartbeat, so it was taken within about a second
+of the chain's end (INFERRED from the one-second heartbeat). It is not the time of the restart and does not say how
+long the page stayed up after the chain. No number was recorded for the restart (UNKNOWN); the operator's "right after
+the last photograph" makes it INFERRED to have come seconds after that heartbeat, at about `UPTIME 17 to 25 S`. What
+the page showed after that photograph is lost.
+
+- q1n1 does not reset the board by itself in this flow: its idle loop is a `for (;;)` with a heartbeat; it calls
+  `SetWatchdogTimer(0)` before ExitBootServices (two sites in `platform/uefi/main.c`); the one `ResetSystem` call is in
+  a path that runs after ExitBootServices only to return to the firmware, and not in the payload flow (VERIFIED by
+  reading the fork's source; it says nothing about what the firmware does).
+- Earlier, a plain q1n1 EL2 page stayed up for about 40 minutes with no restart (operator report, B1 attempt 4, the VHE
+  state, an older build). In the de-VHE state a plain page was alive at `UPTIME 123 S` (step 1 of the restart probe,
+  14.1), and boot 5's page, after a chain of read-only payloads, was photographed at `UPTIME 3 S` and `UPTIME 10 S`
+  with no restart reported. Boot 6 also ended in a restart, which is the X2 image's designed reset (INFERRED from the
+  page's `RESET IN` countdown).
+- So the restart is new, and it coincides with the `cpuon` payload, the first that issued `CPU_ON` and `CPU_OFF`: it
+  was reported after two of its three boots (boot 7 and step 2; the time of neither was recorded) and not observed in
+  the third (step 3, filmed alive through `UPTIME 36 S`; its state beyond that is UNKNOWN: 14.1). A delayed reaction
+  of a watchdog, or of another firmware agent, to the core power cycles is a hypothesis (INFERRED, untested); the
+  runner path alone is not excluded either. Nothing here establishes it.
+- What would separate them: the exact uptime at the restart (film a `cpuon` page until it restarts: the last `UPTIME`
+  in the video, with its `creationdate`, gives the time; 14.1); a chain of the read-only payloads only, held for
+  minutes (control); and cores left running instead of powered off.
+
+### 14.1 The restart probe (three steps, 2026-11-15; OBSERVED, one boot per step)
+
+**What ran.** The plan `restart-probe` ran three steps, one per boot, each preceded by the de-VHE slbounce build
+`SLBOUNCE-DEVHE-MARK.EFI`: step 1, `Q1N1.EFI --el2`, plain q1n1 (SHA-256 prefix `82b63938`), as the control for the page
+itself; steps 2 and 3, `Q1N1-PAYLOAD.EFI --el2` with a manifest of the same `cpuon.bin` as boot 7 (SHA-256 prefix
+`3b4bfda7`) and the same runner. Nothing was typed in a boot, but the operator started every boot of the stick (power
+off, then Volume-Down with Power): after a restart by itself the Surface does not come back to the stick but follows
+its normal boot order (operator report after boot 4, section 13), so a plan cannot run unattended and a restart ends
+its step. None of the three read or wrote an xHC register or a stick sector at EL2 (A1 and A2 stay NOT granted).
+
+**How the runs were timed (a method for later runs).** The Shell script writes a marker file before each step, here
+`DONE1.TXT` to `DONE3.TXT` (`AUTORUN restart-probe STEP n STARTED`). Its FAT time is the firmware's real-time clock,
+which reads the same local time (UTC+4) as the operator's phone: 21:38:28, 21:41:20 and 21:42:50 (FAT resolution 2 s).
+The operator's videos keep the recording start in the QuickTime `creationdate` metadata, in local time, while the still
+photographs have their EXIF data stripped. The two clocks agree within the 2 s resolution: step 1's video started in
+the same 2 s slot as its marker, and step 3's started at 21:42:47, 3 s before its marker, as it should if filming began
+first. With them a page's `UPTIME 0 S` can be placed on the wall clock (step 3's was at about 21:42:53.5, 3.5 s after
+the marker write), and from there every later `UPTIME`. A marker gives only a weak upper bound on an event that the
+page cannot show, such as a restart, because the gap to the next marker also holds the operator's power cycle (below);
+a video that runs through the restart gives its time directly, from the last `UPTIME` it shows.
+
+| Step | What ran | What was seen | Label |
+| --- | --- | --- | --- |
+| 1 | plain `Q1N1.EFI --el2` | The page was alive at `UPTIME 123 S` (photographed; the operator then power-cycled). A 30.5 s video, started at 21:38:28, covers its first seconds | OBSERVED |
+| 2 | `cpuon` | The operator reported that the board restarted by itself. All five photographs show `UPTIME 0 S` (the heartbeat does not update during the chain; the last was taken mid-chain, at `NEXT CPU_ON ALL AFTER 8 S`) and none shows the finished panel, so the report is of the screen going away, with no `UPTIME` | OBSERVED (operator report); the time UNKNOWN (INFERRED, weak: `UPTIME` about 41 S or earlier, below) |
+| 3 | `cpuon` | The operator reported that it stayed up, without a duration. A 42.5 s video, started at 21:42:47, shows the page from `UPTIME 0 S` through the chain (it returned at about `UPTIME 19 to 20 S`) and the finished panel at `UPTIME 32 S`, to the end of the video at about `UPTIME 36 S` (21:43:29.5), the finished page still on screen | OBSERVED alive through `UPTIME 36 S`; UNKNOWN beyond |
+
+**When did step 2 restart? (UNKNOWN; INFERRED, weak: `UPTIME` about 41 S or earlier).** The operator reported that it
+did, and no time was recorded. No photograph shows the page after the chain: the last is mid-chain. `DONE3` minus
+`DONE2` is 90 s, plus or minus 2 s, and that gap holds three things: the time from step 2's marker to its restart; the
+operator noticing it and holding Power; and the operator's Volume-Down with Power, the firmware's boot, the Shell's
+countdown and the marker write of step 3. The last two took 45 s once, between step 1 and step 2 (from the photograph
+at `UPTIME 123 S`, taken at about 21:40:35, to `DONE2` at 21:41:20, the same actions; OBSERVED once). If the operator
+needed at least as long this time, step 2's restart came no later than about 45 s after `DONE2`, that is at about
+`UPTIME 41 S` or earlier (its page started about 3.5 s after the marker). It may have come much earlier, even before
+the chain ended: the page's `UPTIME` stays 0 S during the chain, which lasts about 20 s. Both the assumed pace and the
+one-sided bound make this weak. For boot 7 see section 14 (INFERRED about `UPTIME 17 to 25 S`; no number recorded).
+
+**What is solid, and what is not.**
+
+- A plain q1n1 page was alive at `UPTIME 123 S` (step 1, the de-VHE state, one boot), past every restart estimate above:
+  in that boot the page itself did not restart.
+- A restart was reported after two of the three `cpuon` boots (boot 7 and step 2); the time of neither was recorded
+  (UNKNOWN). Step 3 was OBSERVED alive through `UPTIME 36 S` (video; the operator's "stayed up" has no duration), and
+  its state beyond that is UNKNOWN.
+- INFERRED, and weak: the restart is not at one fixed `UPTIME`. Step 3 was alive through 36 S, step 2's restart is
+  estimated at 41 S or earlier and boot 7's at 17 to 25 S; one common time would have to fall between 36 and 41 S,
+  which boot 7's estimate does not allow. Both estimates rest on the operator's wording and pace.
+- The runner flow with read-only payloads has no observation beyond `UPTIME 10 S` (boot 5), so the runner flow alone is
+  not excluded.
+- The cause is UNKNOWN.
+
+**What would settle it next (NOT RUN).** Film a `cpuon` page from its start until it restarts, or for minutes if it does
+not, keeping the video's `creationdate`: the last `UPTIME` the video shows is the time of the restart. Do the same for a
+chain of read-only payloads only (the control for the runner flow) and for a `cpuon` variant that leaves the cores
+running instead of powering them off. Each is a boot of its own, started by the operator and needing the operator's
+decision like every boot; none writes to a device, and A1 and A2 stay NOT granted.
+
+### 14.2 Logging, the stick, and what is not shown
+
+**What this changes for logging.** The panel stays the only log channel. No stick write at EL2 exists (S1 to S6 are
+UNIMPLEMENTED; A1 and A2 stay NOT granted), so what the panel showed after the last photograph is lost, and the one fact
+that matters most about the restarts, when the board restarted, is exactly what a page cannot show. The restart probe
+found a way to put a page's `UPTIME` on the wall clock (a video's `creationdate` with the stick's marker times, 14.1),
+but as run it did not time a restart: the next marker only bounds one from above, and weakly, because the operator's
+power cycle sits in the gap, and step 3's video, the only one of a `cpuon` page, ended at `UPTIME` about 36 S with the
+page still up. A video that runs through a restart would give its time directly. Filming the page (alternative (v), Q6)
+is therefore the cheap answer for timing; a persistent log (B3) would be the lasting one and is not advanced by these
+boots. The runner's own line budget cost six lines in each `cpuon` boot (counts intact). After a restart by itself the
+board does not come back to the stick (14.1; section 13), so each boot of the stick needs the operator.
+
+**One fact for the stick question (OBSERVED, `pciio.txt` of boot 6, the firmware's PCI I/O view).** It lists four USB
+controller instances, with BAR0 `0x0A000000`, `0x0A400000`, `0x0A200000` and `0x0A600000`, and no PCI location.
+Section 12 recorded that firmware lists four xHCI handles and that the survey showed three of them (BAR0 `0x0a000000`,
+`0x0a400000`, `0x0a200000`): those three are in this list, so the fourth is the one at `0x0A600000`, the `usb_1_ss0`
+window (INFERRED by elimination). `0x0A800000`, the window of `usb_1_ss1`, is not among them. Nothing was read from any
+of them at EL2 in these boots.
+
+**What these runs do not show.** The cause of the restarts and their times (UNKNOWN for boot 7 and step 2; the
+estimates of 14.1 and section 14 are INFERRED and weak); whether step 3 restarted after `UPTIME 36 S`; what the panel
+showed after the last photograph of boot 7; repeatability beyond three `cpuon` boots on one unit; the arrival state of
+cores `0x20200` and `0x20300` (their lines were dropped from both panels); `TCR_EL2`, `TTBR0_EL2`, `MAIR_EL2` and
+`DCZID_EL0` on a secondary; anything about a secondary with the MMU on, interrupts or the guest; why the PCIe SMMU
+registers fault at EL2; why `MIDR_EL1` and the entry state differ between cores, or why the high-half `VBAR_EL2` differs
+between boots (no cause is claimed); any controller reset or DMA on the NVMe.
 
 ## Appendix A. The page lines of the survey boot (S0; EXPERIMENTAL in the q1n1 fork; ran once on the unit, section 12)
 
@@ -1080,3 +1331,63 @@ PAYLOAD USBSMMU CB3 TTBR1=0X0
 PAYLOAD USBSMMU WALK UNSUPPORTED NESTED CBAR=0X35E03 CBA2R=0X1 SCTLR=0XE0 TCR=0X0 TTBR0=0X0
 PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=213 FAULTS=0 REFUSED=0 LINES=17 DROPPED=0
 ```
+
+## Appendix E. The panel of the `cpuon` payload (boot 7 and restart-probe step 3; section 14)
+
+The panel of the `cpuon` payload, capital letters only (the page font folds lower case to upper case), at most 100
+characters per line: the runner's own notes, the payload's 40 lines (`LINES=40`) and its `DONE` line, 45 lines in all.
+Boot 7's first block was read from two crisp photographs, taken at the two 8 s pauses (the last line of the block is
+the second pause); its later lines were read from a photograph taken at an angle, with some blur. Step 3 of the restart
+probe showed the whole panel again and it was read from a video with every line legible, so the values of the later
+lines below are crisp. The first block is boot 7's as transcribed; step 3's panel has the same lines, with the two
+differences given after it. EXPERIMENTAL in the q1n1 fork; OBSERVED twice on the unit.
+
+```text
+PAYLOAD LOADED INDEX=0 BASE=0XCEA8B000 BYTES=18056 SHA=3B4BFDA7D59F923C TYPE=1
+PAYLOAD READY FILES=1 RANGES=4 CODE=1
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 0 3B4BFDA7D59F923C
+PAYLOAD CPUON BOOT_CPU MPIDR_EL1=0X80000000 CNTFRQ_EL0=0X124F800
+PAYLOAD CPUON NEXT AFFINITY
+PAYLOAD CPUON AFFINITY 0X100=OFF 0X200=OFF 0X300=OFF 0X10000=OFF 0X10100=OFF 0X10200=OFF 0X10300=OFF
+PAYLOAD CPUON AFFINITY 0X20000=OFF 0X20100=OFF 0X20200=OFF 0X20300=OFF
+PAYLOAD CPUON NEXT PREPARE
+PAYLOAD CPUON NEXT CPU_ON 0X100 AFTER 8 S
+PAYLOAD CPUON P1 CPU_ON 0X100 RET=0X0:SUCCESS
+PAYLOAD CPUON P1 0X100 EL=2 MPIDR=OK IDS=SAME FRQ=SAME CNTVOFF_EL2=0X0 DT_US=45
+PAYLOAD CPUON P1 0X100 SCTLR_EL2=0X30000000 HCR_EL2=0X1488000038 VBAR_EL2=0XFFFFFF...2800
+PAYLOAD CPUON P1 POWER_OFF OFF=1 NOT_OFF=0
+PAYLOAD CPUON P1 NORMAL
+PAYLOAD CPUON NEXT CPU_ON ALL AFTER 8 S
+```
+
+The `...` in boot 7's `VBAR_EL2` line stands for six digits that were not legible (the value has 16 digits). In step 3 the
+`LOADED` line read `BASE=0XCE60A000` (that boot's allocation) and the same register line read
+`VBAR_EL2=0XFFFFFF9CEA002800`.
+
+After that line phase 2 follows (the `P2` lines), in this form:
+
+```text
+PAYLOAD CPUON P2 CPU_ON ISSUED=11 SUCCESS=11
+PAYLOAD CPUON P2 <affinity> EL=<n> MPIDR=<OK> IDS=<SAME|MIDR> FRQ=<SAME> CNTVOFF_EL2=<value> DT_US=<n>
+PAYLOAD CPUON P2 <affinity> SCTLR_EL2=<value> HCR_EL2=<value> VBAR_EL2=<value>
+PAYLOAD CPUON P2 <affinity> MIDR=<value>/BOOT=<value>          (only where IDS=MIDR)
+```
+
+one report line and one register line per core, plus the `MIDR` line for the cores whose `MIDR_EL1` differs from the
+boot CPU's (for example `MIDR=0X511F0011/BOOT=0X512F0011` for core `0X10000`). Cores of clusters 1 and 2 therefore need
+three lines and cluster 0 cores two, which is why the 40-line budget ran out in both boots: the last two lines of core
+`0X20200`, all three of `0X20300` and the phase 2 `POWER_OFF` line are not on the panel (`SUPPRESSED=6`). The values of
+the printed `P2` lines are in the per-core table of section 14 (crisp from step 3's video). The summary lines at the end
+of the payload and the runner's `DONE` line, as step 3 shows them whole:
+
+```text
+PAYLOAD CPUON CORES STARTED=11 REPORTED=11 OFF=11 SUPPRESSED=6
+PAYLOAD CPUON NOT_DONE NO_SYSTEM_OFF_RESET_SUSPEND NO_CPU_SUSPEND BOOT_CPU_NO_MSR LEFT_RUNNING=0
+PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=0 FAULTS=0 REFUSED=0 LINES=40 DROPPED=0
+```
+
+In boot 7 the middle line was cut by the edge of the photograph after `LEFT_RUNNING`, and the left column of that page
+read `UPTIME 16 S`: the first heartbeat after the chain returned, not a measure of how long the page then stayed up
+(section 14). In step 3 the page started at about 21:42:53.5, the chain returned at about `UPTIME 19 to 20 S`, and the
+video ended at about `UPTIME 36 S` with this panel on screen (section 14.1).

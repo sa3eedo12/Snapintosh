@@ -48,8 +48,11 @@ recent full desktop sessions, which ran about 25 to 30 minutes each.
   EL2 through a scoped-sweep slbounce fork and read back its EL2 state, all
   OBSERVED on one unit; on 2026-11-13 the fork's de-VHE trampoline ran its
   configuration writes, cleared E2H and turned the MMU back on, and q1n1 read
-  `HCR_EL2` back as 0x88000010 (one boot, boot CPU only)), and nothing beyond that
-  has. Host-side groundwork
+  `HCR_EL2` back as 0x88000010 (one boot, boot CPU only); on 2026-11-14 and 2026-11-15 a second and a third X2 image
+  and a read-only USB survey ran too, and a stick payload runner started and stopped the eleven secondary
+  cores through PSCI (OBSERVED, one boot each; the board then restarted by itself after two of the three boots of that
+  payload, cause and times UNKNOWN)), and nothing
+  beyond that has. Host-side groundwork
   exists and is EXPERIMENTAL (see
   [Surface Pro 11 (planned)](#surface-pro-11-planned) below). The A16 monitor
   is byte-identical without `-DSNAP_PLATFORM_SP11=1`.
@@ -64,8 +67,11 @@ reached EL2 on it through a scoped-sweep slbounce fork and read back its EL2
 state (OBSERVED, one unit; [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.5).
 On 2026-11-13 that fork's de-VHE trampoline ran on the boot CPU: it cleared E2H,
 turned the MMU back on, and q1n1 read `HCR_EL2` back as 0x88000010 (OBSERVED, one
-boot; the secondary CPUs, FEAT_NV2 with E2H clear and repeatability are not
-measured).
+boot; repeatability is not measured). Later one-boot observations: FEAT_NV2 with E2H clear
+(2026-11-14, T02 GO beside `E2H=0`), the eleven secondary CPUs started through PSCI from EL2 (2026-11-15, twice; the board
+then restarted by itself after two of the three boots of that payload, cause and times UNKNOWN) and the NVMe's PCIe root
+read at EL2 (2026-11-15, T06 passed), all in
+[SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.5.
 Everything else in this section is NOT RUN on a Surface Pro. The rows are
 host-side groundwork. Each is EXPERIMENTAL (tested
 on the host, and the EFI images also under QEMU) and is built only with
@@ -81,7 +87,7 @@ lists the tests.
 | EL2 entry (VHE or de-VHE), timer offsets, `DC ZVA` | EXPERIMENTAL host models and decision record ([SP11-EL2-ENTRY.md](SP11-EL2-ENTRY.md)); linked into no build |
 | Thermal guard | EXPERIMENTAL read-only model; refuses every admission until X2 measures the platform |
 | `tools/cycle.py --target sp11` | EXPERIMENTAL refusal layer; only the passive checks run, and no SP11 hardware flow exists (UNIMPLEMENTED). `--target` must be spelled in full, and the modes that can write NVMe need a per-run authorization on top of the standing ones |
-| EFI state probe and X2 functional test image | EXPERIMENTAL ([SP11-X2-TESTS.md](SP11-X2-TESTS.md)); they are the instruments for gates X1 and X2, which ran on a unit once on 2026-11-11 (OBSERVED). Hardened after an independent review, with host tests and QEMU only: the passive probe reads no unguarded newer ID register and the PSCI image refuses an HVC conduit; the tests image halts on a framebuffer-only fatal page (nothing written to the stick, no ExitBootServices) when a restore fails, and refuses device windows that are not plausible or that the memory map calls RAM or firmware. The hardening was verified on the host and under QEMU |
+| EFI state probe and X2 functional test image | EXPERIMENTAL ([SP11-X2-TESTS.md](SP11-X2-TESTS.md)); they are the instruments for gates X1 and X2, which ran on a unit on 2026-11-11, and the X2 image ran again on 2026-11-14 (second version) and 2026-11-15 (third version: T06 passed) (OBSERVED, one boot each). Hardened after an independent review, with host tests and QEMU only: the passive probe reads no unguarded newer ID register and the PSCI image refuses an HVC conduit; the tests image halts on a framebuffer-only fatal page (nothing written to the stick, no ExitBootServices) when a restore fails, and refuses device windows that are not plausible or that the memory map calls RAM or firmware. The hardening was verified on the host and under QEMU |
 | Boot media | EXPERIMENTAL staging tool for the USB stick; preparing the stick is the operator's step |
 | USB host link, display, input, NVMe window, GPU (a7xx) | Studies and host models ([host link](SP11-HOST-LINK-STUDY.md), [display](SP11-DISPLAY-STUDY.md), [input](SP11-INPUT-STUDY.md), [NVMe window](SP11-NVME-WINDOW.md), [GPU](SP11-GPU-A7XX-STUDY.md)), EXPERIMENTAL. No bring-up code exists: PHY and clock bring-up, the display and GPU drivers and the input driver are UNIMPLEMENTED |
 | Wi-Fi (stretch goal) | Study and a board-container reader ([Wi-Fi](SP11-WIFI-STUDY.md)), EXPERIMENTAL. The module is WCN7850-class, not the A16's QCC2072. No bring-up code exists: the hand-off survey, admission, the firmware boot and the driver port are UNIMPLEMENTED |
