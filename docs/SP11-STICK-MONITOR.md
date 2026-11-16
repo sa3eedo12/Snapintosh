@@ -1,4 +1,4 @@
-# SP11 stick wrapper: the monitor entry (work item 4b, Phases A and B)
+# SP11 stick wrapper: the monitor entry (work item 4b, Phases A to C)
 
 Status: EXPERIMENTAL. Hardware NOT RUN. Nothing in this note authorises a run: the operator authorises by the SHA-256 of the record that
 `--m1-run` makes (sections 10 and 12), and only then. Labels: VERIFIED (a host test of this tree shows it; never a hardware result), OBSERVED (a run on the unit,
@@ -19,13 +19,14 @@ SNAPMON-M1.BIN and SNAPREP-M1.BIN: a different SHA-256 is a different authorisat
 
 | File | Role |
 | --- | --- |
-| `probes/sp11-stick-monitor.c` (about 16 KB) | the stage; the call trampoline (assembly in a C file); seeded faults (host build only) |
+| `probes/sp11-stick-monitor.c` (about 20 KB) | the stage; the call trampoline (assembly in a C file); seeded faults (host build only) |
 | `probes/sp11-stick-monitor.h` | parameters, `#error` checks of the pins, the PARAMS offsets |
 | `probes/sp11-stick-monitor-record.h` | the record at REPORT.DAT + 0x12000 and the page lines (one renderer for wrapper and reporter) |
 | `probes/sp11-stick-reporter.c` | gated: the record lines, the window decode, the GIC subset |
 | `probes/sp11-stick-wrapper.c`, `-hw.h` | gated hooks only: the stage call, the gate, thirteen EL2 and five ID reads, IC IALLUIS, the call's prototype |
 | `tools/sp11_stick_wrapper_build.py` | `--monitor`, `--monitor-build`, `--monitor-offset` |
 | `tools/test-sp11-stick-monitor{,-build,-record}.py`, `.c`, `sp11_stick_monitor_testlib.py` | sections 8 and 9 |
+| `tools/test-sp11-stick-monitor-call.S` | Phase C: the boot stub that runs the trampoline's real bytes at EL2 under QEMU (section 13) |
 | `tools/sp11_stick_bundle_m1.py`, `sp11_stick_bundle_build.py`, `sp11_stick_bundle_record.py` | Phase B (section 12): `--m1-run`, the build report read against the files, `PARAMS_LAUNCH`, `M1_TOUCHES` |
 | `tools/sp11_monitor_census.py`, `tools/test-sp11-stick-monitor-auth.py`, `tools/test-sp11-stick-monitor-interlock.py` | Phase B: the record checked against the binaries; the suites (the second: the interlock, reach and the corrected statements) |
 
@@ -49,13 +50,13 @@ uses x18 freely (INFERRED harmless: the dry run returned to the runner).
 
 | Step | What | Failure |
 | --- | --- | --- |
-| COPIED 9 | checks, reads only: the record slot and the stack area probed writable (AT), the monitor's 64 KiB window zero, PARAMS (time box 1 to 5 s, `early_stop.flags` 0, `gpu.flags` 0), the five ID registers, the monitor image hashed in place | refuse GIC_NOT_READY, detail 64 to 73 |
+| COPIED 9 | checks, reads only: the record slot and the stack area probed writable (AT), the monitor's 64 KiB window and the 184 KiB filler below the stack's area zero, PARAMS (time box 1 to 5 s, `early_stop.flags` 0, `gpu.flags` 0), the five ID registers, the monitor image hashed in place | refuse GIC_NOT_READY, detail 64 to 73; the record is stored with it, except for 72 REPORT_UNWRITABLE: its slot is what was found unwritable, so the page says it and nothing is stored there |
 | | `IC IALLUIS; DSB ISH; ISB` | none |
-| | `sw_gic_arm`: reads, the NEXT line, 8 s, stores G, R, C, read back; sets PREPARED | refuse GIC_NOT_READY, detail = the GIC outcome (0 to 48); put back first |
+| | `sw_gic_arm`: reads, the NEXT line, 8 s, stores G, R, C, read back; sets PREPARED | refuse GIC_NOT_READY, detail = the GIC outcome (0 to 48); put back first, and the GIC record finished (sub-stage DONE) as the dry run's `gic_finish` does |
 | PREPARED 10 | thirteen EL2 registers read ("pre"); the stack area filled with a pattern | none |
-| MONITOR_ENTERED 11 | record stored (CALLING), head stored (`monitor_out`, `work_*`, `params_pa`, `ticks_launch`), then the call | none |
-| MONITOR_RETURNED 12 | extension slots compared with what was stored before the call; window cleaned by VA; x0 and window words 0 and 1 stored; registers read again and compared; stack scanned and zeroed | none: a difference is a finding |
-| DONE 13 | GIC put back (C, R, G), record stored, lines printed, `payload_entry` returns 0 | none |
+| MONITOR_ENTERED 11 | record stored (CALLING), head stored (`monitor_out`, `work_*`, `params_pa`, `ticks_launch`), the MON CALL line printed, the counter read once more, then the call | none |
+| MONITOR_RETURNED 12 | extension slots compared with what was stored before the call; window cleaned by VA; x0 and window words 0 and 1 stored; registers read again and compared; stack and filler scanned, zeroed and cleaned | none: a difference is a finding |
+| DONE 13 | GIC put back (C, R, G) and its record finished, this record stored, lines printed, `payload_entry` returns 0 | none |
 
 No frozen refusal code fits the new checks: GIC_NOT_READY (82, side W) is reused with a detail from a new range (see section 11, change request 1).
 A quarantine return (0x51554E01 or 0x51554E02, probes/xnuboot-terminal.h) is recorded and printed with "POWER CYCLE"; the wrapper still returns
@@ -70,9 +71,12 @@ are lower bounds and the bound the runner's stack would need (about 40 KiB after
 shown. S2 costs one more RAM use to authorise (the area is inside REPORT.DAT, which the wrapper already writes) and gives the size of the stack q1n1
 gives the A16 host's calls (entry.S); that the monitor needs no more is INFERRED, and the measurement below cannot replace the inference: it is a lower bound. The area is
 filled with 0xC3A5C3A5C3A5C3A5 first and scanned after: `STACK=<used>/<bytes>` on the page and in the
-record is the depth of the first run, to a word, while the stack stays in the area; `STACK FULL` is shown only if the area's lowest word changed, so an
-overflow that skips that word (a large frame) is not seen, and the 184 KiB between the records and the area, REPORT.DAT [0x13000, 0x41000), is neither
-scanned nor zeroed: what the runner loaded is there only if nothing wrote it (the fix is Phase C). The area itself is then zeroed and cleaned.
+record is the depth of the first run, to a word (the distance from the top to the lowest word the monitor changed). `STACK FULL` (flag 0x40) says that the stack
+may have overrun: the monitor wrote the area's lowest word or anything below the area. Below the area lie the 184 KiB of REPORT.DAT between the records and the
+area, the filler [0x13000, 0x41000), which a frame that skips the lowest word reaches without changing it. The filler must be zero before the call (else the check
+refuses WINDOW_DIRTY, as for a stale window) and is scanned after it: a non-zero word sets STACK FULL, and the wrapper zeroes the filler and cleans it, as it does the
+area. An overflow that goes on past the filler reaches the records and is seen by the extension compare (`WINDOW OVERRUN`); one that goes on into the monitor's window
+is not seen by the wrapper, which cannot tell it from the monitor's data (a stack of 448 KiB or more is not expected, INFERRED from H7's lower bounds).
 
 ## 4. The page, and what it means
 
@@ -87,14 +91,20 @@ and the two PARAMS flags), the GIC reads and the NEXT line (WI 8), `MON CALL` (x
 | `REFUSED=<NAME>` at stage <= GUEST_OK | bundle, pins or placement disagree; no RAM beyond REPORT.DAT written | frozen table |
 | `MON VERDICT=<PARAMS_* or IMAGE_* or REPORT_UNWRITABLE or WINDOW_DIRTY>`, `REFUSED=GIC_NOT_READY DETAIL=0X40..0X49` | a check before the call; stage COPIED, placement written, no register written | the named field |
 | `GIC VERDICT=<name>`, `REFUSED=GIC_NOT_READY DETAIL=0X0..0X30` | the GIC arm refused or a store did not hold (U3); nothing called | docs/SP11-STICK-GIC.md |
-| last line `MON CALL ...`, no `MON RET` | the monitor never returned: unbounded guest (timer class or vector), a long prepare, or a fault in its first instructions | power cycle |
-| q1n1 fault page after `PAYLOAD CALL` | a fault before the monitor's `msr vbar_el2` (offset 0x8c in the existing ELF) or in `xnuboot_setup/save`; else a wrapper bug | `llvm-nm -n` on the ELF |
+| last line `MON CALL ...`, no `MON RET` | the monitor never returned: unbounded guest (timer class or vector), a long prepare, or a fault in its first instructions. A hang or a reset then leaves in DRAM only the head and the CALLING record, both stored and cleaned before the call (its `ticks_call` is the counter read before the MON CALL line, section 5): the window is cleaned by the wrapper after the call returns, and the monitor's own clean at its exit covers the guest range, not REPORT.DAT (`publish(c->params->mem_low, c->params->mem_high)`, `probes/xnuboot/report.c:244`; `publish` is `probes/xnuboot/mmu_access.c:193`; INFERRED: the placement is above REPORT.DAT). All of it only if RAM survives the restart (U4) | power cycle |
+| q1n1 fault page after `PAYLOAD CALL` | a fault before the monitor's `msr vbar_el2` (offset 0x8c in the existing ELF) or in `xnuboot_setup/save`; else a wrapper bug. `_start` does not look at `xnuboot_setup`'s return value (below) | `llvm-nm -n` on the ELF |
 | `STACK=OVERFLOW` on `PAYLOAD DONE` | the runner's stack overran (not S2's) | report |
 | `MON RET=0X0 STATUS=0X0` | the monitor returned; the reporter decodes the window | SNAPREP |
 | `MON REGS RESTORED=NO CHANGED=0X.. <names>` | the monitor did not put those registers back | finding, not a refusal |
 | `WINDOW OVERRUN` | the extension slots changed during the call | finding |
 | `GIC RESTORE CLEAN=NO` | a GIC register did not go back | finding |
 | `MON QUARANTINE` | partial window; RAM must not be reused (RET 0x51554E01 or 02) | power cycle |
+
+**`_start` ignores a refused setup** (the reviewer's finding 8). `probes/xnuboot.S:97-100` is `bl xnuboot_setup`, `mov x1, sp`, `mrs x9, tpidr_el2`, `str x1, [x9]`: x0, the `int`
+that `xnuboot_setup` returns (1 for a work area that is small or not 4 KiB aligned, `setup.c:15,22`, for a `txm_native` that is not zero, `:75`, and others; 0 at `:117`), is
+never examined, and setup sets TPIDR_EL2 at `setup.c:40`, after three of its returns. After an early `return 1` the entry goes on with the TPIDR_EL2 the runner held and a half-built
+context: INFERRED a wild store through that register or a fault in the monitor, shown at best as a q1n1 fault page. The wrapper's frozen geometry check and the builder's `PARAMS_LAUNCH`
+keep the returns this wrapper could reach out of the way (INFERRED); nothing in the wrapper can see the value.
 
 SNAPREP-M1.BIN (after a warm restart, if RAM survives: U4) prints the head's summary, then `MON VERDICT`, IMAGE, IDS, CALL, RET, REGS, QUARANTINE,
 then, when RET is 0: `MON STATUS=OK` or `MON PREPARE FAILED CODE=-90 NV2_NO_RECORD` (the codes of probes/run.py PREPARE_FAILURES, named by a
@@ -114,7 +124,7 @@ stack. Written whole before the call (sub-stage CALLING) and after each later st
 | --- | --- |
 | 0x00 | magic `SNAPMNT1`, u32 version 1, u32 size 512 |
 | 0x10 | u32 outcome (below), u32 substage (NONE CHECKS SYNCED ARMING ARMED CALLING RETURNED DONE), u32 flags, u32 changed |
-| 0x20 | counter_hz; ticks_call, ticks_return (CNTPCT_EL0); monitor_pa, monitor_offset, monitor_bytes |
+| 0x20 | counter_hz; ticks_call, ticks_return (CNTPCT_EL0; ticks_call is read before the MON CALL line for the CALLING record and again immediately before the call for the final one, so TICKS leaves out the line and the head's store); monitor_pa, monitor_offset, monitor_bytes |
 | 0x50 | monitor_sha[4]: the digest as four little-endian words |
 | 0x70 | stack_top, stack_bytes, stack_used |
 | 0x88 | call_x[5] (x0 to x4 as passed) |
@@ -124,7 +134,7 @@ stack. Written whole before the call (sub-stage CALLING) and after each later st
 | 0x108 | 13 rows of (pre, post): DAIF, SPSEL, VBAR_EL2, HCR_EL2, TPIDR_EL2, SCTLR_EL2, TCR_EL2, CNTHCTL_EL2, CNTHP_CTL_EL2, MDCR_EL2, VTTBR_EL2, VTCR_EL2, VMPIDR_EL2 |
 | 0x1D8 | 40 zero bytes |
 
-Flags: 1 IC_SYNC, 2 CALLED, 4 RETURNED, 8 STACK_S2, 0x10 WINDOW_OVERRUN, 0x20 REGS_CHANGED, 0x40 STACK_FULL, 0x80 GIC_NOT_RESTORED. `changed` bit i is
+Flags: 1 IC_SYNC, 2 CALLED, 4 RETURNED, 8 STACK_S2, 0x10 WINDOW_OVERRUN, 0x20 REGS_CHANGED, 0x40 STACK_FULL (the monitor wrote the area's lowest word or anything below the area), 0x80 GIC_NOT_RESTORED. `changed` bit i is
 row i; compared under masks (DAIF 0x3C0, SPSEL 1, CNTHP_CTL_EL2 bits 1:0: ISTATUS is read only; the rest whole). The monitor puts them back at its
 exit (probes/xnuboot/report.c:6-47) from values it saved: HCR_EL2, VBAR_EL2, TPIDR_EL2 (last) and DAIF at entry (setup.c:126-131); VTCR, VTTBR, VMPIDR,
 CNTHCTL and MDCR in prepare (prepare.c:398-399, 440, 446-447, 498-499); CNTHP by stopping the timer. A prepare refusal before those saves (-24, -15, -14,
@@ -186,18 +196,19 @@ Run from the repository root with `source <env>` first (clang, lld, llvm, QEMU o
 
 | H | Suite | What | Tests |
 | --- | --- | --- | --- |
-| H1, H2, H6 | test-sp11-stick-monitor.py | H1: a fake monitor returns ok, a prepare failure, an ESR, both quarantine codes, another value; leaves HCR, VBAR, TPIDR, DAIF, CNTHCTL, MDCR, VTTBR, CNTHP changed; stores beyond its window (three offsets); uses 1 KiB, 128 KiB, all of the stack. H2: order (copy, IC sync with no GIC access yet, arm, PREPARED, call); exact x0 to x4 and SP; no store to the placement after MONITOR_ENTERED; GIC writes only classes G, R, C to this CPU's frame; every check before the call (eight refusals, four GIC arm refusals). H6: the stop timer's interrupts as `async.c` takes them (transcribed): HPPIR1 26, IAR1 26, re-arm, EOIR1 (+ DIR with EOImode), post 1023, three times, then the deadline without an acknowledge leaves nothing pending; also from the OBSERVED firmware state of section 9 | 18 |
-| H3, H4, H7 | test-sp11-stick-monitor-build.py | section 7; the gate off (the dry-run pair is the unit's, byte for byte; the GIC pair is not changed by this item: built twice from snapshots, with the earlier files as committed and as edited); the census; the stack census; hygiene | 30 |
+| H1, H2, H6 | test-sp11-stick-monitor.py | H1: a fake monitor returns ok, a prepare failure, an ESR, both quarantine codes, another value; leaves HCR, VBAR, TPIDR, DAIF, CNTHCTL, MDCR, VTTBR, CNTHP changed; stores beyond its window (three offsets); uses 1 KiB, 128 KiB, all of the stack. H2: order (copy, IC sync with no GIC access yet, arm, PREPARED, call); exact x0 to x4 and SP; no store to the placement after MONITOR_ENTERED; GIC writes only classes G, R, C to this CPU's frame; every check before the call (eight refusals, four GIC arm refusals). H6: the stop timer's interrupts as `async.c` takes them (transcribed): HPPIR1 26, IAR1 26, re-arm, EOIR1 (+ DIR with EOImode), post 1023, three times, then the deadline without an acknowledge leaves nothing pending; also from the OBSERVED firmware state of section 9. Phase C: the GIC record the reporter reads after a failed put-back, the filler below the stack (three overflows), the unwritable record slot, the tick of the call, and the model's dirty lines (section 13) | 31 |
+| H3, H4, H7 | test-sp11-stick-monitor-build.py | section 7; the gate off (the dry-run pair is the unit's, byte for byte; the GIC pair is not changed by this item: built twice from snapshots, with the earlier files as committed and as edited); the census; the stack census; hygiene | 33 |
 | H5 | test-sp11-stick-monitor-record.py | the record decoded independently; the page lines of wrapper and reporter against an independent renderer; the reporter on REPORT.DAT files built in Python; the window offsets and PARAMS words compiled against the monitor's own translation unit; the event and status names against the host's tables | 19 |
-| H8 | QEMU | NOT RUN: QEMU would show the call sequence only (EDK2 sets T0SZ 16 under `-cpu max`; FEAT_NV2 there is UNKNOWN) and nothing about the unit | |
+| H8 | test-sp11-stick-monitor-build.py, class Trampoline | Phase C (section 13): the real bytes of `sw_monitor_call` run at EL2 under QEMU's `-cpu max`; the monitor and the wrapper as a whole are NOT RUN under QEMU (EDK2 sets T0SZ 16 under `-cpu max`; FEAT_NV2 there is UNKNOWN) | 4 (the suite: 37) |
 
 Seeded-bad stages (a test define each; the real stage passes the check, the seeded one fails it; all as required): `no-params-check`, `no-digest`,
 `no-reg-check`, `no-ic-sync`, `stray-gic` (a write to another CPU's redistributor frame), `wrong-args` (x1 and x2 swapped), `no-s2`,
 `no-overrun-check`, `store-after` (a byte to the placement after MONITOR_ENTERED), `refuse-after` (a refusal after the call: the frozen head check
-rejects it). Build-side: an absolute-pointer object, a wrapper over OFFSET, a monitor that is not the named build's, a record of another profile,
+rejects it); from Phase C `no-gic-finish`, `no-filler-scan`, `no-filler-precheck`, `no-filler-clean`, `flush-unwritable`, `ticks-early`, `no-window-clean`, `no-record-clean`.
+Build-side: an absolute-pointer object, a wrapper over OFFSET, a monitor that is not the named build's, a record of another profile,
 different GIC macros, a misplaced entry or vectors, an offset that is not a page, a monitor that is empty or over the 8 MiB bound: each REFUSED by name. The identity check can fail (an un-gated
 letter in a panel line changes the digest), the drift check can fail, and the replay ends in EV_ASYNC for a PPI whose group changed, a foreign
-HPPIR value and a timer that never fires. What no host test shows: the monitor's code, the trampoline's execution, the unit's GIC, caches, timing.
+HPPIR value and a timer that never fires. What no host test shows: the monitor's code, the trampoline's execution on the unit's CPU with the MMU and caches on (QEMU runs it with both off), the unit's GIC, caches, timing.
 
 ## 9. The GIC as the unit showed it (OBSERVED once), and H6
 
@@ -267,10 +278,13 @@ PARTIAL`). It cannot show a wrapper that enters a monitor by an indirect branch,
 runs; it has no override, so a false positive is a refusal until the signals change (the wrappers staged so far call page 0x11000 or none, and are tested not to match; the words
 are `STAGE_TEXT` in `tools/sp11_stick_bundle_m1.py` and change together with the stage's, a test). The
 `--m1-run` kind refuses a wrapper with no `bl` to the report's monitor offset, or one that says `MONITOR NOT CALLED` (`M1_NO_MONITOR_CALL`), and a monitor that its build report does
-not name (`M1_REPORT_MISMATCH`: its digest, the layout, the offset, length and digest the wrapper was built to pin, the NV2 record). Each has a faulty case.
+not name (`M1_REPORT_MISMATCH`: its digest, the layout, the offset, length and digest the wrapper was built to pin, the NV2 record). Each has a faulty case. The reporter slot is executed in
+the same boot, so `--reporter` is refused for the same name in every kind, `--m1-run` included, when it holds that `bl` (`refuse_monitor_reporter`; Phase C): the `bl` alone, because
+SNAPREP-M1.BIN has the stage's text by design and is the one reporter this kind authorises. Faulty case: the M1 wrapper given as `--reporter` under the default, `--gic-stop` and
+`--m1-run` kinds (the third is refused for the reporter, not as `M1_REPORT_MISMATCH`: the reporter is looked at before the report is read); control: SNAPREP-M1.BIN under `--m1-run`.
 
 **The text** (`tools/sp11_stick_bundle_record.py`; a test pins its digest): section 1b (the files taken apart, the NV2 record), the store classes as `M1_TOUCHES` instead
-of `TOUCHES`, section 4 with the time budget and D8, two more stop rules; the text of every other kind is what it was. Budget: wrapper 2.9 s (OBSERVED once), GIC wait
+of `TOUCHES`, section 4 with the time budget and D8, two more stop rules and, from Phase C, the silence rule of section 5 in its own words (section 13); the text of every other kind is what it was. Budget: wrapper 2.9 s (OBSERVED once), GIC wait
 8 s (`SW_GIC_WAIT_S`), prepare UNKNOWN, the box 5 s, the stop's clean of 432 MiB about 0.6 s (the plan's estimate, INFERRED) and at most 2.9 s (INFERRED bound: the dry run's 0.96 s
 for 141.4 MiB included the re-hash): 2.9 + 8 + prepare + 5 + 0.6 is at least 16.5 s, at most 18.8 s, plus the prepare. The earliest restart datum is about UPTIME 17 s (INFERRED: one
 boot, in a run that started secondary CPUs; plan section 10), so the run is as long as that by construction; it does not meet the plan's "well under 20 s", a precaution of low weight
@@ -294,8 +308,28 @@ under the A16 early stop, which was wrong (`early_off` is the secondary entry's 
 reached when (333 indirect branches, 324 BLR and 9 BR, are not followed), MMIO by a
 computed address, or the binary of the real record (the census is of the test-record build; LTO folding a record is INFERRED not to add code): run the tool on the real ELF.
 
-**Evidence.** `test-sp11-stick-monitor-auth.py` (53 tests): the options, each refusal, the text, the budget and D8, the census, the pinned records (`$SP11_GICDRY2_DIR`
-for the third), hygiene. `test-sp11-stick-monitor-interlock.py` (37): the interlock both ways on fabricated images and on the binaries, the reach claims against the census, the call
-graph and the sources they cite, the corrected statements; `test-sp11-stick-monitor-build.py` (33) gained the profile's flag rules, the layout check of the relinked ELF and the stated
+**Evidence.** `test-sp11-stick-monitor-auth.py` (53 tests in Phase B, 54 now): the options, each refusal, the text, the budget and D8, the census, the pinned records (`$SP11_GICDRY2_DIR`
+for the third), hygiene. `test-sp11-stick-monitor-interlock.py` (37 in Phase B, 46 now): the interlock both ways on fabricated images and on the binaries, the reach claims against the census, the call
+graph and the sources they cite, the corrected statements; `test-sp11-stick-monitor-build.py` (33 in Phase B, 37 now) gained the profile's flag rules, the layout check of the relinked ELF and the stated
 limits of the position proof, each with a faulty case. NOT RUN: `real` with `--m1-run` (no kernelcache here), hardware. Still the operator's: D4 (the classes as the record lists them),
 D6, D8, D10 (`SNAP_FAIR_TOKEN=1` is in the profile), D11 proper, N1.
+
+## 13. Phase C: the code findings of the independent review (host only)
+
+Implemented; hardware NOT RUN. Every change under `probes/` is inside `SNAP_SP11_STICK_MONITOR`: the four monitor-off binaries and the three regression records are unchanged
+byte for byte (section 8), and the M1 pair has new digests. Each item has a test that the real stage passes and a seeded-bad stage that fails it.
+
+| Item (finding) | Change | Test, and the seeded-bad stage that fails it |
+| --- | --- | --- |
+| C1 (2, HIGH) | `sw_gic_put_back` stores the GIC record when it begins (sub-stage RESTORING), so SNAPREP-M1 could print `CLEAN=YES` over a register that did not go back. After both put-backs, the refusal path and the success path, the record is finished as the dry run's `gic_finish` does: sub-stage DONE, the outcome (`NOT_RESTORED` for a failed put-back), `sw_gic_flush` | the real reporter on the REPORT.DAT of a failed put-back prints the wrapper's `GIC RESTORE` line (`CLEAN=NO`, the same FAILED mask) on both paths; a clean one reads `CLEAN=YES` on both; the stored record is DONE; `no-gic-finish` |
+| C2 (5) | the filler is zero before the call (else `WINDOW_DIRTY`), scanned after it, a word there sets `STACK FULL`, then zeroed and cleaned (section 3). The flag's text is "the area's lowest word or anything below the area"; no record format change | a fake monitor that stores 4 words and 20,000 words below the area, and one that skips the area's lowest word: STACK FULL on the page and the filler zero afterwards (for the third the area scan alone saw one free word, so the flag came from the filler); a stale byte in the filler is refused; `no-filler-scan`, `no-filler-clean`, `no-filler-precheck` |
+| C3 (10) | (a) `REPORT_UNWRITABLE` prints and stores nothing in the slot it found unwritable; (b) `ticks_call` is read again immediately before the call, after the MON CALL line and the head's store, and goes into the record after the extension compare (which needs the record as it was stored); the CALLING record keeps the earlier reading | no store into the record slot for an unwritable record slot or stack area, and every other refusal still stores it; the final `ticks_call` is the first counter read after the MON CALL line and later than the CALLING record's; `flush-unwritable`, `ticks-early` |
+| C4 (6a) | the harness's dirty-line counts are asserted: no dirty line of the head, the GIC record or this record at the CALL mark, none of this record at a refusal, none anywhere in REPORT.DAT at the FINAL mark | `no-window-clean`, `no-record-clean`, `no-filler-clean`. The model is a dirty flag per 64-byte line: it shows that the stage cleans what it stores, nothing about when a real line is evicted or how Oryon's caches behave. A store beyond the window that is not in a record slot (`overrun-gap`) stays dirty: it is the monitor's word, not the stage's to clean |
+| C5 (6b) | `sw_monitor_call` is executed: the eleven instructions of the M1 build's wrapper, at their own offset in a flat image with a fake monitor, run at EL2 under QEMU (`-M virt,virtualization=on -cpu max`, no firmware, the PL011) from a boot stub of this tree (`tools/test-sp11-stick-monitor-call.S`) | with a stack in x5 and with 0: the fake monitor sees x0 to x4 as passed and SP equal to x5 (16-byte aligned), or the caller's SP less the 32-byte frame; x0 comes back; SP, x19, x29 and x30 are as before. Six changed words each fail exactly the check that matches (SP from the wrong register, a zero stack not skipped, x19 restored from the wrong slot or never saved, the frame popped by less, an argument register clobbered); one that loses x30 never returns |
+| C6 | the stop rule of this record kind: no page change for 60 seconds after the MON CALL line, note the last line and power cycle. The rule of the other kinds (twice the time box after ENTER) could end a legitimate run: the monitor prints nothing while it runs and its prepare is UNKNOWN. The 60 s is an operator-safe wait, not a measurement | the pinned digests of the M1 text; the other kinds' records regenerate byte for byte; a record that kept the old rule is another record |
+| C7 | `--reporter` is refused for `WRAPPER_CALLS_MONITOR` when it holds the `bl` to an appended monitor, under every kind (section 12) | the M1 wrapper as `--reporter` under the three kinds; control: SNAPREP-M1.BIN under `--m1-run`; no reporter that ran or is staged is flagged |
+| C8 | the failure table says what a hang or a reset leaves in DRAM, and section 4 what `_start` does with a refused setup (INFERRED) | documentation; the tests pin the sentences |
+
+What C5 shows and does not: it shows that the instructions of the real function do what their comment says on QEMU's CPU model, and that each check can fail. It does not show the unit
+(the MMU and the caches are off here; the runner's regime and the monitor's are not), the monitor's code, or any build but this one: the test expects the encoding of each word it
+changes and says so if the compiler has made another. The verdicts are the stub's own comparisons on the CPU model, not the host's. EXPERIMENTAL.

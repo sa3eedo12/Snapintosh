@@ -4,15 +4,17 @@
  * sp11-stick-monitor-record.h.
  *
  * Order, one sub-stage between steps and the record (REPORT.DAT + 0x12000) stored whole after each, so that a hang is named by the last one:
- *   checks    reads only: REPORT.DAT's record slot and stack area probed writable, the monitor's window zero, PARAMS (time box, early_stop.flags
- *             and gpu.flags), the ID registers, the monitor image in the file hashed in place against the build's pin. A check that fails
- *             refuses with GIC_NOT_READY and an SM_OUT_* detail before anything is stored but REPORT.DAT.
+ *   checks    reads only: REPORT.DAT's record slot and stack area probed writable, the monitor's window and the filler below the stack's area zero,
+ *             PARAMS (time box, early_stop.flags and gpu.flags), the ID registers, the monitor image in the file hashed in place against the build's
+ *             pin. A check that fails refuses with GIC_NOT_READY and an SM_OUT_* detail before anything is stored but REPORT.DAT; the record slot
+ *             is stored with it, except for REPORT_UNWRITABLE, whose slot is what was found unwritable.
  *   sync      IC IALLUIS, DSB ISH, ISB: the guest will execute what the copy wrote with data stores.
  *   arm       the GIC stage's arm half (sp11-stick-gic.c, built with SW_GIC_DRY_REGS=0): classes G, R and C, the NEXT line and eight seconds first.
- *   call      thirteen EL2 registers read, the stack area filled, the arguments and the head stored, MONITOR_ENTERED stored, then the call.
+ *   call      thirteen EL2 registers read, the stack area filled, the arguments and the head stored, MONITOR_ENTERED stored, the MON CALL line, the
+ *             counter read once more, then the call.
  *   return    the extension slots compared with what was stored before the call, the monitor's window cleaned to the point of coherency, x0 and
- *             the window's first two words stored, the registers read again and compared, the stack scanned for its depth and zeroed, then the
- *             GIC put back (classes C, R, G). Nothing after the call is a refusal.
+ *             the window's first two words stored, the registers read again and compared, the stack scanned for its depth and zeroed, the filler
+ *             below it scanned and zeroed, then the GIC put back (classes C, R, G) and its record finished. Nothing after the call is a refusal.
  * No recursion, no allocation, no writable global, no libc; every loop has a fixed bound. The wrapper's stores are sp11hw_store64's. */
 #include "sp11-stick-hw.h"
 
@@ -36,7 +38,9 @@ static void mon_flush(struct sw_mon *m)
     uint64_t at = m->c->report_pa + SM_REC_AT;
     uint32_t i;
     for (i = 0; i < SM_REC_BYTES / 8; i++) sp11hw_store64(at + 8 * i, m->rec.w[i]);
+#ifndef SP11_STICK_MONITOR_SEED_NO_RECORD_CLEAN
     sp11hw_clean_range(at, SM_REC_BYTES);
+#endif
     sp11hw_dsb_sy();
 }
 
@@ -73,7 +77,8 @@ static void mon_init(struct sw_mon *m, struct sw_ctx *c)
 /* ---- The checks: reads only ---- */
 
 /* The slots and the area this stage stores to are probed writable first (the wrapper probed REPORT.DAT's first and last page only), and the
- * monitor's window must be zero, as the runner loaded it: a stale word there could be taken for the monitor's own. */
+ * monitor's window and the filler below the stack's area must be zero, as the runner loaded them: a stale word in the window could be taken for the
+ * monitor's own, and one in the filler for the stack's overflow. */
 static unsigned mon_report_ready(struct sw_mon *m)
 {
     const struct sw_ctx *c = m->c;
@@ -81,7 +86,11 @@ static unsigned mon_report_ready(struct sw_mon *m)
     if (c->files[SP11SB_ROLE_REPORT].size < SP11SB_REPORT_BYTES) return SM_OUT_REPORT_UNWRITABLE;
     if (sw_probe_range(c->report_pa + SM_REC_AT, SM_REC_BYTES, 1, &probe) || sw_probe_range(m->stack_lo, SM_STACK_BYTES, 1, &probe))
         return SM_OUT_REPORT_UNWRITABLE;
-    return sp11sb_zero((const uint8_t *)sp11hw_view(c->report_pa + SP11SB_REPORT_OUT, SM_WINDOW_BYTES), SM_WINDOW_BYTES) ? 0 : SM_OUT_WINDOW_DIRTY;
+    if (!sp11sb_zero((const uint8_t *)sp11hw_view(c->report_pa + SP11SB_REPORT_OUT, SM_WINDOW_BYTES), SM_WINDOW_BYTES)) return SM_OUT_WINDOW_DIRTY;
+#ifndef SP11_STICK_MONITOR_SEED_NO_FILLER_PRECHECK
+    if (!sp11sb_zero((const uint8_t *)sp11hw_view(c->report_pa + SM_FILLER_AT, SM_FILLER_BYTES), SM_FILLER_BYTES)) return SM_OUT_WINDOW_DIRTY;
+#endif
+    return 0;
 }
 
 /* The one PARAMS chunk's destination and size, from the table that sp11sb_guest_check has passed (exactly one exists). */
@@ -206,9 +215,29 @@ static void mon_fill_stack(const struct sw_mon *m)
     for (at = m->stack_lo; at < m->stack_top; at += 8) sp11hw_store64(at, SM_STACK_PATTERN);
 }
 
+/* The filler is zero before the call (mon_report_ready), so a word in it afterwards is the monitor's: a stack that outgrew its area, or a frame
+ * that skipped the area's lowest word and so left the watermark's last word unchanged. It sets STACK FULL, and is zeroed and cleaned like the
+ * area, so that the filler is what the runner loaded again. An overflow that goes on past the filler reaches the extension slots, which
+ * mon_extension_intact compares. */
+static void mon_filler_after(struct sw_mon *m)
+{
+#ifndef SP11_STICK_MONITOR_SEED_NO_FILLER_SCAN
+    const uint64_t lo = m->c->report_pa + SM_FILLER_AT;
+    uint64_t at;
+    if (sp11sb_zero((const uint8_t *)sp11hw_view(lo, SM_FILLER_BYTES), SM_FILLER_BYTES)) return;
+    m->rec.r.flags |= SM_F_STACK_FULL;
+    for (at = lo; at < lo + SM_FILLER_BYTES; at += 8) sp11hw_store64(at, 0);
+#ifndef SP11_STICK_MONITOR_SEED_NO_FILLER_CLEAN
+    sp11hw_clean_range(lo, SM_FILLER_BYTES);
+#endif
+#else
+    (void)m;
+#endif
+}
+
 /* The depth is the distance from the top to the lowest word the monitor changed, exact to a word as long as the monitor never writes the
- * pattern itself. A stack that reached its lowest word may have gone further: the flag says the figure is only a lower bound. The area is
- * zeroed and cleaned afterwards so that REPORT.DAT beyond the records is what the runner loaded. */
+ * pattern itself. STACK FULL says that the figure is only a lower bound and the stack may have overrun: the monitor wrote the area's lowest word,
+ * or anything below the area (mon_filler_after). The area is zeroed and cleaned afterwards. */
 static void mon_stack_after(struct sw_mon *m)
 {
     const uint8_t *p = (const uint8_t *)sp11hw_view(m->stack_lo, SM_STACK_BYTES);
@@ -216,6 +245,7 @@ static void mon_stack_after(struct sw_mon *m)
     while (free_bytes < SM_STACK_BYTES && sp11sb_rd64(p + free_bytes) == SM_STACK_PATTERN) free_bytes += 8;
     m->rec.r.stack_used = SM_STACK_BYTES - free_bytes;
     if (!free_bytes) m->rec.r.flags |= SM_F_STACK_FULL;
+    mon_filler_after(m);
     for (at = m->stack_lo; at < m->stack_top; at += 8) sp11hw_store64(at, 0);
     sp11hw_clean_range(m->stack_lo, SM_STACK_BYTES);
     sp11hw_dsb_sy();
@@ -238,10 +268,16 @@ static int mon_extension_intact(const struct sw_mon *m, const struct sw_gic *g)
 
 /* ---- Refusals before the call ---- */
 
+/* The page names a refusal. The record is stored with it, except for REPORT_UNWRITABLE: its slot is what was found unwritable (or lies beyond
+ * the file), and a store there is the one thing the check said not to do. */
 static uint64_t mon_refuse(struct sw_mon *m, unsigned outcome, uint64_t detail)
 {
     m->rec.r.outcome = outcome;
+#ifdef SP11_STICK_MONITOR_SEED_FLUSH_UNWRITABLE
     mon_flush(m);
+#else
+    if (outcome != SM_OUT_REPORT_UNWRITABLE) mon_flush(m);
+#endif
 #ifdef SP11_STICK_HOST_TEST
     sp11hw_test_point("REFUSED");
 #endif
@@ -249,11 +285,35 @@ static uint64_t mon_refuse(struct sw_mon *m, unsigned outcome, uint64_t detail)
     return sw_refuse(m->c, SP11SB_E_GIC_NOT_READY, detail);
 }
 
+/* The GIC record after the put-back, finished the way the dry run finishes its own (sp11-stick-gic-dry.c, gic_finish). sw_gic_put_back stores the
+ * record when it begins, with the sub-stage RESTORING, and the registers that did not go back are only in the stage's copy: without this the copy
+ * in REPORT.DAT, which SNAPREP-M1 prints after a restart, says CLEAN=YES over a register that was not put back. `first` is what the arm decided:
+ * zero when it armed, else its refusal. */
+static void mon_gic_finish(struct sw_gic *g, unsigned first, unsigned put)
+{
+#ifndef SP11_STICK_MONITOR_SEED_NO_GIC_FINISH
+    struct sw_gic_rec *r = &g->rec.r;
+    r->first_outcome = first;
+    r->outcome = put ? SG_OUT_NOT_RESTORED : first;
+    r->substage = SG_SUB_DONE;
+    sw_gic_flush(g);
+#else
+    (void)g;
+    (void)first;
+    (void)put;
+#endif
+}
+
 /* The arm refused or a store did not hold: the GIC goes back (a no-op when no class began) and the refusal carries the GIC's outcome, the one
  * convention of docs/SP11-STICK-GIC.md, so that the same reporter line explains it. */
 static uint64_t mon_arm_failed(struct sw_mon *m, struct sw_gic *g, unsigned out)
 {
-    unsigned put = sw_gic_put_back(g);
+    unsigned put;
+#ifdef SP11_STICK_HOST_TEST
+    sp11hw_test_point("PUTBACK");
+#endif
+    put = sw_gic_put_back(g);
+    mon_gic_finish(g, out, put);
     sw_gic_say(g, SG_L_RESTORE, 1);
     sw_gic_say(g, SG_L_VERDICT, 1);
     return mon_refuse(m, SM_OUT_GIC_NOT_READY, put ? SG_OUT_NOT_RESTORED : out);
@@ -265,7 +325,7 @@ uint64_t sw_monitor_stage(struct sw_ctx *c)
     struct sw_gic g;
     struct sw_mon_rec *r = &m.rec.r;
     const uint8_t *window;
-    uint64_t out_pa = c->report_pa + SP11SB_REPORT_OUT, work = SP11SB_PIN_U64(c->pin, work_base), work_size = SP11SB_PIN_U64(c->pin, work_size), ret, ticks_back;
+    uint64_t out_pa = c->report_pa + SP11SB_REPORT_OUT, work = SP11SB_PIN_U64(c->pin, work_base), work_size = SP11SB_PIN_U64(c->pin, work_size), ret, ticks_call, ticks_back;
     unsigned out, put;
     int intact;
     mon_init(&m, c);
@@ -316,14 +376,22 @@ uint64_t sw_monitor_stage(struct sw_ctx *c)
     mon_flush(&m);
     mon_say(&m, SM_L_CALL, 1);
     sw_set_stage(c, SP11SB_STAGE_MONITOR_ENTERED);
+#ifdef SP11_STICK_MONITOR_SEED_TICKS_EARLY
+    ticks_call = r->ticks_call;
+#else
+    ticks_call = sp11hw_ticks();                /* the record and the head stored above hold the tick before the page line; TICKS is measured from this one */
+#endif
     ret = sw_monitor_call(r->call_x[0], r->call_x[1], r->call_x[2], r->call_x[3], r->call_x[4], r->stack_top);
     ticks_back = sp11hw_ticks();
     intact = mon_extension_intact(&m, &g);      /* before anything of the record or the GIC record changes: they are compared with what was stored */
 #ifdef SP11_STICK_MONITOR_SEED_NO_OVERRUN_CHECK
     intact = 1;
 #endif
+    r->ticks_call = c->head.r.ticks_launch = ticks_call;
     c->head.r.ticks_return = r->ticks_return = ticks_back;
+#ifndef SP11_STICK_MONITOR_SEED_NO_WINDOW_CLEAN
     sp11hw_clean_range(out_pa, SM_WINDOW_BYTES);
+#endif
     sp11hw_dsb_sy();
     window = (const uint8_t *)sp11hw_view(out_pa, 16);
     r->ret = c->head.r.monitor_ret = ret;
@@ -345,8 +413,12 @@ uint64_t sw_monitor_stage(struct sw_ctx *c)
     mon_say(&m, SM_L_RET, 1);
     mon_say(&m, SM_L_REGS, 1);
     mon_say(&m, SM_L_QUARANTINE, 1);
+#ifdef SP11_STICK_HOST_TEST
+    sp11hw_test_point("PUTBACK");
+#endif
     put = sw_gic_put_back(&g);
     if (put) r->flags |= SM_F_GIC_NOT_RESTORED;
+    mon_gic_finish(&g, 0, put);
     r->substage = SM_SUB_DONE;
     mon_flush(&m);
 #ifdef SP11_STICK_HOST_TEST

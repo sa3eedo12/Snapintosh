@@ -242,6 +242,82 @@ class M1Kind(BT.Case):
         self.assertEqual(len(names), 2)
 
 
+class ReporterSlot(BT.Case):
+    """Hardening of the interlock: the reporter (payload 1) is executed in the same boot, so --reporter is refused for the same name when it holds the
+    call to an appended monitor, under every kind. The call alone is looked for: SNAPREP-M1.BIN has the text of the monitor stage by design."""
+
+    def calling(self):
+        return AUTH.STATE['fake']['image']
+
+    def test_a_reporter_that_calls_a_monitor_is_refused_under_the_default_the_gic_stop_and_the_m1_kinds(self):
+        reporter = BT.write(SCRATCH / 'reporter-calls' / 'SNAPREP.BIN', self.calling())
+        for gic_stop in (False, True):
+            with self.subTest(gic_stop=gic_stop):
+                code, text, err = other_kind(dict(monitor=BT.FIX['monitor'], reporter=reporter), gic_stop)
+                self.assertEqual((code, BT.refusal(text)), (1, 'REFUSED=WRAPPER_CALLS_MONITOR'), err)
+                self.assertIn('--reporter calls a monitor', err)
+        code, text, err = AUTH.template(AUTH.stage('reporter-calls-m1', reporter=self.calling()))
+        self.assertEqual((code, BT.refusal(text)), (1, 'REFUSED=WRAPPER_CALLS_MONITOR'), err)
+        self.assertIn('--reporter calls a monitor', err, 'the reporter is looked at before the report is read: not M1_REPORT_MISMATCH')
+
+    def test_the_controls_a_reporter_that_calls_none_is_accepted_under_every_kind(self):
+        for gic_stop in (False, True):
+            self.assertEqual(other_kind(dict(monitor=BT.FIX['monitor'], reporter=BT.FIX['reporter']), gic_stop)[0], 0, gic_stop)
+        self.assertEqual(AUTH.template(AUTH.stage('reporter-control'))[0], 0)
+
+    def test_the_detail_names_the_option_and_the_stage_text_alone_refuses_a_wrapper_but_not_a_reporter(self):
+        with self.assertRaises(m1.Refused) as reporter:
+            m1.refuse_monitor_reporter(self.calling())
+        with self.assertRaises(m1.Refused) as wrapper:
+            m1.refuse_monitor_wrapper(self.calling())
+        self.assertEqual((reporter.exception.name, wrapper.exception.name), ('WRAPPER_CALLS_MONITOR', 'WRAPPER_CALLS_MONITOR'))
+        self.assertIn('--reporter', reporter.exception.detail)
+        self.assertNotIn('--monitor', reporter.exception.detail)
+        self.assertIn('--monitor', wrapper.exception.detail)
+        self.assertNotIn('--reporter', wrapper.exception.detail)
+        text_only = b'\xaa' * 5000 + STAGE[0] + b'\xaa' * 5000
+        m1.refuse_monitor_reporter(text_only)
+        with self.assertRaises(m1.Refused):
+            m1.refuse_monitor_wrapper(text_only)
+
+
+class ReporterBinaries(AUTH.Need):
+    """The reporter slot on the binaries: the real wrapper of the M1 build in it is refused, and no reporter that ran or is staged is flagged."""
+
+    def test_the_real_m1_wrapper_as_the_reporter_is_refused_under_every_kind_and_the_real_reporter_is_accepted(self):
+        real = AUTH.STATE['real']
+        for gic_stop in (False, True):
+            code, text, err = other_kind(dict(monitor=BT.FIX['monitor'], reporter=real['monitor']), gic_stop)
+            self.assertEqual((code, BT.refusal(text)), (1, 'REFUSED=WRAPPER_CALLS_MONITOR'), (gic_stop, err))
+            self.assertIn('--reporter calls a monitor', err)
+        code, text, err = AUTH.template({**real, 'reporter': real['monitor']})
+        self.assertEqual((code, BT.refusal(text)), (1, 'REFUSED=WRAPPER_CALLS_MONITOR'), err)
+        self.assertEqual(AUTH.template(real)[0], 0, 'the control: SNAPREP-M1.BIN as --reporter under --m1-run')
+
+    def test_the_reporter_of_this_kind_has_the_stage_text_and_is_not_refused(self):
+        reporter = (SCRATCH / 'm1' / 'SNAPREP-M1.BIN').read_bytes()
+        self.assertTrue(m1.monitor_call_evidence(reporter), 'the text of the stage is in it: the signal that --monitor uses would refuse it')
+        m1.refuse_monitor_reporter(reporter)
+
+    def pinned(self, path):
+        path = Path(path)
+        if not path.is_file():
+            self.skipTest(f'{path.name}: no local copy of the reporter that a pinned record was made from')
+        return path.read_bytes()
+
+    def test_no_reporter_that_ran_or_is_staged_is_flagged(self):
+        for name, key, file in (('the dry run reporter', 'plain', 'SNAPREP.BIN'), ('the GIC and stop reporter', 'gic', 'SNAPREP-GIC.BIN')):
+            with self.subTest(name):
+                m1.refuse_monitor_reporter((SCRATCH / key / file).read_bytes())
+        m1.refuse_monitor_reporter(Path(BT.FIX['reporter']).read_bytes())
+
+    def test_the_pinned_reporters_are_not_flagged(self):
+        named = os.environ.get('SP11_GICDRY2_DIR')
+        for path in (ROOT / 'build/sp11-dryrun/SNAPREP.BIN', ROOT / 'build/sp11-gic/bin/SNAPREP-GIC.BIN', Path(named or '/nonexistent') / 'binA/SNAPREP-GIC.BIN'):
+            with self.subTest(path.name):
+                m1.refuse_monitor_reporter(self.pinned(path))
+
+
 class Reach(AUTH.Need):
     """The record's claims of reach, against the census and the call graph of the monitor built from the local test record."""
 
@@ -401,19 +477,36 @@ class Note(unittest.TestCase):
 
     def test_the_false_statements_are_gone(self):
         for gone in ('(off in M1, INFERRED)', 'the measurement below replaces the inference', '(exact to a word; `STACK FULL` if the lowest word changed)',
-                     'REPORT.DAT beyond the records is what the runner loaded', 'The monitor puts these back at its exit'):
+                     'REPORT.DAT beyond the records is what the runner loaded', 'The monitor puts these back at its exit',
+                     'is neither scanned nor zeroed', '(the fix is Phase C)', 'an overflow that skips that word (a large frame) is not seen',
+                     'which nothing scans or zeroes'):
             self.assertNotIn(gone, self.flat)
 
     def test_the_corrections_are_made(self):
         for needle in ('the exit then writes zeros, not what they held, into MDCR_EL2, VTTBR_EL2, VTCR_EL2, VMPIDR_EL2, TTBR0_EL1, TTBR1_EL1, MAIR_EL1 and MDSCR_EL1',
                        'expect CHANGED rows for the first four on such a status and none for the other four',
                        'that this is harmless to the non-VHE EL2 runner is INFERRED',
-                       'cannot replace the inference: it is a lower bound', 'is neither scanned nor zeroed', '(the fix is Phase C)',
-                       'an overflow that skips that word (a large frame) is not seen',
+                       'cannot replace the inference: it is a lower bound', 'a frame that skips the lowest word reaches without changing it',
+                       'The filler must be zero before the call (else the check refuses WINDOW_DIRTY, as for a stale window) and is scanned after it: a non-zero word sets '
+                       'STACK FULL, and the wrapper zeroes the filler and cleans it',
+                       'the monitor wrote the area\'s lowest word or anything below the area',
                        'The wrapper\'s check of these is a snapshot, not a guard', '`txm_native` not at all (the builder checks all three)',
                        'the monitor re-reads `gpu.flags` and `early_stop.flags` live', 'at least 16.5 s, at most 18.8 s, plus the prepare',
                        'The earliest restart datum is about UPTIME 17 s', 'The 8 s is the operator\'s to change',
                        'with the two of the interlock below', '`WRAPPER_CALLS_MONITOR`', '`M1_NO_MONITOR_CALL`', 'it has no override', 'CNTVOFF_EL2 is read'):
+            self.assertIn(needle, self.flat)
+
+    def test_the_failure_table_says_what_a_hang_leaves_and_the_setup_return_is_quoted(self):
+        for needle in ('A hang or a reset then leaves in DRAM only the head and the CALLING record, both stored and cleaned before the call',
+                       '`publish(c->params->mem_low, c->params->mem_high)`, `probes/xnuboot/report.c:244`; `publish` is `probes/xnuboot/mmu_access.c:193`',
+                       'All of it only if RAM survives the restart (U4)',
+                       '`_start` ignores a refused setup', '`probes/xnuboot.S:97-100` is `bl xnuboot_setup`, `mov x1, sp`, `mrs x9, tpidr_el2`, `str x1, [x9]`',
+                       'INFERRED a wild store through that register or a fault in the monitor'):
+            self.assertIn(needle, self.flat)
+
+    def test_the_phase_c_statements_are_made(self):
+        for needle in ('except for 72 REPORT_UNWRITABLE', 'The 60 s is an operator-safe wait, not a measurement',
+                       'refused for the same name in every kind, `--m1-run` included', '`refuse_monitor_reporter`'):
             self.assertIn(needle, self.flat)
 
     def test_the_stop_figure_of_the_record_says_both_the_plans_and_the_bound(self):
@@ -428,10 +521,13 @@ class Note(unittest.TestCase):
 
     def test_the_record_states_the_stack_filler_and_the_params_snapshot(self):
         flat = ' '.join(AUTH.STATE['text'].split())
-        for needle in ('a stack that outgrows it writes below it, into REPORT.DAT 0x13000 to 0x41000, which nothing scans or zeroes',
-                       'is seen only if the area\'s lowest word changes (that it fits is INFERRED)',
+        for needle in ('A stack that outgrows it writes below it, into REPORT.DAT 0x13000 to 0x41000: that range must be zero before the call '
+                       '(else WINDOW_DIRTY, a refusal) and is scanned after it;',
+                       'a word in it is STACK FULL on the page, and the wrapper then zeroes it and cleans it (a store to REPORT.DAT, made only then)',
+                       'That the stack fits its area is INFERRED',
                        'That is a snapshot: the monitor reads gpu.flags and early_stop.flags again while the guest runs'):
             self.assertIn(needle, flat)
+        self.assertNotIn('which nothing scans or zeroes', flat, 'the filler is scanned and zeroed now: the sentence of Phase B is gone')
 
 
 if __name__ == '__main__':

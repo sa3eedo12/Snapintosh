@@ -11,7 +11,9 @@ The interlock between the two kinds of record. The record of the GIC and stop dr
 a wrapper that calls one must never be authorised under them (WRAPPER_CALLS_MONITOR, every kind but this one); and this kind must not
 authorise a wrapper that calls none, or a monitor that the build report does not name (M1_NO_MONITOR_CALL, M1_REPORT_MISMATCH). The call is
 recognised from the file, not from a report: by the direct `bl` into a zero-padded page that tools/sp11_stick_wrapper_build.py --monitor lays out,
-and by the text of the wrapper's monitor stage. What that cannot show is in `monitor_call_evidence`.
+and by the text of the wrapper's monitor stage. What that cannot show is in `monitor_call_evidence`. The reporter slot is executed in the same boot,
+so --reporter is refused for the same name when it holds that `bl`, under every kind: the `bl` alone (`refuse_monitor_reporter`), because the
+reporter of this kind has the stage's text by design.
 
 Evidence: EXPERIMENTAL, hardware NOT RUN. Nothing here approves anything."""
 import hashlib
@@ -134,6 +136,16 @@ def refuse_monitor_wrapper(image):
     if found := monitor_call_evidence(image):
         raise Refused('WRAPPER_CALLS_MONITOR', f'--monitor calls a monitor ({"; ".join(found[:2])}); only the record of --m1-run authorises that, '
                                                'and it names the monitor: give --m1-run, or a wrapper that calls none')
+
+
+def refuse_monitor_reporter(image):
+    """WRAPPER_CALLS_MONITOR, for every kind of record including --m1-run: `image` (--reporter, payload 1) runs in the same boot as payload 0 and is
+    authorised as a program that reads REPORT.DAT and prints, so it must not call a monitor. Only the call is looked for (appended_image_calls), never the
+    text of the monitor stage: SNAPREP-M1.BIN prints the monitor's record by design and has those words, and it is the one reporter this kind authorises.
+    What this cannot show is what monitor_call_evidence cannot, and that a reporter has no text to find."""
+    if found := appended_image_calls(image):
+        raise Refused('WRAPPER_CALLS_MONITOR', f'--reporter calls a monitor (a BL at {found[0][0]:#x} calls the zero-padded page at {found[0][1]:#x}); '
+                                               'the reporter reads REPORT.DAT and prints, and no record authorises it to call one: give the reporter')
 
 
 def _int(value, what, low=0):

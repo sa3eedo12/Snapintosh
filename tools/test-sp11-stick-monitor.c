@@ -16,9 +16,14 @@
  *   overrun=off                     one word stored at out + off (a store beyond the 64 KiB window)
  *   leave=reg:v  (repeatable)       a register left at v at its return: daif spsel vbar hcr tpidr sctlr tcr cnthctl cnthp mdcr vttbr vtcr vmpidr
  *   replay=1                        take the stop timer's interrupts as the monitor does (probes/xnuboot/async.c, clock_timer.c): H6
+ *   putphase=n                      the model's phase counter goes up by n where the stage is about to put the GIC back (test point PUTBACK):
+ *                                   a register marked NOHOLD from that phase stops holding for the put-back, on the refusal path too
+ *   below=n                         n words stored below the stack area, at stack_lo - 8 * i: an overflow into REPORT.DAT's filler; with stack=0x3FFF8
+ *                                   the area's lowest word is the one word left alone
  * Output, besides the base harness's and the GIC model's: MONMARK (IC, CALL and RET: where each came in the GIC log and the event log, the
- * counter, the arguments), MONREPLAY (one line per interrupt of the replay) and MONSTATE (the model's registers at the return). Hardware: NOT RUN;
- * nothing here touches a device. */
+ * counter, the arguments), MONREPLAY (one line per interrupt of the replay), MONSTATE (the model's registers at the return) and MONREC and
+ * MONDIRTY (the stage's observation points: the monitor record as REPORT.DAT holds it, and how many 64-byte lines of REPORT.DAT are still
+ * dirty in the model's cache). Hardware: NOT RUN; nothing here touches a device. */
 #include "test-sp11-stick-gic.c"
 
 #include "../probes/sp11-stick-monitor.h"
@@ -57,8 +62,8 @@ void sp11hw_ic_ialluis(void)
 /* ---- what a scenario makes the fake monitor do ---- */
 #define MON_LEAVES 8
 struct mon_cfg {
-    uint64_t ret, status, entered, stack, overrun;
-    int stackfull, has_overrun, replay, nleave, bumpphase, ns_ppi, has_ns_ppi;
+    uint64_t ret, status, entered, stack, overrun, below;
+    int stackfull, has_overrun, replay, nleave, bumpphase, ns_ppi, has_ns_ppi, putphase;
     struct {
         char reg[12];
         uint64_t value;
@@ -93,6 +98,8 @@ static void cfg_load(struct mon_cfg *k)
             else if (!strncmp(tok, "overrun=", 8)) k->overrun = strtoull(tok + 8, NULL, 0), k->has_overrun = 1;
             else if (!strncmp(tok, "replay=", 7)) k->replay = atoi(tok + 7);
             else if (!strncmp(tok, "bumpphase=", 10)) k->bumpphase = atoi(tok + 10);
+            else if (!strncmp(tok, "putphase=", 9)) k->putphase = atoi(tok + 9);
+            else if (!strncmp(tok, "below=", 6)) k->below = strtoull(tok + 6, NULL, 0);
             else if (!strncmp(tok, "ns_ppi=", 7)) k->ns_ppi = atoi(tok + 7), k->has_ns_ppi = 1;
             else if (!strncmp(tok, "leave=", 6)) {
                 char *colon = strchr(tok + 6, ':');
@@ -184,7 +191,28 @@ static void replay_ticks(void)
     }
 }
 
-/* The stage's observation points (probes/sp11-stick-monitor.c, host build only): what REPORT.DAT holds of the monitor record at that moment. */
+/* How many of the 64-byte lines of REPORT.DAT in [lo, hi) the model's cache still holds dirty: written by the CPU and not cleaned to the model's DRAM. */
+static unsigned dirty_lines(const struct region *r, uint64_t lo, uint64_t hi)
+{
+    unsigned n = 0;
+    uint64_t i;
+    for (i = lo / LINE; i < (hi + LINE - 1) / LINE && i < r->size / LINE; i++) n += r->dirty[i] != 0;
+    return n;
+}
+
+/* The stage's observation points (probes/sp11-stick-monitor.c, host build only): what REPORT.DAT holds of the monitor record at that moment, and
+ * how many lines of each part of REPORT.DAT are dirty then (a model of the cache: it shows what the stage cleaned, not how the unit's caches
+ * behave). PUTBACK is the point just before the GIC goes back: a scenario may move the model's phase there. */
+static void point_dirty(const char *what)
+{
+    struct region *rep = region_named("report");
+    if (!rep) return;
+    printf("MONDIRTY %s total=%u head=%u window=%u gic=%u rec=%u filler=%u stack=%u\n", what, dirty_lines(rep, 0, rep->size), dirty_lines(rep, 0, 0x1000),
+           dirty_lines(rep, SP11SB_REPORT_OUT, SP11SB_REPORT_OUT + SM_WINDOW_BYTES), dirty_lines(rep, SG_REC_AT, SG_REC_AT + SG_REC_BYTES),
+           dirty_lines(rep, SM_REC_AT, SM_REC_AT + SM_REC_BYTES), dirty_lines(rep, SM_REC_AT + SG_REC_SLOT, SM_STACK_AT),
+           dirty_lines(rep, SM_STACK_AT, SM_STACK_AT + SM_STACK_BYTES));
+}
+
 void sp11hw_test_point(const char *what)
 {
     struct region *rep = region_named("report");
@@ -193,6 +221,12 @@ void sp11hw_test_point(const char *what)
     if (rep && rep->size >= SM_REC_AT + SM_REC_BYTES)
         for (i = 0; i < SM_REC_BYTES; i++) printf("%02x", rep->cpu[SM_REC_AT + i]);
     printf("\n");
+    point_dirty(what);
+    if (!strcmp(what, "PUTBACK")) {
+        struct mon_cfg k;
+        cfg_load(&k);
+        G.phase += k.putphase;
+    }
 }
 
 /* ---- the fake monitor ---- */
@@ -202,12 +236,14 @@ uint64_t sw_monitor_call(uint64_t out, uint64_t work, uint64_t size, uint64_t pa
     uint64_t i;
     cfg_load(&k);
     mark("CALL", out, work, size, params, host_cpus, stack_top);
+    sp11hw_test_point("CALL");                                      /* what a hang here would leave in DRAM: the record as stored, and what is still dirty */
     mon_store64(out, k.status);                                     /* _start stores status and entered first */
     mon_store64(out + 8, k.entered);
     mon_store64(work, 0x4D4F4E5745524B21ull);                       /* and the work arena is the monitor's */
     if (stack_top) {
         for (i = 1; i <= k.stack / 8; i++) mon_store64(stack_top - 8 * i, 0x1111111111111111ull + i);
         if (k.stackfull) mon_store64(stack_top - SM_STACK_BYTES, 0x2222222222222222ull);
+        for (i = 1; i <= k.below; i++) mon_store64(stack_top - SM_STACK_BYTES - 8 * i, 0x3333333333333333ull + i);     /* an overflow below the area */
     }
     if (k.has_overrun) mon_store64(out + k.overrun, 0xBAD0BAD0BAD0BAD0ull);
     if (k.has_ns_ppi) G.ns_ppi = k.ns_ppi;                          /* the PPI's group changed under the monitor: its interrupt is no longer an IRQ */

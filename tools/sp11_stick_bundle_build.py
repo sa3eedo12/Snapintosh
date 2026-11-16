@@ -499,6 +499,7 @@ def prepare(a, kind, before_filler=None):
         m1.check_options(stores, gic_stop, a.time_box_s)
     descriptor, state, board = descriptor_digest(a, facts, kind)
     monitor, reporter = read_regular(a.monitor, '--monitor', minimum=4), read_regular(a.reporter, '--reporter', minimum=4)
+    m1.refuse_monitor_reporter(reporter)        # every kind, the M1 kind too: the reporter slot is executed in the same boot
     if m1_path is None:
         m1.refuse_monitor_wrapper(monitor)
     m1_facts = m1.read_report(read_m1_report(m1_path), monitor, reporter) if m1_path is not None else None

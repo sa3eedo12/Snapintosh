@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Tests for the monitor entry of SNAPMON-M1.BIN (docs/SP11-STICK-MONITOR.md section 9), monitor port work item 4b, Phase A: what the wrapper does
+"""Tests for the monitor entry of SNAPMON-M1.BIN (docs/SP11-STICK-MONITOR.md section 9), monitor port work item 4b, Phases A and C: what the wrapper does
 around the call, host only. H1: a fake monitor (tools/test-sp11-stick-monitor.c) that returns ok, a prepare failure, an EL2 fault status, both
 quarantine codes, another value, leaves HCR_EL2, VBAR_EL2 or TPIDR_EL2 changed or stores beyond its window. H2: the order of events (the copy, the
 instruction-cache sync, the GIC arm, PREPARED, the call), the exact arguments x0 to x4, the stack, no store to the placement after MONITOR_ENTERED,
 GIC writes only to this CPU's frame and only of classes G, R and C. Every check before the call, each refusing before anything but REPORT.DAT is
 stored to. H6: the stop timer's interrupts as the monitor takes them (probes/xnuboot/async.c, transcribed in the harness) against the GIC state the
-arm half leaves, with the firmware's own state as the unit showed it once (OBSERVED, one unit). The seeded-bad stages: each test define breaks
-the check that matches its fault and the real stage passes that check.
+arm half leaves, with the firmware's own state as the unit showed it once (OBSERVED, one unit). Phase C (section 13): the GIC record that the reporter
+reads after a failed put-back, the filler below the stack, an unwritable record slot, the tick of the call, and the dirty lines of the harness's model
+of a cache. The seeded-bad stages: each test define breaks the check that matches its fault and the real stage passes that check.
 
     python3 tools/test-sp11-stick-monitor.py
     Q1N1_SP11_TREE=/nonexistent python3 tools/test-sp11-stick-monitor.py      (the harness tests SKIP)
@@ -50,6 +51,7 @@ def params_patch(world, offset, value):
 # scenario name -> (model lines, monitor configuration, extra scenario lines as a function of the world, world overrides as a function of the bundle)
 CASES = {
     'happy': {},
+    'happy-reported': dict(runs=('snapmon', 'snaprep')),
     'happy-eoimode': dict(gic=['ICCCTLR 2']),
     'happy-observed': dict(gic=OBSERVED_GIC),
     'prep-fail': dict(cfg=f'status={BAD_STATUS:#x}'),
@@ -67,7 +69,11 @@ CASES = {
     'overrun-record': dict(cfg='overrun=0x11008'),
     'stack-deep': dict(cfg='stack=0x20000'),
     'stack-full': dict(cfg='stackfull=1'),
-    'not-restored': dict(cfg='bumpphase=1', gic=['NOHOLD ICC_PMR_EL1']),
+    'overflow-4': dict(cfg='below=4'),
+    'overflow-20000': dict(cfg='below=20000'),
+    'overflow-skip-lowest': dict(cfg='stack=0x3FFF8 below=4'),
+    'not-restored': dict(cfg='bumpphase=1', gic=['NOHOLD ICC_PMR_EL1'], runs=('snapmon', 'snaprep')),
+    'refuse-not-restored': dict(cfg='putphase=1', gic=['IGNORE ICC_IGRPEN1_EL1', 'NOHOLD ICC_PMR_EL1 1'], runs=('snapmon', 'snaprep')),
     'refuse-params-early': dict(extra=lambda w: [params_patch(w, M.PARAMS_EARLY, 8)]),
     'refuse-params-gpu': dict(extra=lambda w: [params_patch(w, M.PARAMS_GPU, 1)]),
     'refuse-params-box0': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, 0)]),
@@ -75,7 +81,9 @@ CASES = {
     'refuse-image-digest': dict(world=lambda b: dict(images={0: M.FAKE_FILE[:-1] + b'\x5a'})),
     'refuse-image-size': dict(world=lambda b: dict(sizes={0: len(M.FAKE_FILE) + 4096, 1: 0x6000})),
     'refuse-window-dirty': dict(world=lambda b: dict(report=b.report[:0x3000] + b'\x01' + b.report[0x3001:])),
+    'refuse-filler-dirty': dict(world=lambda b: dict(report=b.report[:M.FILLER_AT + 0x8000] + b'\x01' + b.report[M.FILLER_AT + 0x8001:])),
     'refuse-report-ro': dict(extra=lambda w: [f'AT {w.REPORT + M.STACK_AT:#x} 0x1000 ro']),
+    'refuse-record-ro': dict(extra=lambda w: [f'AT {w.REPORT + M.REC_AT:#x} 0x1000 ro']),
     'refuse-gic-sre': dict(gic=['SRE 0']),
     'refuse-gic-active': dict(gic=['ISACTIVER0 0x4000000']),
     'refuse-gic-not-held': dict(gic=['IGNORE ICC_IGRPEN1_EL1']),
@@ -88,9 +96,11 @@ CASES = {
     'replay-foreign-ppi': dict(cfg='replay=1', gic=['HPPIR 27']),
     'replay-no-fire': dict(cfg='replay=1', gic=['NO_FIRE']),
 }
-SEED_CASES = {'no-params-check': 'refuse-params-early', 'no-digest': 'refuse-image-digest', 'no-reg-check': 'leave-hcr', 'no-ic-sync': 'happy',
-              'stray-gic': 'happy', 'wrong-args': 'happy', 'no-s2': 'happy', 'no-overrun-check': 'overrun-gap', 'store-after': 'happy',
-              'refuse-after': 'leave-hcr'}
+SEED_CASES = {'no-params-check': ('refuse-params-early',), 'no-digest': ('refuse-image-digest',), 'no-reg-check': ('leave-hcr',), 'no-ic-sync': ('happy',),
+              'stray-gic': ('happy',), 'wrong-args': ('happy',), 'no-s2': ('happy',), 'no-overrun-check': ('overrun-gap',), 'store-after': ('happy',),
+              'refuse-after': ('leave-hcr',), 'no-gic-finish': ('not-restored', 'refuse-not-restored'),
+              'no-filler-scan': ('overflow-4', 'overflow-skip-lowest'), 'no-filler-precheck': ('refuse-filler-dirty',), 'no-filler-clean': ('overflow-4',),
+              'flush-unwritable': ('refuse-record-ro',), 'ticks-early': ('happy',), 'no-window-clean': ('happy',), 'no-record-clean': ('happy',)}
 
 
 class Run:
@@ -99,6 +109,7 @@ class Run:
     def __init__(self, name, w, out, runs):
         self.name, self.w, self.results, self.g = name, w, out.results[name], out.gic[name]
         self.marks, self.replay, self.state, self.recs = out.marks[name], out.replay[name], out.state[name], out.recs[name]
+        self.dirty = out.dirty[name]
         self.runs = runs
 
     @property
@@ -135,7 +146,7 @@ def batch(names, variant='base', runs=('snapmon',)):
         c = CASES[name]
         over = c['world'](FIX['bundle']) if 'world' in c else {}
         w = worlds[name] = M.world(FIX['bundle'], FIX['scratch'], **over)
-        texts.append((name, G.scenario(name, w, c.get('gic', ()), runs, c['extra'](w) if 'extra' in c else ())))
+        texts.append((name, G.scenario(name, w, c.get('gic', ()), c.get('runs', runs), c['extra'](w) if 'extra' in c else ())))
         if 'cfg' in c:
             cfg[name] = c['cfg']
     out = M.run(exe_of(variant), texts, cfg)
@@ -247,6 +258,43 @@ class Held:
         found += [f'store {e.a:#x} outside REPORT.DAT' for e in run.mon.of('ST') if e.stage > STAGE.COPYING and not WC.in_report(run.w, e.a, e.b)]
         return found + Held.stores(run)
 
+    @staticmethod
+    def overflow_seen(run):
+        """The monitor wrote below the stack's area: the page says STACK FULL and what it wrote is zero again (the dump counts every non-zero byte beyond
+        the head, in the stage's view; the records and the monitor's entered word are all that may be left)."""
+        regs = next((t for t in run.mon.texts() if t.startswith('SNAPMON MON REGS')), '')
+        left = sum(1 for b in run.recs['FINAL'] if b) + sum(1 for b in run.g.rec if b) + 1
+        return (([] if 'STACK FULL' in regs else ['the page does not say STACK FULL']) +
+                ([] if run.mon.report_tail == left else [f'{run.mon.report_tail} non-zero bytes beyond the head, the records and the entered word are {left}']))
+
+    @staticmethod
+    def record_untouched(run):
+        """A refusal for REPORT_UNWRITABLE stores nothing into the monitor's record slot, which is what was found unwritable."""
+        lo = run.w.REPORT + M.REC_AT
+        return [f'store {e.a:#x}+{e.b:#x} into the record slot' for e in run.mon.of('ST') if lo < e.a + e.b and e.a < lo + M.REC_BYTES]
+
+    @staticmethod
+    def ticks_at_call(run):
+        """TICKS is the call: ticks_call of the final record is the first counter read after the MON CALL line (the head's store is before it too), and a
+        later read than the CALLING record's, which is all a hang leaves."""
+        at = next((i for i, t in enumerate(run.mon.texts()) if t.startswith('SNAPMON MON CALL')), None)
+        final, calling = run.rec, M.decode(run.recs['CALL']) if run.recs.get('CALL') else None
+        if at is None or final is None or calling is None or at not in run.g.line_ticks:
+            return ['no MON CALL line, no final or CALLING record, or no counter read after the line']
+        found = [] if final.ticks_call == run.g.line_ticks[at] else [f'ticks_call {final.ticks_call} is not the first counter read after the MON CALL line ({run.g.line_ticks[at]})']
+        return found + ([] if calling.ticks_call < final.ticks_call else [f'the CALLING record holds {calling.ticks_call}, the final one {final.ticks_call}: not a later read'])
+
+    @staticmethod
+    def clean(run):
+        """What a restart reads is what the stage stored, in the model's cache: at the CALL mark the head and both records are clean, at a refusal the
+        record, and at the FINAL mark nothing of REPORT.DAT is dirty (the window after the call, the records after every store, the stack and any filler
+        word after the scan). A model of a cache: it shows what the stage cleaned, not how Oryon's caches behave."""
+        call, final, refused = (run.dirty.get(k) for k in ('CALL', 'FINAL', 'REFUSED'))
+        found = [f'{call[p]} dirty lines of the {p} at the CALL mark' for p in ('head', 'gic', 'rec') if call and call[p]]
+        found += [f'{refused["rec"]} dirty lines of the record at the refusal'] if refused and refused['rec'] else []
+        found += [f'{final["total"]} dirty lines of REPORT.DAT at the FINAL mark: {final}'] if final and final['total'] else []
+        return found + ([] if call or refused else ['no observation point'])
+
 
 class Base(unittest.TestCase):
     @classmethod
@@ -339,18 +387,79 @@ class Window(Base):
                              f'{name}: the stack area is zeroed again: only the records and the entered word are left beyond the head')
 
 
+class Overflow(Base):
+    """Finding 5 of the review: a stack that outgrows its area writes below it, into the 184 KiB of REPORT.DAT between the records and the area, and a frame
+    that skips the area's lowest word reaches it without changing that word. The stage must say STACK FULL for either and leave the filler zero."""
+
+    def test_a_word_below_the_area_is_seen_and_zeroed(self):
+        for name in ('overflow-4', 'overflow-20000', 'overflow-skip-lowest'):
+            with self.subTest(name):
+                self.holds(Held.overflow_seen(RUNS[name]) + Held.common(RUNS[name]))
+
+    def test_the_skipping_frame_is_seen_by_the_filler_alone(self):
+        ret = next(t for t in RUNS['overflow-skip-lowest'].mon.texts() if t.startswith('SNAPMON MON RET'))
+        self.assertIn(f'STACK={M.STACK_BYTES - 8}/{M.STACK_BYTES}', ret, 'the area scan saw one free word: STACK FULL did not come from the area')
+
+    def test_a_clean_filler_is_not_flagged(self):
+        for name in ('happy', 'stack-deep'):
+            self.assertNotIn('STACK FULL', next(t for t in RUNS[name].mon.texts() if t.startswith('SNAPMON MON REGS')))
+
+
+class Timing(Base):
+    """Finding 10 of the review: TICKS is the call, not also the MON CALL line and the head's store before it."""
+
+    def test_ticks_call_is_the_read_after_the_call_line(self):
+        self.holds(Held.ticks_at_call(RUNS['happy']))
+
+
+class Cache(Base):
+    """Finding 6a of the review: the harness models a cache with a dirty flag per 64-byte line, and the stage cleans what it stores. What a restart reads
+    is DRAM's. This is the model's cache, not the Oryon's: it shows that the stage cleans, and nothing about when a real line is evicted."""
+
+    def test_clean_at_the_call_the_refusals_and_the_final_mark(self):
+        for name, r in RUNS.items():
+            if name in ('refuse-report-ro', 'refuse-record-ro', 'overrun-gap') or (not r.dirty.get('CALL') and not r.dirty.get('REFUSED')):
+                continue
+            with self.subTest(name):
+                self.holds(Held.clean(r))
+
+    def test_a_store_beyond_the_window_is_reported_and_not_cleaned_by_the_stage(self):
+        """The one line the stage leaves dirty is the monitor's own stray word in the gap after the GIC record: it is not the stage's to clean, and
+        the other two overruns land in the records, which the stage stores again."""
+        self.assertEqual(RUNS['overrun-gap'].dirty['FINAL']['total'], 1)
+        for name in ('overrun', 'overrun-record'):
+            self.assertEqual(RUNS[name].dirty['FINAL']['total'], 0, name)
+
+    def test_the_model_does_see_a_dirty_line(self):
+        """The check is not vacuous: before the call the stack area is filled and not cleaned, so the model shows dirty lines there."""
+        self.assertGreater(RUNS['happy'].dirty['CALL']['stack'], 0)
+
+
 class Checks(Base):
     """Every check before the call refuses with GIC_NOT_READY and an SM_OUT_* detail, before anything but REPORT.DAT is stored to."""
 
     def test_refusals(self):
         for name, code in (('refuse-params-early', M.OUT.PARAMS_EARLY_STOP), ('refuse-params-gpu', M.OUT.PARAMS_GPU), ('refuse-params-box0', M.OUT.PARAMS_BOX),
                            ('refuse-params-box9', M.OUT.PARAMS_BOX), ('refuse-image-digest', M.OUT.IMAGE_DIGEST), ('refuse-image-size', M.OUT.IMAGE_SIZE),
-                           ('refuse-window-dirty', M.OUT.WINDOW_DIRTY), ('refuse-report-ro', M.OUT.REPORT_UNWRITABLE)):
+                           ('refuse-window-dirty', M.OUT.WINDOW_DIRTY), ('refuse-filler-dirty', M.OUT.WINDOW_DIRTY),
+                           ('refuse-report-ro', M.OUT.REPORT_UNWRITABLE), ('refuse-record-ro', M.OUT.REPORT_UNWRITABLE)):
             with self.subTest(name):
                 r = RUNS[name]
                 self.holds(Held.refused_before_call(r, code))
                 self.assertEqual(r.state, {}, 'the monitor was not called')
                 self.assertEqual([e for e in r.g.log if e[0] == 'W'], [], 'no GIC register was written')
+
+    def test_an_unwritable_report_is_printed_and_the_record_slot_is_not_stored_to(self):
+        for name in ('refuse-report-ro', 'refuse-record-ro'):
+            with self.subTest(name):
+                self.assertTrue(any(t.startswith('SNAPMON MON VERDICT=REPORT_UNWRITABLE') for t in RUNS[name].mon.texts()), RUNS[name].mon.texts())
+                self.holds(Held.record_untouched(RUNS[name]))
+
+    def test_the_other_refusals_do_store_the_record(self):
+        """The control of the one above: the record slot is stored for every other refusal, so that the reporter names it after a restart."""
+        for name in ('refuse-params-gpu', 'refuse-window-dirty', 'refuse-filler-dirty', 'refuse-image-digest'):
+            with self.subTest(name):
+                self.assertTrue(M.decode(RUNS[name].recs['REFUSED']), name)
 
     def test_arm_refusals_carry_the_gic_outcome(self):
         for name, code in (('refuse-gic-sre', G.OUT.SRE_CLEAR), ('refuse-gic-active', G.OUT.PPI_OWNED), ('refuse-gic-not-held', G.OUT.C_NOT_HELD),
@@ -402,6 +511,51 @@ class Contract(Base):
             self.assertFalse([e for e in r.g.log if e[0] == 'W' and e[1] == 'GICR_ISENABLER0'], 'PPI 26 was enabled already: ISENABLER0 is not written')
 
 
+class GicRecord(Base):
+    """Finding 2 of the review: sw_gic_put_back stores the GIC record when it begins and the registers that did not go back are only in the stage's
+    copy. SNAPREP-M1 prints the stored copy after a restart, so the stage must store it again once the put-back is done, on the success path and on
+    the refusal path alike, and the reporter's GIC RESTORE line must be the wrapper's."""
+
+    @staticmethod
+    def line(texts, who):
+        return next((t[len(who) + 1:] for t in texts if t.startswith(f'{who} GIC RESTORE')), None)
+
+    @staticmethod
+    def agree(run):
+        """The violations: the reporter, reading REPORT.DAT as the wrapper left it, prints another GIC RESTORE line than the wrapper printed."""
+        wrapper, reporter = GicRecord.line(run.mon.texts(), 'SNAPMON'), GicRecord.line(run.rep.texts(), 'SNAPREP') if run.rep else None
+        if wrapper is None or reporter is None:
+            return [f'a GIC RESTORE line is missing: the wrapper printed {wrapper!r}, the reporter {reporter!r}']
+        return [] if wrapper == reporter else [f'the wrapper printed {wrapper!r} and the reporter {reporter!r}']
+
+    def test_a_put_back_that_failed_is_said_by_the_reporter_as_the_wrapper_said_it(self):
+        for name in ('not-restored', 'refuse-not-restored'):
+            with self.subTest(name):
+                run = RUNS[name]
+                wrapper = self.line(run.mon.texts(), 'SNAPMON')
+                self.assertIn('CLEAN=NO', wrapper, 'the scenario must be one where a register does not go back')
+                self.assertRegex(wrapper, r'FAILED=0X[1-9A-F][0-9A-F]* ')
+                self.holds(self.agree(run))
+                self.assertIn('CLEAN=NO', self.line(run.rep.texts(), 'SNAPREP'))
+
+    def test_the_refusal_path_carries_the_put_back_in_its_detail_and_stays_a_refusal(self):
+        self.holds(Held.refused_before_call(RUNS['refuse-not-restored'], G.OUT.NOT_RESTORED))
+
+    def test_a_clean_put_back_is_said_clean_by_both(self):
+        self.assertIn('CLEAN=YES', self.line(RUNS['happy-reported'].mon.texts(), 'SNAPMON'))
+        self.holds(self.agree(RUNS['happy-reported']))
+        self.assertIn('CLEAN=YES', self.line(RUNS['refuse-gic-not-held'].mon.texts(), 'SNAPMON'))
+
+    def test_the_stored_record_is_finished(self):
+        """The GIC record in REPORT.DAT after the stage: sub-stage DONE (11), the outcome and the first outcome as the dry run's gic_finish sets them."""
+        for name, outcome, first in (('happy', 0, 0), ('not-restored', G.OUT.NOT_RESTORED, 0), ('refuse-not-restored', G.OUT.NOT_RESTORED, G.OUT.C_NOT_HELD),
+                                     ('refuse-gic-not-held', G.OUT.C_NOT_HELD, G.OUT.C_NOT_HELD)):
+            with self.subTest(name):
+                raw = RUNS[name].g.rec
+                got = {k: int.from_bytes(raw[o:o + 4], 'little') for k, o in (('outcome', 0x10), ('substage', 0x14), ('first_outcome', 0x2C))}
+                self.assertEqual(got, {'outcome': outcome, 'substage': 11, 'first_outcome': first}, name)
+
+
 class Seeded(Base):
     """Each seeded-bad stage breaks the check that matches its fault; the real stage passes that check."""
 
@@ -409,21 +563,24 @@ class Seeded(Base):
     def setUpClass(cls):
         super().setUpClass()
         cls.seeded = {}
-        for seed, scenario in SEED_CASES.items():
-            cls.seeded[seed] = batch([scenario], seed)[scenario]
+        for seed, scenarios in SEED_CASES.items():
+            cls.seeded[seed] = batch(list(scenarios), seed)
 
     def test_each_seed_fails_its_check(self):
-        real = lambda name: RUNS[name]                                                           # noqa: E731
         checks = {'no-params-check': lambda r: Held.refused_before_call(r, M.OUT.PARAMS_EARLY_STOP),
                   'no-digest': lambda r: Held.refused_before_call(r, M.OUT.IMAGE_DIGEST),
                   'no-reg-check': lambda r: [] if 'HCR_EL2' in ' '.join(r.mon.texts()) else ['the changed HCR_EL2 was not reported'],
                   'no-ic-sync': Held.order, 'stray-gic': Held.gic_writes, 'wrong-args': Held.args, 'no-s2': Held.args,
                   'no-overrun-check': lambda r: [] if 'WINDOW OVERRUN' in ' '.join(r.mon.texts()) else ['the overrun was not reported'],
-                  'store-after': Held.stores, 'refuse-after': Held.head}
+                  'store-after': Held.stores, 'refuse-after': Held.head, 'no-gic-finish': GicRecord.agree,
+                  'no-filler-scan': Held.overflow_seen, 'no-filler-precheck': lambda r: Held.refused_before_call(r, M.OUT.WINDOW_DIRTY),
+                  'no-filler-clean': Held.clean, 'flush-unwritable': Held.record_untouched, 'ticks-early': Held.ticks_at_call,
+                  'no-window-clean': Held.clean, 'no-record-clean': Held.clean}
         for seed, check in checks.items():
             with self.subTest(seed):
-                self.assertEqual(check(real(SEED_CASES[seed])), [], f'the real stage must pass the {seed} check')
-                self.assertNotEqual(check(self.seeded[seed]), [], f'the {seed} stage must fail it')
+                for name in SEED_CASES[seed]:
+                    self.assertEqual(check(RUNS[name]), [], f'the real stage must pass the {seed} check on {name}')
+                    self.assertNotEqual(check(self.seeded[seed][name]), [], f'the {seed} stage must fail it on {name}')
 
 
 if __name__ == '__main__':

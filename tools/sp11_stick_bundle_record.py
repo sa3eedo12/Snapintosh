@@ -6,9 +6,9 @@ reading, the approval check and the pipeline.
 
 The text is wrapped by hand, never by a library: its digest is the operator's approval, so it must not depend on how a library version breaks
 lines, and a changed byte is another record. A record of a synthetic build must not change when a line about a real build is added: the
-lines of section 1a exist only for kind `real`. In the same way the lines of section 1b, the touches of M1_TOUCHES, the budget of section 4 and
-the two stop rules of M1_STOP_RULES exist only for a record of the monitor entry run (--m1-run), and the records of the other kinds are what
-they were (tools/test-sp11-stick-bundle-record.py pins their digests).
+lines of section 1a exist only for kind `real`. In the same way the lines of section 1b, the touches of M1_TOUCHES, the budget of section 4, the
+silence rule of section 5 (M1_SILENCE_RULE, in place of SILENCE_RULE) and the two stop rules of M1_STOP_RULES exist only for a record of the monitor
+entry run (--m1-run), and the records of the other kinds are what they were (tools/test-sp11-stick-bundle-record.py pins their digests).
 
 Evidence: EXPERIMENTAL, hardware NOT RUN. Nothing here approves anything."""
 import hashlib
@@ -77,9 +77,12 @@ M1_TOUCHES = {
     'ram': ('RAM inside the placement and the tail of REPORT.DAT, as the GIC and stop dry run, and what the monitor and its',
             'guest add. The wrapper: the copy of the chunks and the zero fills; REPORT.DAT page 0 (the head), its GIC record at',
             '0x11000 and its monitor record at 0x12000; a 256 KiB stack for the call at REPORT.DAT 0x41000 to 0x81000, filled',
-            'with a pattern, scanned after the call and zeroed: a stack that outgrows it writes below it, into REPORT.DAT',
-            '0x13000 to 0x41000, which nothing scans or zeroes, and is seen only if the area\'s lowest word changes (that it',
-            'fits is INFERRED). The monitor: its 64 KiB window (the out buffer of the call,',
+            'with a pattern, scanned after the call and zeroed. A stack that outgrows it writes below it, into REPORT.DAT',
+            '0x13000 to 0x41000: that range must be zero before the call (else WINDOW_DIRTY, a refusal) and is scanned',
+            'after it; a word in it is STACK FULL on the page, and the wrapper then zeroes it and cleans it (a store to',
+            'REPORT.DAT, made only then). That the stack fits its area is INFERRED; one that went below the filler would',
+            'reach the two record slots, which the wrapper compares afterwards (WINDOW OVERRUN).',
+            'The monitor: its 64 KiB window (the out buffer of the call,',
             'REPORT.DAT 0x1000), its work area (work_size bytes at work_base: tables, logs, a console buffer), the page tables',
             'and frame tables it builds over the guest, and the cache maintenance that publishes them. The guest: its own RAM',
             'and the reserve above it, guest_base to work_base; its other accesses are meant to fault at stage 2 and stop the',
@@ -171,6 +174,12 @@ M1_STOP_RULES = ('   - MON STATUS -90 to -95 is the monitor\'s NV2 and PAuth gat
                  '     is open; the same bundle is not retried.',
                  '   - MON QUARANTINE on the page (RET=0X51554E01 or 0X51554E02): the monitor\'s window is partial. Power cycle; never',
                  '     continue on that RAM.')
+# The silence rule of every kind, and the rule of this one in its place: the monitor prints nothing while it runs and its prepare is UNKNOWN, so twice the
+# time box after ENTER (10 s at most) could end a legitimate run. The 60 s is the operator's safe wait, not a measurement (docs/SP11-STICK-MONITOR.md section 10).
+SILENCE_RULE = '   - No page change for twice the time box after ENTER: note the last line and power cycle.'
+M1_SILENCE_RULE = ('   - No page change for 60 seconds after the MON CALL line: note the last line and power cycle. The 60 s is an operator-safe wait and not a',
+                   '     measurement: the monitor prints nothing while it runs and its prepare is UNKNOWN (never run on this unit), so the rule of the other',
+                   '     kinds, twice the time box after ENTER, could end a legitimate run.')
 
 
 def m1_lines(m1):
@@ -337,7 +346,7 @@ def record_text(r):
                 [f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.']), '',
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
               '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',
-              '   - No page change for twice the time box after ENTER: note the last line and power cycle.',
+              *(M1_SILENCE_RULE if m1 else (SILENCE_RULE,)),
               '   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',
               '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',
               '     operator\'s power cycle, which writes nothing.',

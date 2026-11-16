@@ -50,7 +50,7 @@ sha = lambda data: hashlib.sha256(data).hexdigest()     # noqa: E731
 LLVM = ('clang', 'ld.lld', 'llvm-objcopy', 'llvm-readelf', 'llvm-nm', 'llvm-objdump')
 OWN = ('tools/sp11_stick_bundle_m1.py', 'tools/sp11_monitor_census.py', 'tools/test-sp11-stick-monitor-auth.py', 'tools/test-sp11-stick-monitor-interlock.py',
        'docs/SP11-STICK-MONITOR.md')
-DOC_CAP = 36000         # raised from 30,000 on purpose (the review addendum: the interlock, the corrected text, the limits stated); nothing was cut to make room
+DOC_CAP = 46000         # raised from 36,000 on purpose (Phase C: section 13, the failure table, the stack and `_start` text); nothing was cut to make room
 # The records the operator was shown or approved, regenerated here from the files they were made from (docs/SP11-MONITOR-PORT.md section 15 D4/D7).
 RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e035977bf700e',
            'gic and stop dry run': 'c74f7af0217c507e7738673b9d437d6c76589ef3c243c23eef4837b0ca435b3b',
@@ -58,7 +58,7 @@ RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e03597
 FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=7, time_box_s=5, label='M1-FIXED', monitor=(445935, '1' * 64), reporter=(58463, '2' * 64),
              note=None, gic_stop=False, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
 # The SHA-256 of record_text for FIXED and FABRICATED[...]: the text of an M1 record is what the operator approves, so a changed byte is another record.
-GOLDEN = {'a test record': '54e4833dc9b81adaf413f668f0e40fefa20bf8ea7e2e0d2f1cbe7becb30d08a6', 'another record': '1fbd90ebcb2d9895b468cb9db661ce3057be0b18eed33f1bb8e2cf2569f3b141'}
+GOLDEN = {'a test record': 'ad9efc9336b556ca98292120997b24b61f49599966302a37a094ae334cd9873c', 'another record': '9ef9e729a0ca3e8590f8e831588dd21f9013e7c35fd2dce88f3c126dba5ba7f6'}
 
 
 def quietly(function, *args):
@@ -233,9 +233,11 @@ class Report(BT.Case):
 
     def test_the_files_come_through_monitor_and_reporter_and_no_other_way(self):
         paths = stage('swapped')
-        self.refused('M1_REPORT_MISMATCH', BT.template(stores='ram,el2_sysreg,gic', **{**paths, 'monitor': paths['reporter'], 'reporter': paths['monitor']}))
+        # The monitor image in the reporter's slot is refused first, for the reporter slot's own refusal (the call in it), not for the report.
+        self.refused('WRAPPER_CALLS_MONITOR', BT.template(stores='ram,el2_sysreg,gic', **{**paths, 'monitor': paths['reporter'], 'reporter': paths['monitor']}))
         self.refused('M1_REPORT_MISMATCH', template(stage('wrong-reporter', reporter=b'another reporter')))
         self.refused('M1_REPORT_MISMATCH', template(stage('wrong-image', image=STATE['fake']['image'] + b'\0')))
+        self.refused('M1_REPORT_MISMATCH', BT.template(stores='ram,el2_sysreg,gic', **{**paths, 'monitor': paths['reporter']}))
 
     def test_a_file_that_is_not_the_report_of_this_kind_is_refused(self):
         good = STATE['fake']['report']
@@ -482,12 +484,25 @@ class Text(BT.Case):
             self.assertIn(needle, flat)
         self.assertNotIn('VERIFIED', STATE['text'], 'no label of a hardware result, and no VERIFIED of anything the host proves only for a binary')
 
-    def test_the_stop_rules_of_the_other_kinds_are_kept_and_this_kind_adds_two(self):
+    def test_the_stop_rules_of_the_other_kinds_are_kept_but_for_the_silence_rule_and_this_kind_adds_two(self):
         after = STATE['text'].split('5. Refusal and stop rules')[1]
         plain = BT.template()[1].split('5. Refusal and stop rules')[1]
-        self.assertTrue(after.startswith(plain.rstrip('\n')), 'the four rules of every record come first, unchanged')
+        replaced = plain.replace(rec.SILENCE_RULE, '\n'.join(rec.M1_SILENCE_RULE))
+        self.assertNotEqual(replaced, plain, 'the plain text holds the rule that this kind replaces')
+        self.assertTrue(after.startswith(replaced.rstrip('\n')), 'the rules of every record come first, unchanged but for the silence rule')
         for line in rec.M1_STOP_RULES:
             self.assertIn(line, after)
+        flat = ' '.join(after.split())
+        self.assertIn('No page change for 60 seconds after the MON CALL line: note the last line and power cycle', flat)
+        self.assertIn('an operator-safe wait and not a measurement', flat)
+        self.assertNotIn('twice the time box after ENTER: note the last line', flat, 'the rule of the other kinds would end a legitimate run here')
+
+    def test_an_m1_record_that_kept_the_rule_of_the_other_kinds_is_another_record(self):
+        """The faulty case: with the old rule in place the text is not the pinned one, and it says what the monitor's silence makes wrong."""
+        with mock.patch.object(rec, 'M1_SILENCE_RULE', (rec.SILENCE_RULE,)):
+            old = rec.record_text({**FIXED, 'm1': m1_facts(test=True)})
+        self.assertNotEqual(sha(old.encode()), GOLDEN['a test record'])
+        self.assertIn('twice the time box after ENTER: note the last line', old)
 
     def test_the_text_is_pinned(self):
         fx = {'a test record': m1_facts(test=True), 'another record': m1_facts()}

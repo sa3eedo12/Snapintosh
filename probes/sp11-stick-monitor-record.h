@@ -55,7 +55,7 @@ enum sm_flag {
     SM_F_STACK_S2 = 1u << 3,            /* the call ran on the stack in REPORT.DAT's tail (option S2), not on the runner's */
     SM_F_WINDOW_OVERRUN = 1u << 4,      /* a byte of the extension slots changed during the call: the monitor stored beyond its window */
     SM_F_REGS_CHANGED = 1u << 5,        /* `changed` is not zero */
-    SM_F_STACK_FULL = 1u << 6,          /* the monitor wrote the lowest word of its stack: the depth is a lower bound and the stack may have overrun */
+    SM_F_STACK_FULL = 1u << 6,          /* the monitor wrote the area's lowest word or anything below the area: the depth is a lower bound and the stack may have overrun */
     SM_F_GIC_NOT_RESTORED = 1u << 7,    /* the GIC put-back reported a register that did not go back */
     SM_F_ALL = (1u << 8) - 1
 };
@@ -75,7 +75,7 @@ struct sw_mon_rec {
     uint64_t monitor_offset, monitor_bytes;     /* 0x040 as built */
     uint64_t monitor_sha[4];            /* 0x050 SHA-256 of the image as built: four little-endian words of the digest */
     uint64_t stack_top, stack_bytes;    /* 0x070 the call's stack (0, 0 when it stayed on the runner's) */
-    uint64_t stack_used;                /* 0x080 bytes below the top that the monitor changed: a lower bound, exact to one word */
+    uint64_t stack_used;                /* 0x080 bytes from the top to the lowest word that the monitor changed: exact to a word, a lower bound with STACK FULL */
     uint64_t call_x[5];                 /* 0x088 x0 to x4 as passed */
     uint64_t ret, status, entered;      /* 0x0B0 x0 on return; words 0 and 1 of the monitor's window */
     uint64_t box_s, early_stop_flags, gpu_flags;        /* 0x0C8 PARAMS words the stage read: the time box, early_stop.flags, gpu.flags */

@@ -28,6 +28,7 @@ FAKE_IMAGE = bytes((i * 7 + (i >> 8) * 13 + 3) & 0xFF for i in range(IMAGE_BYTES
 FAKE_FILE = bytes(OFFSET) + FAKE_IMAGE
 REC_AT, REC_BYTES, WINDOW = 0x12000, 512, 0x10000          # the record's offset in REPORT.DAT; the monitor's window
 STACK_AT, STACK_BYTES, PATTERN = 0x41000, 0x40000, 0xC3A5C3A5C3A5C3A5
+FILLER_AT, FILLER_BYTES = 0x13000, 0x2E000                 # REPORT.DAT between the monitor's record slot and the stack's area
 QUARANTINE = (0x51554E01, 0x51554E02)
 BOX_MAX = 5
 PARAMS_BYTES, PARAMS_WATCHDOG, PARAMS_GPU, PARAMS_EARLY = 0x2410, 192, 0x2340, 0x23E0
@@ -41,7 +42,9 @@ OUT = type('OUT', (), {name: code for code, name in OUTCOMES.items()})
 SUBSTAGES = ('NONE', 'CHECKS', 'SYNCED', 'ARMING', 'ARMED', 'CALLING', 'RETURNED', 'DONE')
 FLAGS = dict(IC_SYNC=1, CALLED=2, RETURNED=4, STACK_S2=8, WINDOW_OVERRUN=16, REGS_CHANGED=32, STACK_FULL=64, GIC_NOT_RESTORED=128)
 SEEDS = {'no-params-check': 'NO_PARAMS_CHECK', 'no-digest': 'NO_DIGEST', 'no-reg-check': 'NO_REG_CHECK', 'no-ic-sync': 'NO_IC_SYNC', 'stray-gic': 'STRAY_GIC',
-         'wrong-args': 'WRONG_ARGS', 'no-s2': 'NO_S2', 'no-overrun-check': 'NO_OVERRUN_CHECK', 'store-after': 'STORE_AFTER', 'refuse-after': 'REFUSE_AFTER'}
+         'wrong-args': 'WRONG_ARGS', 'no-s2': 'NO_S2', 'no-overrun-check': 'NO_OVERRUN_CHECK', 'store-after': 'STORE_AFTER', 'refuse-after': 'REFUSE_AFTER',
+         'no-gic-finish': 'NO_GIC_FINISH', 'no-filler-scan': 'NO_FILLER_SCAN', 'no-filler-precheck': 'NO_FILLER_PRECHECK', 'flush-unwritable': 'FLUSH_UNWRITABLE',
+         'ticks-early': 'TICKS_EARLY', 'no-window-clean': 'NO_WINDOW_CLEAN', 'no-record-clean': 'NO_RECORD_CLEAN', 'no-filler-clean': 'NO_FILLER_CLEAN'}
 GIC_REFUSAL = 'GIC_NOT_READY'
 
 # ---- The record, from the document's table (section 5), independent of the C header ------------------------------------------
@@ -200,10 +203,11 @@ class Out:
     replay: dict        # scenario name -> [dict(kind=..., k=..., field=int...)]
     state: dict
     recs: dict          # scenario name -> {point: the monitor record as REPORT.DAT held it at that point}
+    dirty: dict         # scenario name -> {point: {part: dirty 64-byte lines of REPORT.DAT in that part, in the model's cache}}
 
 
 def parse_extra(text):
-    marks, replay, state, recs, cur_m, cur_r, cur_s, cur_c = {}, {}, {}, {}, [], [], {}, {}
+    marks, replay, state, recs, dirty, cur_m, cur_r, cur_s, cur_c, cur_d = {}, {}, {}, {}, {}, [], [], {}, {}, {}
     for raw in text.splitlines():
         word, _, rest = raw.partition(' ')
         if word == 'MONMARK':
@@ -217,10 +221,13 @@ def parse_extra(text):
         elif word == 'MONREC':
             point, _, hexed = rest.partition(' ')
             cur_c[point] = bytes.fromhex(hexed.strip())
+        elif word == 'MONDIRTY':
+            point, _, parts = rest.partition(' ')
+            cur_d[point] = {k: int(v) for k, v in (x.split('=') for x in parts.split())}
         elif word == 'END':
-            marks[rest], replay[rest], state[rest], recs[rest] = cur_m, cur_r, cur_s, cur_c
-            cur_m, cur_r, cur_s, cur_c = [], [], {}, {}
-    return marks, replay, state, recs
+            marks[rest], replay[rest], state[rest], recs[rest], dirty[rest] = cur_m, cur_r, cur_s, cur_c, cur_d
+            cur_m, cur_r, cur_s, cur_c, cur_d = [], [], {}, {}, {}
+    return marks, replay, state, recs, dirty
 
 
 def run(exe, scenarios, cfg=None, timeout=1800):
@@ -233,8 +240,8 @@ def run(exe, scenarios, cfg=None, timeout=1800):
     done = subprocess.run([str(exe)], input=''.join(text for _, text in scenarios), capture_output=True, text=True, env=env, timeout=timeout)
     if done.returncode:
         raise AssertionError(f'the harness exited {done.returncode}:\n{done.stderr[-4000:]}\n{done.stdout[-1000:]}')
-    marks, replay, state, recs = parse_extra(done.stdout)
-    return Out(T.parse_output(done.stdout), G.parse_gic(done.stdout), marks, replay, state, recs)
+    marks, replay, state, recs, dirty = parse_extra(done.stdout)
+    return Out(T.parse_output(done.stdout), G.parse_gic(done.stdout), marks, replay, state, recs, dirty)
 
 
 def world(bundle, directory, **over):
