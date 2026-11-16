@@ -685,7 +685,7 @@ class Document(unittest.TestCase):
 
     def test_the_note_names_every_source_and_test_file_of_the_work_item(self):
         for path in own_files():
-            if path.suffix in ('.c', '.h', '.py') and not path.name.startswith('sp11-stick-gic'):      # the GIC variant's files are named in SP11-STICK-GIC.md
+            if path.suffix in ('.c', '.h', '.py') and not path.name.startswith(('sp11-stick-gic', 'sp11-stick-monitor')):      # the GIC variant's files are named in SP11-STICK-GIC.md, the monitor entry's in SP11-STICK-MONITOR.md
                 self.assertIn(f'{path.parent.name}/{path.name}', self.text, f'{path.name} is not named in the note')
 
     def test_the_stack_depth_it_states_is_what_the_call_graph_gives(self):

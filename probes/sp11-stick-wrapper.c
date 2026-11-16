@@ -6,8 +6,9 @@
  * path arms a timer, touches the GIC or writes an EL2 system register. UNIMPLEMENTED: the monitor entry, the stop timer and the GIC
  * bring-up (work items 4b, 8 and 11, each behind a later gate). The stages PREPARED, MONITOR_ENTERED and MONITOR_RETURNED are never
  * written and the report fields that belong to them stay zero. (The opt-in SNAP_SP11_STICK_GIC=1 build, SNAPMON-GIC.BIN, adds one stage
- * between COPIED and DONE, sp11-stick-gic.c, which does all of that but still calls no monitor: docs/SP11-STICK-GIC.md. With the gate at
- * 0 this file compiles to the bytes that ran on the unit.)
+ * between COPIED and DONE, sp11-stick-gic.c, which does all of that but still calls no monitor: docs/SP11-STICK-GIC.md. The third opt-in,
+ * SNAP_SP11_STICK_MONITOR=1, SNAPMON-M1.BIN, puts sp11-stick-monitor.c in that place: it arms the GIC with the arm half alone and CALLS the
+ * monitor appended to the file: docs/SP11-STICK-MONITOR.md. With the gates at 0 this file compiles to the bytes that ran on the unit.)
  *
  * Order, one stage between steps, REPORT.DAT stored whole after each (so a hang is named by its last stage, on the panel by the last
  * line and in RAM by the head):
@@ -25,6 +26,9 @@
 #include "sp11-stick-wrapper.h"
 #if SNAP_SP11_STICK_GIC
 #include "sp11-stick-gic.h"
+#endif
+#if SNAP_SP11_STICK_MONITOR
+#include "sp11-stick-monitor.h"
 #endif
 
 uint64_t payload_entry(const struct q1n1_payload_args *a);
@@ -401,7 +405,9 @@ uint64_t payload_entry(const struct q1n1_payload_args *a)
     if ((ret = stage_files(&c)) != 0 || (ret = stage_pin(&c)) != 0 || (ret = stage_observed(&c)) != 0 ||
         (ret = stage_place(&c)) != 0 || (ret = stage_guest(&c)) != 0 || (ret = stage_copy(&c)) != 0)
         return ret;
-#if SNAP_SP11_STICK_GIC
+#if SNAP_SP11_STICK_MONITOR
+    if ((ret = sw_monitor_stage(&c)) != 0) return ret;
+#elif SNAP_SP11_STICK_GIC
     if ((ret = sw_gic_stage(&c)) != 0) return ret;
 #endif
     sw_set_stage(&c, SP11SB_STAGE_DONE);
@@ -415,7 +421,9 @@ uint64_t payload_entry(const struct q1n1_payload_args *a)
     stage_begin(&c, &l);
     pl_text(&l, " RETURN=0");
     sw_emit(&c, &l, 1);
-#if SNAP_SP11_STICK_GIC
+#if SNAP_SP11_STICK_MONITOR
+    /* the monitor was called: the stage printed what it did, and there is no line to say it was not */
+#elif SNAP_SP11_STICK_GIC
     sw_begin(&l);                       /* the GIC variant's page is longer; the line that says what this build did not do is kept */
     pl_text(&l, "MONITOR NOT CALLED: UNIMPLEMENTED IN THIS BUILD");
     sw_emit(&c, &l, 1);

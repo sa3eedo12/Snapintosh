@@ -508,6 +508,7 @@ class Hygiene(unittest.TestCase):
     def test_no_existing_monitor_source_names_the_gic_gate_or_includes_a_file_of_this_work_item(self):
         needles = ('SNAP_SP11_STICK_GIC', 'sp11-stick-gic', 'SP11_STICK_GIC_SEED')
         mine = {p.resolve() for p in own_files()} | {ROOT / 'probes' / n for n in ('sp11-stick-hw.h', 'sp11-stick-wrapper.c', 'sp11-stick-wrapper.h', 'sp11-stick-reporter.c')}
+        mine |= {p.resolve() for p in (ROOT / 'probes').glob('sp11-stick-monitor*')}      # the monitor entry of the stick (work item 4b) is the client of sw_gic_arm and sw_gic_put_back
         scanned = []
         for sub in ('compat', 'shadow', 'probes'):
             scanned += [p for p in (ROOT / sub).rglob('*') if p.is_file() and p.suffix in ('.c', '.h', '.S', '.py', '.mk', '.json', '.ld', '') and p.resolve() not in mine]

@@ -46,6 +46,18 @@
 #if SNAP_SP11_STICK_GIC && !SNAP_SP11_STICK
 #error "SNAP_SP11_STICK_GIC=1 needs SNAP_SP11_STICK=1 (and so SNAP_PLATFORM_SP11=1): the GIC stage is a variant of the stick wrapper"
 #endif
+/* The monitor entry (docs/SP11-STICK-MONITOR.md) is a third opt-in, on top of the GIC stage's arm and put-back: the wrapper arms the GIC, calls the
+ * monitor that is appended to SNAPMON-M1.BIN and puts the GIC back. With it at 0, the default, nothing below it is compiled and the dry-run and
+ * GIC builds keep their bytes. */
+#ifndef SNAP_SP11_STICK_MONITOR
+#define SNAP_SP11_STICK_MONITOR 0
+#endif
+#if SNAP_SP11_STICK_MONITOR != 0 && SNAP_SP11_STICK_MONITOR != 1
+#error "SNAP_SP11_STICK_MONITOR accepts only 0 and 1"
+#endif
+#if SNAP_SP11_STICK_MONITOR && !SNAP_SP11_STICK_GIC
+#error "SNAP_SP11_STICK_MONITOR=1 needs SNAP_SP11_STICK_GIC=1 (and so SNAP_SP11_STICK=1): the monitor entry arms the GIC with the GIC stage's arm half"
+#endif
 
 #if SNAP_SP11_STICK
 #include <stddef.h>
@@ -309,5 +321,47 @@ static inline void sp11hw_el1_excursion(struct sw_gic_rec *rec, uint64_t vectors
 }
 #endif
 #endif /* SNAP_SP11_STICK_GIC */
+
+#if SNAP_SP11_STICK_MONITOR
+/* ---- The monitor entry's part of the layer (docs/SP11-STICK-MONITOR.md section 4) ----
+ * What the stage adds to the machine: reads of the EL2 registers that the monitor writes and puts back (kept before and after the call and
+ * compared), five ID registers the page prints, one instruction-cache operation and the call itself. No function here writes a system
+ * register or stores to memory: the stores of the stage are sp11hw_store64's, the GIC's are the GIC block's. The ID registers can be read at EL2
+ * whatever HCR_EL2.TID3 says (it traps EL1). Evidence: EXPERIMENTAL; hardware NOT RUN. */
+#ifdef SP11_STICK_HOST_TEST
+uint64_t sp11hw_read_tpidr_el2(void);
+uint64_t sp11hw_read_mdcr_el2(void);
+uint64_t sp11hw_read_vttbr_el2(void);
+uint64_t sp11hw_read_vtcr_el2(void);
+uint64_t sp11hw_read_vmpidr_el2(void);
+uint64_t sp11hw_read_id_aa64mmfr2_el1(void);
+uint64_t sp11hw_read_id_aa64mmfr4_el1(void);
+uint64_t sp11hw_read_revidr_el1(void);
+uint64_t sp11hw_read_id_aa64isar1_el1(void);
+uint64_t sp11hw_read_id_aa64isar2_el1(void);
+void sp11hw_ic_ialluis(void);
+/* The harness's own observation point, not a machine function: the stage calls it where a record has just been stored, and the harness prints
+ * what REPORT.DAT holds, so that the tests decode the stored bytes. It exists in the host build only. */
+void sp11hw_test_point(const char *what);
+#else
+static inline uint64_t sp11hw_read_tpidr_el2(void) { return SP11HW_MRS(tpidr_el2); }
+static inline uint64_t sp11hw_read_mdcr_el2(void) { return SP11HW_MRS(mdcr_el2); }
+static inline uint64_t sp11hw_read_vttbr_el2(void) { return SP11HW_MRS(vttbr_el2); }
+static inline uint64_t sp11hw_read_vtcr_el2(void) { return SP11HW_MRS(vtcr_el2); }
+static inline uint64_t sp11hw_read_vmpidr_el2(void) { return SP11HW_MRS(vmpidr_el2); }
+static inline uint64_t sp11hw_read_id_aa64mmfr2_el1(void) { return SP11HW_MRS(id_aa64mmfr2_el1); }
+static inline uint64_t sp11hw_read_id_aa64mmfr4_el1(void) { return SP11HW_MRS(id_aa64mmfr4_el1); }
+static inline uint64_t sp11hw_read_revidr_el1(void) { return SP11HW_MRS(revidr_el1); }
+static inline uint64_t sp11hw_read_id_aa64isar1_el1(void) { return SP11HW_MRS(id_aa64isar1_el1); }
+static inline uint64_t sp11hw_read_id_aa64isar2_el1(void) { return SP11HW_MRS(id_aa64isar2_el1); }
+/* The guest chunks were written by data stores and are first fetched as instructions by the guest: every instruction cache of the inner
+ * shareable domain is dropped, so that no stale line of what the firmware left there can be executed. */
+static inline __attribute__((noinline)) void sp11hw_ic_ialluis(void) { __asm__ volatile("ic ialluis\n\tdsb ish\n\tisb" : : : "memory"); }
+#endif
+/* sp11-stick-monitor.c: the call. The monitor is `int64_t _start(u64 *out, u64 work, u64 work_size, const struct params *params, const
+ * struct secondary_config *host_cpus)` (probes/xnuboot.S) at the symbol sp11_monitor, which the build defines. stack_top is the 16-byte aligned
+ * top of the stack the call runs on, or 0 to stay on the caller's. The host harness defines this over a fake monitor. */
+uint64_t sw_monitor_call(uint64_t out, uint64_t work, uint64_t work_size, uint64_t params, uint64_t host_cpus, uint64_t stack_top);
+#endif /* SNAP_SP11_STICK_MONITOR */
 #endif /* SNAP_SP11_STICK */
 #endif /* SNAP_PROBES_SP11_STICK_HW_H */
