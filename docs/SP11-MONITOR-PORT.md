@@ -114,7 +114,7 @@ WI 2); the wrapper refuses an overlap with its pinned placement.
 **The host tool** (WI 3, EXPERIMENTAL, hardware NOT RUN): `tools/sp11_stick_bundle_build.py` (`docs/SP11-STICK-BUILD.md`).
 `facts-check`, `place-check`, `synthetic` and `authorisation-template` work from a facts file and the local dumps (D1, D4, D5, D9:
 required arguments); `real` (a kernelcache through `xnuboot.build()` and a boot-ready `--descriptor`; the committed
-`config/boards/sp11.json` `is a template and is refused`[docs/SP11-STICK-BUILD.md:161]) is written and NOT RUN, so U9 stands. It reads
+`config/boards/sp11.json` `is a template and is refused`[docs/SP11-STICK-BUILD.md:165]) is written and NOT RUN, so U9 stands. It reads
 the MADT itself (section 7), not through `from_hamoa`.
 
 ## 5. Memory (Q3)

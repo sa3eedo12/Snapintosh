@@ -121,7 +121,7 @@ def setUpModule():
     FIX['acpi'] = acpi_of(tables_for(f))
     FIX['facts'] = facts_file('facts.json')
     for key, name in (('monitor', 'SNAPMON.BIN'), ('reporter', 'SNAPREP.BIN')):
-        FIX[key] = write(SCRATCH / f'in/{key}.bin', f'PLACEHOLDER {name}: the wrapper and the reporter do not exist yet (work item 4)\n'.encode() * 4)
+        FIX[key] = write(SCRATCH / f'in/{key}.bin', f'PLACEHOLDER {name}: a stand-in for these tests, not the wrapper of docs/SP11-STICK-WRAPPER.md\n'.encode() * 4)
     argv = ['stage', '--no-pins', '--dest', str(SCRATCH / 'base')]
     for flag, name, subsystem in (('--shell', 'BOOTAA64.EFI', 10), ('--slbounce', 'sl.efi', 12), ('--sltest', 'sltest.efi', 10), ('--tcblaunch', 'tcb.exe', 10)):
         argv += [flag, write(SCRATCH / 'in' / name, pe(subsystem, name.encode()))]

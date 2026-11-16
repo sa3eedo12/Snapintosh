@@ -5,7 +5,7 @@
     sp11_stick_bundle_build.py facts-check  --facts F [--dump DIR ...]
     sp11_stick_bundle_build.py place-check  --base A --guest-mib N [--reserve-mib N] [--facts F] [--dump DIR ...] [--declared BASE:SIZE ...]
     sp11_stick_bundle_build.py synthetic    --out DIR ...     a complete bundle from deterministic filler: no Apple material
-    sp11_stick_bundle_build.py authorisation-template synthetic|real ...      the record the operator approves, on stdout
+    sp11_stick_bundle_build.py authorisation-template synthetic|real [--note FILE] ...    the record the operator approves, on stdout
     sp11_stick_bundle_build.py real         --kernelcache K ...   NOT RUN: no kernelcache exists on the machine this was written on
 
 The bundle is the five files of docs/SP11-STICK-BUNDLE.md, q1n1's PAYLOAD.MAN and, with --base-tree, a stage tree that the stager verifies.
@@ -47,7 +47,7 @@ DUMMY = b'\x01' * 32        # a nonzero stand-in digest for the early checks, be
 BUILDER_REFUSALS = (
     'FACTS_BAD', 'FACTS_DISAGREE', 'NO_DUMPS', 'DUMP_INCOMPLETE', 'FB_UNKNOWN', 'DESCRIPTOR_NOT_READY', 'AUTH_RECORD_MISMATCH', 'Q1N1_TREE_ABSENT',
     'STAGE_REFUSED', 'STAGE_VERIFY_FAILED', 'OUT_DIR_REFUSED', 'OUT_NOT_EMPTY', 'PAYLOAD_BAD', 'REPORT_NOT_ZERO', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING',
-    'OPTIONS_BAD')
+    'OPTIONS_BAD', 'NOTE_BAD')
 ch.KNOWN_REFUSALS.update(BUILDER_REFUSALS)
 
 
@@ -76,7 +76,7 @@ def read_regular(path, what, cap=sb.FILE_MAX, minimum=1):
     if not stat.S_ISREG(info.st_mode):
         raise Refused('PAYLOAD_BAD', f'{what} is not a regular file')
     if info.st_size > cap:
-        raise Refused('FILE_SIZE', f'{what} is {info.st_size} bytes; the runner takes at most {sb.FILE_MAX}')
+        raise Refused('FILE_SIZE', f'{what} is {info.st_size} bytes, more than the {cap} allowed')
     if info.st_size < minimum:
         raise Refused('PAYLOAD_BAD', f'{what} is shorter than {minimum} bytes')
     data = Path(path).read_bytes()
@@ -374,13 +374,46 @@ def placement_of(a):
 
 
 # ---- The authorisation record ------------------------------------------------------------------------------------------------
+# Wrapped by hand: the record's digest is the operator's approval, so it must not depend on how a library version breaks lines.
+# The sentences about the dry-run wrapper restate docs/SP11-STICK-WRAPPER.md section 4 and name it as their source; a build whose
+# SNAPMON.BIN does more than that wrapper has to say so in a note (section 6 of the record).
 TOUCHES = {
-    'ram': 'RAM inside the placement only: the copy of the chunks, zero fills, the monitor work area and out buffer, the report written into '
-           'REPORT.DAT. No disk, no device, no RAM outside the placement (INFERRED: no wrapper exists yet).',
-    'el2_sysreg': 'the EL2 system registers the monitor entry writes and restores: HCR_EL2, VBAR_EL2, TPIDR_EL2, VTCR_EL2, VTTBR_EL2, CNTHCTL_EL2, '
-                  'MDCR_EL2 and the OS lock (docs/SP11-MONITOR-PORT.md section 12; read from the sources, not run).',
-    'gic': 'GIC registers for the timer stop (PPI 26). Which registers is UNKNOWN until the wrapper (work item 4) and its register list (work item 6) '
-           'exist: do not approve this class before they do.'}
+    'ram': ('RAM inside the placement only: the copy of the chunks, zero fills, the monitor work area and out buffer, and',
+            'the report written into REPORT.DAT. No disk, no device, no RAM outside the placement. What the dry-run wrapper',
+            'does to the machine is in docs/SP11-STICK-WRAPPER.md section 4: RAM stores only to page 0 of REPORT.DAT and,',
+            'after the stage COPYING, to the chunk destinations; cache maintenance by VA; AT S1E2W and AT S1E2R (they set',
+            'PAR_EL1); MRS reads; nothing else.'),
+    'el2_sysreg': ('required in every PIN.DAT by the interface (STORE_REQUIRED), so always listed. The dry-run wrapper',
+                   'stores no EL2 system register (docs/SP11-STICK-WRAPPER.md section 4: MRS reads, no MSR). A monitor entry',
+                   'would write and restore HCR_EL2, VBAR_EL2, TPIDR_EL2, VTCR_EL2, VTTBR_EL2, CNTHCTL_EL2, MDCR_EL2 and the',
+                   'OS lock (docs/SP11-MONITOR-PORT.md section 12; read from the sources, not run).'),
+    'gic': ('GIC registers for the timer stop (PPI 26). Which registers is UNKNOWN until the wrapper (work item 4) and its',
+            'register list (work item 6) exist: do not approve this class before they do.')}
+NOTE_LINES, NOTE_COLUMNS = 40, 120
+
+
+def read_note(path):
+    """The lines of the --note file, or None without one. They are appended to the record the operator approves, so they must read on a
+    terminal exactly as they are stored: printable ASCII and line feeds only (a carriage return, a backspace or an escape sequence could hide
+    or overwrite a word), at most NOTE_LINES lines of NOTE_COLUMNS characters. A refusal quotes no byte of the file."""
+    if path is None:
+        return None
+    try:
+        data = read_regular(path, '--note', cap=NOTE_LINES * (NOTE_COLUMNS + 1), minimum=0)
+    except Refused as error:
+        raise Refused('NOTE_BAD', error.detail) from None
+    if (bad := next((i for i, byte in enumerate(data) if byte != 10 and not 32 <= byte <= 126), None)) is not None:
+        raise Refused('NOTE_BAD', f'--note byte {bad} is not printable ASCII or a line feed')
+    lines = data.decode('ascii').split('\n')
+    if lines[-1] == '':
+        lines.pop()         # the terminator of the last line, not a line of its own
+    if not any(line.strip() for line in lines):
+        raise Refused('NOTE_BAD', '--note holds no text')
+    if len(lines) > NOTE_LINES:
+        raise Refused('NOTE_BAD', f'--note has {len(lines)} lines; at most {NOTE_LINES}')
+    if long := next((i for i, line in enumerate(lines, 1) if len(line) > NOTE_COLUMNS), None):
+        raise Refused('NOTE_BAD', f'--note line {long} has {len(lines[long - 1])} characters; at most {NOTE_COLUMNS}')
+    return lines
 
 
 def record_text(r):
@@ -402,7 +435,10 @@ def record_text(r):
         f'work_base {p["work_base"]:#x}  work_size {p["work_size"] // MIB} MiB',
         f'   place_base {p["place_base"]:#x}  place_end {p["place_base"] + p["place_size"]:#x}  (limit 2^36)', '',
         f'3. Store classes authorised (PIN.DAT authorised_stores = {r["stores"]})']
-    lines += [f'   {name}: {TOUCHES[name]}' for name in STORES if r['stores'] & STORES[name]]
+    for name in STORES:
+        if r['stores'] & STORES[name]:
+            first, *rest = TOUCHES[name]
+            lines += [f'   {name}: {first}', *(f'      {line}' for line in rest)]
     lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.', '',
               f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.', '',
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
@@ -410,8 +446,10 @@ def record_text(r):
               '   - No page change for twice the time box after ENTER: note the last line and power cycle.',
               '   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',
               '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',
-              '     operator\'s power cycle, which writes nothing.', '']
-    text = '\n'.join(lines)
+              '     operator\'s power cycle, which writes nothing.']
+    if r['note']:
+        lines += ['', '6. Notes of this build (part of the digest)', *r['note']]
+    text = '\n'.join(lines) + '\n'
     text.encode('ascii')
     return text
 
@@ -540,6 +578,7 @@ def prepare(a, kind, before_filler=None):
     expensive generation. Returns what finish() and the writers need."""
     if not 0 < a.time_box_s < 1 << 32:
         raise Refused('OPTIONS_BAD', '--time-box-s is a positive number of seconds')
+    note = read_note(getattr(a, 'note', None))
     facts, dumps = load_facts(a.facts), find_dumps(a.dump)
     lines, stores, place = facts_check(facts, dumps), stores_of(a.stores), placement_of(a)
     descriptor, state = descriptor_digest(a, facts, kind)
@@ -568,7 +607,7 @@ def prepare(a, kind, before_filler=None):
     ch.check_params(chunks, place, a.time_box_s)
     head, table = sb.unpack_guest(guest)
     record = record_text(dict(place=place, stores=stores, time_box_s=a.time_box_s, label=facts['build_label'], monitor=(len(monitor), sha(monitor)),
-                              reporter=(len(reporter), sha(reporter)),
+                              reporter=(len(reporter), sha(reporter)), note=note,
                               guest=dict(size=len(guest), sha256=sha(guest), chunks=len(table), index=head['index_sha256'].hex())))
     return dict(facts=facts, dumps=dumps, place=place, stores=stores, descriptor=descriptor, state=state, monitor=monitor, reporter=reporter,
                 guest=guest, maps=maps, lines=lines, record=record, declared=declared)
@@ -700,9 +739,11 @@ def build_opts(p, kind, template=False):
                      ('--base', dict(required=True, help='guest_base: a multiple of 32 MiB (D1)')), ('--guest-mib', dict(type=int, required=True)),
                      ('--reserve-mib', dict(type=int, help='default: the loader\'s bootstrap_reserve() for this guest')),
                      ('--declared', dict(action='append', default=[], help='BASE:SIZE the runner declared: kept clear')),
-                     ('--monitor', dict(required=True, help='SNAPMON.BIN (a placeholder until work item 4)')), ('--reporter', dict(required=True)),
+                     ('--monitor', dict(required=True, help='SNAPMON.BIN: payload 0, the wrapper (the dry-run one of docs/SP11-STICK-WRAPPER.md, or any file)')),
+                     ('--reporter', dict(required=True, help='SNAPREP.BIN: payload 1, the reporter')),
                      ('--stores', dict(required=True, help='ram,el2_sysreg[,gic]: the store classes authorised (D4)')),
-                     ('--time-box-s', dict(type=int, required=True, help='D5')), ('--descriptor', dict(help='a boot-ready board descriptor (real needs one)'))):
+                     ('--time-box-s', dict(type=int, required=True, help='D5')), ('--descriptor', dict(help='a boot-ready board descriptor (real needs one)')),
+                     ('--note', dict(help='a text file (printable ASCII, at most 40 lines of 120 characters) appended to the record as its section 6'))):
         p.add_argument(flag, **kw)
     if kind == 'synthetic':
         for flag, default in (('--image-mib', 115.5), ('--tables-mib', 16.0), ('--sptm-data-mib', 5.0)):
