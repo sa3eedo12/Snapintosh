@@ -389,6 +389,30 @@ TOUCHES = {
                    'OS lock (docs/SP11-MONITOR-PORT.md section 12; read from the sources, not run).'),
     'gic': ('GIC registers for the timer stop (PPI 26). Which registers is UNKNOWN until the wrapper (work item 4) and its',
             'register list (work item 6) exist: do not approve this class before they do.')}
+# The same three classes for the GIC and stop dry run (--gic-stop; docs/SP11-STICK-GIC.md sections 4 and 5), where payload 0 is the wrapper
+# built with SNAP_SP11_STICK_GIC=1. A register named here is one the binary's census lists (tools/test-sp11-stick-gic-build.py checks it).
+GIC_STOP_TOUCHES = {
+    'ram': ('RAM inside the placement only, as the dry-run wrapper: the copy of the chunks, zero fills and the report in',
+            'REPORT.DAT. One more RAM store of the GIC and stop stage: its record, 1376 bytes at REPORT.DAT offset 0x11000',
+            '(after the monitor\'s 64 KiB window), which is inside the report. No other RAM.'),
+    'el2_sysreg': ('required in every PIN.DAT by the interface (STORE_REQUIRED). The GIC and stop wrapper writes these',
+                   'registers of the boot CPU, each read first, put back and verified by read-back: class C ICC_PMR_EL1,',
+                   'ICC_BPR1_EL1, ICC_IGRPEN1_EL1; class T CNTHP_CVAL_EL2 and CNTHP_CTL_EL2 (the EL2 physical timer, armed',
+                   'for a time box of 2 s in the default build, in each of two windows, then disabled); class V VBAR_EL2 (the',
+                   'wrapper\'s own vector table) and DAIF.I (cleared only inside a window of at most twice the time box); in',
+                   'the handlers ICC_EOIR1_EL1 (ICC_DIR_EL1 when EOImode is set), SPSR_EL2 and ELR_EL2. Class E, only after a',
+                   'first window passed and a second announcement and 8 s: HCR_EL2 (RW and IMO, TGE clear), VBAR_EL1 and',
+                   'SCTLR_EL1 (MMU and caches off) for one ERET to a stub at EL1 that spins on CNTPCT_EL0 for at most twice',
+                   'the time box and ends by HVC; its lines are made visible with DC CIVAC and IC IVAU. It writes no',
+                   'CNTHCTL_EL2, TPIDR_EL2 or other register, executes no SMC, SVC or TLBI, and calls no monitor. Total',
+                   'time of the two windows and the two 8 s waits: about 20 s.'),
+    'gic': ('memory-mapped GIC registers in the pinned frames only (PIN.DAT gicd_base, gicr_first, gicr_stride,',
+            'gicr_count). Class G: GICD_CTLR, only when the value read shows group 1 disabled: EnableGrp1A is set, and',
+            'EnableGrp1 too unless DS is set (a read of 0x10 becomes 0x13); the old value is saved and put back. Class R: in',
+            'this CPU\'s own redistributor (found by matching GICR_TYPER to MPIDR; the other',
+            'frames are read for GICR_TYPER only) the SGI frame of INTID 26: IPRIORITYR byte, ISENABLER0 bit, ICFGR1',
+            'field if it reads edge, IGROUPR0 bit if the distributor shows one security state, and the put-backs',
+            'ICENABLER0 and ICPENDR0. Never the ITS, another interrupt, SMMU, PCIe, USB or the framebuffer.')}
 NOTE_LINES, NOTE_COLUMNS = 40, 120
 
 
@@ -435,9 +459,12 @@ def record_text(r):
         f'work_base {p["work_base"]:#x}  work_size {p["work_size"] // MIB} MiB',
         f'   place_base {p["place_base"]:#x}  place_end {p["place_base"] + p["place_size"]:#x}  (limit 2^36)', '',
         f'3. Store classes authorised (PIN.DAT authorised_stores = {r["stores"]})']
+    touches = GIC_STOP_TOUCHES if r.get('gic_stop') else TOUCHES
+    if r.get('gic_stop'):
+        lines.append('   Record of the GIC and stop dry run (docs/SP11-STICK-GIC.md): payload 0 is SNAPMON-GIC.BIN; no monitor is called.')
     for name in STORES:
         if r['stores'] & STORES[name]:
-            first, *rest = TOUCHES[name]
+            first, *rest = touches[name]
             lines += [f'   {name}: {first}', *(f'      {line}' for line in rest)]
     lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.', '',
               f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.', '',
@@ -544,6 +571,9 @@ def prepare(a, kind, before_filler=None):
     note = read_note(getattr(a, 'note', None))
     facts, dumps = load_facts(a.facts), find_dumps(a.dump)
     lines, stores, place = facts_check(facts, dumps), stores_of(a.stores), placement_of(a)
+    gic_stop = getattr(a, 'gic_stop', False)
+    if gic_stop and not stores & sb.STORE_GIC:
+        raise Refused('OPTIONS_BAD', '--gic-stop is the record of the GIC and stop dry run, which stores in the gic class: --stores must include gic')
     descriptor, state = descriptor_digest(a, facts, kind)
     monitor, reporter = read_regular(a.monitor, '--monitor', minimum=4), read_regular(a.reporter, '--reporter', minimum=4)
     declared = declared_ranges(a.declared)
@@ -572,7 +602,7 @@ def prepare(a, kind, before_filler=None):
     ch.check_params(chunks, place, a.time_box_s)
     head, table = sb.unpack_guest(guest)
     record = record_text(dict(place=place, stores=stores, time_box_s=a.time_box_s, label=facts['build_label'], monitor=(len(monitor), sha(monitor)),
-                              reporter=(len(reporter), sha(reporter)), note=note,
+                              reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop,
                               guest=dict(size=len(guest), sha256=sha(guest), chunks=len(table), index=head['index_sha256'].hex())))
     return dict(facts=facts, dumps=dumps, place=place, stores=stores, descriptor=descriptor, state=state, monitor=monitor, reporter=reporter,
                 guest=guest, maps=maps, lines=lines, record=record, declared=declared, real=real)
@@ -708,6 +738,7 @@ def build_opts(p, kind, template=False):
                      ('--monitor', dict(required=True, help='SNAPMON.BIN: payload 0, the wrapper (the dry-run one of docs/SP11-STICK-WRAPPER.md, or any file)')),
                      ('--reporter', dict(required=True, help='SNAPREP.BIN: payload 1, the reporter')),
                      ('--stores', dict(required=True, help='ram,el2_sysreg[,gic]: the store classes authorised (D4)')),
+                     ('--gic-stop', dict(action='store_true', help='the record of the GIC and stop dry run (docs/SP11-STICK-GIC.md); needs gic in --stores')),
                      ('--time-box-s', dict(type=int, required=True, help='D5')), ('--descriptor', dict(help='a boot-ready board descriptor (real needs one)')),
                      ('--note', dict(help='a text file (printable ASCII, at most 40 lines of 120 characters) appended to the record as its section 6'))):
         p.add_argument(flag, **kw)

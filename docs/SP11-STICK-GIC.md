@@ -1,0 +1,284 @@
+# SP11 stick wrapper: the GIC and stop dry run (work item 8)
+
+Status: EXPERIMENTAL. Hardware NOT RUN. Nothing in this note authorises a run: the operator authorises by the SHA-256 of the record of
+section 7, and only then. Labels: VERIFIED (a host or QEMU test of this tree shows it), OBSERVED (a run on the unit, one unit), INFERRED
+(from the GICv3 architecture as remembered or from q1n1's code: the specification was not re-read), EXPERIMENTAL, UNIMPLEMENTED, UNKNOWN.
+No hardware result of this work item exists, so none of its statements is VERIFIED on the unit.
+
+## 1. What it is
+
+The A16 monitor stops its guest with the EL2 physical timer, a level PPI (INTID 26) routed to EL2 by HCR_EL2.IMO and taken from the guest at
+EL1. On the Surface Pro 11 that has never been tried: no register of the GIC has been written there, GICD_CTLR reads 0x10 and no interrupt
+has been enabled (docs/SP11-MONITOR-PORT.md U3, D2). This variant of the stick wrapper (docs/SP11-STICK-WRAPPER.md) tests the mechanism and
+nothing else. After the unchanged stages (bundle checks, placement, copy and verify) it reads the GIC, announces its first store and waits
+8 s, stores in classes G, R, C and T, and runs window 1 at EL2 (C4). Only if that passed it announces again, waits 8 s, writes the EL1
+registers (class E) and runs window 2, an excursion to EL1 (C6). It puts everything back, reports, and returns:
+`MONITOR NOT CALLED: UNIMPLEMENTED IN THIS BUILD`.
+
+It is opt-in at compile time: `SNAP_SP11_STICK_GIC=1` (needs `SNAP_SP11_STICK=1` and so `SNAP_PLATFORM_SP11=1`; only 0 and 1; default 0).
+With it at 0 every file of the variant compiles to nothing and the dry-run wrapper rebuilds byte for byte as the one that ran on the unit
+(VERIFIED by tools/test-sp11-stick-gic-build.py). The variant is a separate binary pair, SNAPMON-GIC.BIN and SNAPREP-GIC.BIN, and a
+different SHA-256 means a different authorisation.
+
+## 2. What it decides, and what it cannot
+
+Decides (UNKNOWN until the unit runs): U3, whether PPI 26 arrives at EL2 as an IRQ after non-secure stores and how long after the programmed
+deadline; whether the non-secure view takes the group 1 enable and owns PPI 26; whether the CPU interface and CNTHP registers hold at EL2. It
+feeds D2 (an interrupt stop for the M1 monitor, or the polling fallback) and D4. Two contracts of the monitor's use of the interrupt:
+
+- C4, window 1 at EL2. Three cycles, each armed a short time ahead (10 ms): at the vector HPPIR1 is 26 and CNTHP_CTL.ISTATUS is 1; IAR1 is
+  26; once the level is dropped and the interrupt ended (EOIR1, DIR when EOImode is set) HPPIR1 is 1023 and the PPI is neither pending nor
+  active. Then a final deadline taken with no acknowledge, as the monitor's stop path takes it (probes/xnuboot/async.c:165-171 never reads
+  IAR): after CNTHP_CTL = 0 nothing may remain pending. Every latency is reported in ticks and in us against the deadline programmed.
+- C6, window 2 from EL1. The monitor takes the interrupt from its guest at the lower-EL vector (+0x480, probes/xnuboot.S:260) with
+  HCR_EL2.IMO set. Window 2 does the same from a stub at EL1 under HCR_EL2 0x80000010 (RW and IMO, TGE clear) with IRQ unmasked at EL1.
+
+Cannot decide: anything under a running guest, the other CPUs, the SMMU, the ITS, the M1 time box (D5: 5 s; here 2 s per window), EL3's
+behaviour at other moments, and an interrupt taken at EL1 with PSTATE.I set (the monitor enters its guest masked, probes/xnuboot.S:158;
+section 12). A QEMU run proves the sequence and the assembly, never the unit's EL3 (section 9).
+
+## 3. Build and test
+
+    export Q1N1_SP11_TREE=<q1n1 checkout>      (the fork: runner headers, sha256.c, the payload recipe; absent: REFUSED)
+    python3 tools/sp11_stick_wrapper_build.py --out build/sp11-gic --gic       SNAPMON-GIC.BIN, SNAPREP-GIC.BIN, build-report.json
+    python3 tools/sp11_stick_bundle_build.py authorisation-template real ... --monitor SNAPMON-GIC.BIN --reporter SNAPREP-GIC.BIN \
+        --stores ram,el2_sysreg,gic --gic-stop                                  the record the operator approves, on stdout
+    python3 tools/test-sp11-stick-gic.py | -gic-record.py | -gic-build.py | -gic-qemu.py     the tests of section 9
+
+The bundle builder writes the two payloads into the bundle as SNAPMON.BIN and SNAPREP.BIN (the frozen file roles); the record names their
+sizes and digests. `--gic-stop` needs `gic` in `--stores` and changes only the three class texts of section 3 of the record.
+
+## 4. The stage, step by step
+
+Reads first, then one decision, then stores. Code: `probes/sp11-stick-gic.c` (the arm and the put-back), `probes/sp11-stick-gic-dry.c` (the dry
+run's own: classes T, V, E, the windows, the verdict), `probes/sp11-stick-gic-vec.c` (assembly: the EL2 vector table, the window and excursion
+routines, the EL1 table and stub), `probes/sp11-stick-gic-record.h` (the record and the page lines), `probes/sp11-stick-gic.h` (parameters,
+register offsets, `struct sw_gic`, the interface), the gated layer at the end of `probes/sp11-stick-hw.h` (one function per register).
+
+| Step | Function | Reads | Stores |
+| --- | --- | --- | --- |
+| CPU and pins | `gic_check_cpu` | CurrentEL 2, SPSel 1, DAIF masked, HCR_EL2.IMO, PIN.DAT's GIC fields, the counter, an AT write probe of the record | none |
+| EL1 checks | `gic_dry_precheck` | CNTHCTL_EL2.EL1PCTEN, an AT read probe that the stub image is identity-mapped (EL1 with the MMU off fetches by physical address), old HCR_EL2, VBAR_EL1, SCTLR_EL1 | none |
+| Reads | `gic_read_*` | GICD_CTLR, TYPER, IIDR; a bounded scan of the pinned frames for MPIDR's affinity, then this PPI's registers; ICC_SRE_EL2 and, only if SRE is set, the rest of the CPU interface, VBAR_EL2, CNTHP | none |
+| Announce | `sw_gic_arm_stores` | | `NEXT GIC STORES AFTER 8 S G= R= C= T= V= E=`, then 8 s on the counter, then the first store |
+| G, R, C | `gic_store_g`, `_r`, `_c` | back, each | section 7; then PREPARED, written after all three held |
+| T | `gic_arm_timer` | back | CNTHP_CVAL_EL2 now + time box, CNTHP_CTL_EL2 enable |
+| V, window 1 | `gic_el2_window` | the done flag, CNTPCT | VBAR_EL2 (own table), DAIF.I clear; at the end masked and VBAR_EL2 back |
+| Classify 1 | `gic_classify_el2` | the diagnosis registers | none; its IRQ or DIAG line is printed before E |
+| E, window 2 | `gic_el1_window` | back | the second NEXT line and 8 s, then VBAR_EL1, SCTLR_EL1, HCR_EL2, T again, ERET to the stub (section 7) |
+| Classify 2 | `gic_classify_el1` | as above, in the HVC path | none |
+| Put back | `gic_dry_restore`, `sw_gic_put_back` | each register again | CNTHP_CTL 0 (always), E (HCR_EL2 first), V, T, then C, R, G |
+| Report | `gic_finish` | | the record to REPORT.DAT, the page lines |
+
+Each class is marked `begun` in the record, and the record stored and cleaned to RAM, before the class's first store, so that a freeze at a
+store is named by what the record holds. Every register is read before it is changed and read back after: one that did not hold is a named
+failure (the stage stops storing, puts back, reports). The put-back is verified by read-back, one more write at most, then NOT_RESTORED; a
+register never written is only read.
+
+The two halves, for the monitor entry (work item 4b). One source of truth. 4b calls `sw_gic_arm` (the reads, the NEXT line and wait, G, R and C
+with read-back, PREPARED written after the arm succeeded), then the monitor, then `sw_gic_put_back` (C, R and G exactly, verified, one retry,
+NOT_RESTORED loud). It must not arm CNTHP or change VBAR_EL2 or HCR_EL2: the monitor does those itself (probes/xnuboot.S:172-178). The dry
+run's own registers (T, V, E) are in `probes/sp11-stick-gic-dry.c` only, and `probes/sp11-stick-gic.c` built with `-DSW_GIC_DRY_REGS=0` has
+no write or read of them (VERIFIED on its object: MSR to ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1 only; no ERET, HVC, IC).
+
+Window 1 (EL2). `sw_gic_window` is the only code that changes VBAR_EL2 on purpose and unmasks IRQ at EL2 (the I bit only). It polls a done flag
+and CNTPCT against the deadline: no WFI, so a lost interrupt ends by the counter. The table has sixteen entries 128 bytes apart, 2 KiB aligned;
+each saves x0 and x1, numbers itself and joins one body that saves the other caller-saved registers, calls the C half and ERETs. Slot 5
+(current EL, SPx, IRQ, +0x280), cycles 0 to 2: record HPPIR1 and CNTHP_CTL, read IAR1, re-arm CVAL 10 ms ahead (the level is low before the end
+of interrupt, compat/fast-timer-irq.h), EOIR1 (DIR when EOImode), record the state after a 10 us settle on the counter, return with IRQ unmasked. The fourth entry reads no
+IAR: CNTHP_CTL = 0, settle, record, end masked. An IAR that is not 26, an entry before its deadline or more than six entries ends it by name; any
+other slot is recorded and ends it: no retry.
+
+Window 2 (EL1). Before any store: EL1PCTEN set and the image identity-mapped, else a refusal. Then `NEXT GIC EL1 EXCURSION AFTER 8 S`, 8 s,
+VBAR_EL1 (the EL1 table), SCTLR_EL1 0x30500800 (MMU and caches off, as q1n1's el1trap), HCR_EL2 0x80000010, each read back (IMO must hold:
+EL1_NOT_HELD), the stub made visible (DC CIVAC, IC IVAU), CNTHP armed, and an ERET to the stub with SPSR 0x345 (EL1h, D, A, F masked, I clear).
+The stub spins on CNTPCT_EL0 up to twice the time box from its own first read (a CNTPOFF offset cannot matter), then `hvc #0`; a UDF follows.
+The EL1 table: sixteen entries `mov x16, #n; hvc #1`. EL2's slot 9 (lower EL, IRQ, +0x480) records INTID, ELR, SPSR and latency, silences the
+timer, ends the interrupt and the excursion at EL2h with the caller's PSTATE; slot 8 (lower EL, synchronous, +0x400): HVC #0 is
+NO_IRQ_FROM_EL1 with the diagnosis registers, HVC #1 an exception of EL1 itself (0x100 + n; ESR_EL1, ELR_EL1, FAR_EL1), any other class
+EL1_EXCEPTION; every other slot ends the window by its number. The stage is never left at EL1. q1n1's `payloads/el1trap.c` is the pattern
+(OBSERVED, boot 11: the first q1n1 runner payload to run code below EL2, one unit; the X2 image's T02 had run an EL1 stub with vector tables
+and an ERET path, OBSERVED): evidence for the pattern, none for U3.
+
+Parameters (compile time; another value is another binary): `SP11_STICK_GIC_TIME_BOX_S` 2 (1 to 5), `SP11_STICK_GIC_CYCLE_US` 10000, `SP11_STICK_GIC_SLACK_US`
+1000 (a label, not a limit), the wait 8 s, priority 0x80, PMR 0xF0, BPR1 0. Every wait is bounded by the counter (the 8 s waits by a read count
+too). Stack: the state is under 2 KiB (static assert); the call graph and two exception frames stay far below the stack (tested).
+
+Time. Each window's first timer is armed one time box (2 s) ahead, a later cycle 10 ms ahead. Window 1 takes about 2.03 s (hard bound 4.08 s),
+window 2 about 2 s (the stub's bound 4 s). With the two 8 s waits: about 20 s on a passing run, 22 s when window 2 sees no interrupt, 12 s when
+window 1 sees none.
+
+## 5. The record in REPORT.DAT, and the extension-record convention
+
+REPORT.DAT is 528,384 bytes (0x81000): the head page (the frozen interface), then the window the monitor writes through x0 = REPORT.DAT + 0x1000.
+Every store of the monitor lies below out + 0x10000 (VERIFIED by reading: the static asserts of probes/xnuboot/report_layout.c, lines 524 to 586
+and 604, and REPORT_RESERVE in probes/run.py:233), so the first free byte is REPORT.DAT offset 0x11000. Pass 1 put the record at 0x1000, the
+first byte of that window: a collision once a monitor is called. The convention for what lives after the window, an extension record:
+
+- It starts with an 8-byte ASCII tag, a u32 version and a u32 size, then 64-bit words, in a slot of 0x1000 bytes from 0x11000. This record is
+  the first (magic `SNAPGIC1`, 1376 bytes); the next slot would start at 0x12000.
+- Only the wrapper (SNAPMON.BIN, which runs first) writes a slot; the reporter (SNAPREP.BIN) and the operator read it; the monitor never does.
+  A zero tag means the stage did not run; a tag a reader does not know is skipped; a record that fails its own check is named damaged and not
+  printed.
+- The head page is not changed: its `monitor_*` fields stay zero when no monitor is called, so `sp11sb_report_check` passes (tested).
+
+Record (little-endian, 172 words, no padding, reserved words zero; the field names are in `probes/sp11-stick-gic-record.h`): magic, version 2, size
+at 0x00; outcome 0x10, substage 0x14, planned and begun class masks 0x18 and 0x1C (G 1, R 2, C 4, T 8, V 16, E 32), wrote, restore_failed and
+restore_retried 0x20 to 0x28 (one bit per register of the table), first outcome 0x2C, done flag 0x30, next cycle 0x34, counter Hz 0x38, time box
+0x40, slack 0x48, cycle 0x50 (ticks), GICD base 0x58, GICR base 0x60, then index, INTID, GICD TYPER and IIDR, GICR WAKER and TYPER, ICC_SRE_EL2,
+ICC_CTLR_EL1, CNTHCTL_EL2 0x98, resume SPSR 0xA0. Five interrupts from 0xA8, 0x48 bytes each: deadline, tick at the vector, ELR, SPSR, IAR,
+HPPIR1 at the vector and after the end, CNTHP_CTL at the entry, flags, latency in ticks and in us (no ESR: INFERRED that an IRQ entry leaves ESR_EL2 as it was);
+0 to 2 the acknowledged cycles, 3 the final
+one with no acknowledge, 4 the EL1 interrupt. Two windows from 0x210, 0x88 bytes each: arm tick, deadline, entry counts, the stub's HVC flag, the
+first other entry (vector, ESR, ELR, FAR, SPSR), the diagnosis registers. Then 18 rows of `{old, new, readback, final}` from 0x320: GICD_CTLR,
+IGROUPR0, ISENABLER0, ISPENDR0, ISACTIVER0, IPRIORITYR, ICFGR1, ICC_PMR, ICC_BPR1, ICC_IGRPEN1, CNTHP_CTL, CNTHP_CVAL, VBAR_EL2, DAIF, ICC_RPR,
+HCR_EL2, VBAR_EL1, SCTLR_EL1. `sg_record_check` (also in the reporter) accepts a record only with its magic, version, size, no reserved bits and every field in range: a
+record that fails is named `GIC RECORD DAMAGED CODE=n` (1 magic, 2 version, 3 size, 4 reserved or index, 5 value), one that is zero
+`GIC NO RECORD: THE STAGE DID NOT RUN`.
+
+Return value and head. The stage returns 0 whenever it ran to its end with a clean put-back, whatever the windows showed: the VERDICT line and
+the record say. A refusal, a store or put-back that did not hold, and a NOT_RESTORED return `0x1000 + 82` (GIC_NOT_READY) with
+`refusal_detail` = the outcome number, at the stage reached (COPIED, or PREPARED once G, R and C held). It is the closest existing code (section
+12). The arm writes PREPARED after it succeeded.
+
+## 6. The page lines
+
+The wrapper adds ten lines at most (the dry run prints 19: 29 of the 30 allowed; the closing `MONITOR NOT CALLED` line is essential under the
+gate): `GIC GICD`, `GIC GICR` (or `NOT_FOUND FRAMES= FIRST= TYPER0=`) and `GIC CPU` (the reads), `NEXT GIC STORES AFTER 8 S G= R= C= T= V= E=`,
+`NEXT GIC WINDOW 2 S GICD= ISEN= PRIO= PMR= IGRPEN1= CTL=` (what the stores put in place, before window 1 opens), `GIC IRQ INTID= LAT_US=a/b/c/d
+OK=xxxx FINAL=CLEAR|PEND|NONE` (window 1's four interrupts; OK per interrupt 1, 0 or - not entered) or `GIC DIAG CTL= HPPIR= PEND= ISEN= GICD=
+RPR= DAIF=` when it saw nothing; then, only if window 1 passed, `NEXT GIC EL1 EXCURSION AFTER 8 S HCR= SCTLR1= VBAR1= PCT=`, `GIC EL1 INTID=
+LAT_US= EARLY|ON_TIME|LATE ELR= SPSR= OK=` or `GIC DIAG1` (the stub's bound ended it), `GIC RESTORE CLEAN= FAILED= RETRIED= BEGUN= VBAR=OK|BAD|NONE
+EL1=OK|BAD|NONE`, `GIC VERDICT=<name> [FIRST=<name>] OUTCOME= SUB=`. The reporter prints at most 23 lines of its 40 from the record (VERDICT,
+FRAMES, GICD, GICR, CPU, OLD, NEW, TIMER, IRQ, one `GIC CYC<k> IAR= HPPIR= POST= F=<ISTATUS><PEND><ACT> TICKS= US=` per interrupt, DIAG, EXC, EL1,
+DIAG1, HVC, EXC1, HCR, VBAR1, SCTLR1, FINAL, RESTORE). One renderer (`sg_line`) writes both pages; every line is at most 100 characters for any
+record that passes the check (VERIFIED).
+
+## 7. Store classes for the authorisation record (D4)
+
+`tools/sp11_stick_bundle_build.py authorisation-template ... --stores ram,el2_sysreg,gic --gic-stop` names them; a class not listed in
+`--stores` is withheld and the wrapper refuses `STORE_NOT_AUTH` at PIN_OK before it stores anything but REPORT.DAT page 0 (VERIFIED on the
+host and under QEMU).
+
+| Class | `--stores` | Registers (window) | Evidence |
+| --- | --- | --- | --- |
+| ram | `ram` | the copy and the head as the dry run; the record, 1376 bytes at REPORT.DAT + 0x11000 | INFERRED nothing else |
+| G | `gic` | GICD_CTLR, only when EnableGrp1A reads clear: old value, `old \| 0x2 \| 0x1` with DS = 0 (q1n1's A16 recipe writes 0x13), `old \| 0x2` with DS = 1 (after the 8 s wait, put back after the windows) | INFERRED (section 12) |
+| R | `gic` | this CPU's redistributor only (found by affinity; other frames: GICR_TYPER read): SGI frame INTID 26: IPRIORITYR byte, ISENABLER0 bit, ICFGR1 if edge, IGROUPR0 if DS = 1; put back ICENABLER0, ICPENDR0 | INFERRED |
+| C | `el2_sysreg` | ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1 | INFERRED |
+| T | `el2_sysreg` | CNTHP_CVAL_EL2, CNTHP_CTL_EL2 (armed in each window for the time box, disabled again) | INFERRED |
+| V | `el2_sysreg` | VBAR_EL2 and DAIF.I inside window 1 and the excursion; in the handlers ICC_EOIR1_EL1, ICC_DIR_EL1 (EOImode), SPSR_EL2, ELR_EL2 | EXPERIMENTAL; the pattern OBSERVED: el1trap, T02 |
+| E | `el2_sysreg` | only after window 1 passed, a second NEXT line and 8 s: HCR_EL2 (0x80000010), VBAR_EL1, SCTLR_EL1 (0x30500800), put back HCR_EL2 first; SPSR_EL2 and ELR_EL2 for the ERET; the stub's HVC; DC CIVAC and IC IVAU over its 2 KiB table and code | EXPERIMENTAL; el1trap ran, boot 11 |
+
+Nothing else: no CNTHCTL_EL2 write, TPIDR_EL2, ITS, other PPI or SPI, other redistributor beyond a read of its GICR_TYPER, SMMU, PCIe, USB,
+framebuffer, secondary CPU, no SMC, SVC or TLBI. HVC is only the EL1 stub's and the EL1 table's. Beyond the brief's list: ICC_DIR_EL1, SPSR_EL2,
+ELR_EL2 and the E class (the census says so, section 8).
+
+## 8. Binary properties
+
+SNAPMON-GIC.BIN is about 90 KB (the default 35,164 B), SNAPREP-GIC.BIN about 56 KB (under the reporter's 64 KiB); the build report names the
+digests. Two builds are byte identical; no undefined symbol; the ELF check passes; text and rodata only, no data, no bss, no GOT, no libc.
+Census (listing and bit patterns agree; each register's name is checked against its encoding): 26 MSR instructions of 15 registers:
+VBAR_EL2 x5, SPSR_EL2 x4, ELR_EL2 x4, DAIFSet x2, DAIFClr x1 (immediate #2 only), ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1, ICC_EOIR1_EL1,
+ICC_DIR_EL1, CNTHP_CVAL_EL2, CNTHP_CTL_EL2 and, new in pass 2, HCR_EL2, VBAR_EL1, SCTLR_EL1, once each. New instruction classes: ERET x2 (the
+vector body, the excursion), HVC x17 (one `hvc #0` in the stub, sixteen `hvc #1` in the EL1 table), IC IVAU x1 and one more DC CIVAC
+(`sp11hw_make_visible`), a UDF after the stub's HVC, MRS of CNTHCTL_EL2, VBAR_EL1, SCTLR_EL1, ESR_EL1, ELR_EL1, FAR_EL1. As the dry run: DC CVAC,
+AT S1E2W and S1E2R, DSB SY, ISB; no SMC, SVC, TLBI, WFI, WFE, BR; every BLR through the runner's ops table. MMIO stores: two one-instruction
+functions (`strb`, `str`), 11 call sites, all in the stage; every other store is to the stack or through an argument. The default SNAPMON.BIN
+census is unchanged (no MSR, ERET, TLBI, IC, SMC, HVC, SVC). The reporter variant has no system instruction and stores only to its stack.
+
+## 9. Tests (host first; every one can fail)
+
+| File | What it proves |
+| --- | --- |
+| `tools/test-sp11-stick-gic.py` + `tools/test-sp11-stick-gic.c` | the real wrapper, stage and reporter under ASan and UBSan against a model of the machine (`tools/sp11_stick_gic_testlib.py`, `tools/sp11_stick_gic_checks.py`): the happy path and its variants, C4 and C6, every refusal before a store (the write log proves none), windows that end badly (a lost interrupt in the EL1 window, a wrong vector class, IMO clear, a stuck line after the final deadline, a second storm, and more), registers that do not restore, stores that do not hold, and fifteen seeded-bad stages (one fault each in the order, the NEXT lines, the end of interrupt,
+the re-arm, the final acknowledge, IMO, the EL1 restore, the stub's bound or the settle), each failing its matching check while the real stage passes it |
+| `tools/test-sp11-stick-gic-record.py` | the record round trip, the check, damaged and extreme records through the reporter, line widths, the authorisation record (`--gic-stop`) |
+| `tools/test-sp11-stick-gic-build.py` | section 8, the core object alone, the gate, hygiene, this note |
+| `tools/test-sp11-stick-gic-qemu.py` | the real runner and the real binaries at EL2 under QEMU/EDK2, both windows |
+
+The host model proves order, bounds, put-back and report, not the assembly (the census and QEMU do) or the unit's GIC. QEMU (virt,
+gic-version=3, cortex-a76): EDK2 leaves this CPU's redistributor asleep (WAKER 0x6), and the real binary refuses `GICR_ASLEEP` (VERIFIED under
+QEMU). With the redistributor woken by the shell (`mm`), both windows run: four interrupts at EL2 (the
+last unacknowledged, nothing pending after CNTHP_CTL = 0) and one from EL1 at +0x480 (SPSR 0x345), and every register is restored
+(VERIFIED under QEMU only; QEMU's latencies say nothing about the unit's).
+
+## 10. Failure table: what the page says, what it means, what next
+
+A refusal before `NEXT` stored nothing but REPORT.DAT. Never retry the same bundle blindly.
+
+| VERDICT | Meaning | Next |
+| --- | --- | --- |
+| NOT_EL2, SPSEL_NOT_1, DAIF_NOT_MASKED, IMO_CLEAR | the runner's state at the call is not the one the stage needs | fix the runner state; nothing stored |
+| PIN_GIC | PIN.DAT's GIC fields differ from the build's five macros, or the geometry is not walkable | rebuild bundle and wrapper from one profile |
+| COUNTER | counter frequency out of range, or the counter did not run during an 8 s wait | investigate the counter |
+| GICD_VIEW | GICD_CTLR has RWP, an unknown bit, or affinity routing off: not a view the stage decodes | the GICD line has the value; a new decode is needed |
+| GICR_NOT_FOUND | no pinned frame's affinity matched MPIDR | check the pins and MPIDR (FRAMES, FIRST, TYPER0 on the page) |
+| GICR_ASLEEP | WAKER shows sleep: waking it is not an authorised store | decide whether to authorise a WAKER write: a new class |
+| PPI_OWNED | something is enabled in ISENABLER0, or INTID 26 is pending or active | find the owner; do not enable on top of it |
+| SRE_CLEAR | ICC_SRE_EL2.SRE is clear: the ICC registers would be UNDEFINED, so none was read | the interface is off: not this stage's to enable |
+| TIMER_OWNED | CNTHP_CTL.ENABLE is set | someone else uses the EL2 timer |
+| WINDOW_UNWRITABLE | the AT write probe of REPORT.DAT + 0x11000 failed | the record page is not writable: bundle or map |
+| EL1_PCT_TRAPPED | CNTHCTL_EL2.EL1PCTEN is clear: the stub could not read the counter, its bound would never end | refused before any store |
+| EL1_IMAGE | the stub or its table is not identity-mapped at EL2: with the MMU off EL1 would fetch elsewhere and abort in a loop no counter ends | refused before any store; fix the map |
+| G_NOT_HELD, R_NOT_HELD, C_NOT_HELD, T_NOT_HELD | the store (or its RWP) did not read back: that class's registers are put back | the answer is the finding (non-secure write ignored, PPI not the OS's, CNTHP not writable); nothing armed |
+| PRIO_NOT_BELOW_PMR | the priority reads back at or above PMR: the non-secure view differs | the OLD and NEW lines have both |
+| EL1_NOT_HELD | HCR_EL2, VBAR_EL1 or SCTLR_EL1 did not read back as written, or IMO did not hold: EL1 was not entered, E is put back | the HCR, VBAR1 and SCTLR1 lines have OLD, RB, FIN: the finding |
+| IRQ_OK | both windows: four interrupts at EL2 each as C4 says, and the interrupt from EL1 at +0x480, ended, restored | read LAT_US: the interrupt stop is viable (U3 answered yes); the I-set entry is still UNKNOWN |
+| NO_IRQ | window 1: nothing arrived by its deadline; DIAG: CTL bit 2 (ISTATUS) clear: the timer did not fire; ISTATUS set, PEND 0: the line did not reach the GIC; PEND 1 and HPPIR 0X3FF: not delivered (group, enable, priority); HPPIR 0X1A: signalled and not taken (masked, RPR) | the polling fallback (D2), with the DIAG line as the reason |
+| WRONG_INTID | another INTID, or 1023 (spurious: no end of interrupt) | the IRQ line has it |
+| EXCEPTION | another vector entry in window 1: the EXC line has vector, ESR, ELR | decode ESR; the table or a register access faulted |
+| STORM | an interrupt before its programmed deadline, or more entries than the cycles allow, or still signalled after the end | the line is stuck or the timer did not stop; IRQ stays masked |
+| CYCLE_LOST | one of the three re-armed deadlines produced no interrupt (the CYC lines show which) | the re-arm did not take, or the level did not drop: D2 |
+| HPPIR_NOT_26 | HPPIR1 at a vector entry was not 26 although the interrupt came | the GIC signals another interrupt: group or priority view |
+| NO_ISTATUS | CNTHP_CTL.ISTATUS was clear at a vector entry | the interrupt was not the timer's condition |
+| NOT_CLEAN | after EOI (DIR) HPPIR1 is not 1023, or the PPI is pending or active | the level did not drop or the end did not take (CYC F=) |
+| FINAL_PENDING | after the final deadline (no acknowledge) and CNTHP_CTL = 0 something stayed pending | the monitor's stop path would leave an interrupt: D2 |
+| NO_IRQ_FROM_EL1 | nothing arrived at +0x480 by the stub's bound; HVC #0 ended it; DIAG1 and the HVC line have ISTATUS, HPPIR, PEND, ISEN, GICD, RPR, PMR, HCR, SPSR | as NO_IRQ, for the guest's case |
+| EL1_WRONG_INTID | another INTID or 1023 from EL1 | the EL1 line has it |
+| EL1_EXCEPTION | any other class or vector in window 2: EXC1 has vector (0x100 + n: an EL1 vector), ESR, ELR, SPSR | decode ESR; the stub or its table faulted |
+| NOT_RESTORED | a put-back did not hold after one retry; FAILED names the registers, FIRST what the windows had shown | stop the series: the machine is not as found |
+
+Last line on a freeze or reset: `NEXT GIC STORES AFTER 8 S` (in the wait or at the first store; the record in RAM names the class begun, if RAM
+survived), `NEXT GIC WINDOW 2 S` (the timer is armed, IRQ unmasked at some point) or `NEXT GIC EL1 EXCURSION AFTER 8 S` (E writes, ERET, the stub;
+window 1's page is already filmed).
+
+## 11. Proposed supervised plan (for the coordinator; nothing here authorises it)
+
+One boot, one autorun step, one hardware client; AC power or at least 50% battery; thermal guard as the other runs; the operator present
+and filming. Manifest, exactly: `\SP11\SNAPMON.BIN` (from SNAPMON-GIC.BIN), `\SP11\SNAPREP.BIN` (from SNAPREP-GIC.BIN), `GUEST.DAT`,
+`PIN.DAT`, `REPORT.DAT`, built with `--stores ram,el2_sysreg,gic --gic-stop`; the record's SHA-256 is the authorisation, named by the
+operator. Read the page: up to `NEXT GIC STORES AFTER 8 S` it is read-only evidence; the stores follow 8 s later, the EL1 writes 8 s after
+`NEXT GIC EL1 EXCURSION AFTER 8 S`. Total window time: about 20 s from the first NEXT line to the last (section 4). Stop rules: a refusal
+ends the boot; freeze on a NEXT line or no page change for 15 s: note the
+last line and power cycle (nothing writes to disk); two resets at the same last line stop the series; NOT_RESTORED stops the series; a fault
+page is a finding. After IRQ_OK or a failed window with its DIAG, the next work is the M1 stop design (D2), not a retry.
+
+## 12. Decisions, deviations, risks, change requests
+
+GICD_CTLR reading (INFERRED). 0x10 read non-secure is ARE_NS (bit 4) with EnableGrp1A (bit 1) and EnableGrp1 (bit 0) clear and DS (bit 6)
+clear: two security states, EL3 owns group 0 and secure group 1. So the non-secure group 1 enable IS needed (class G), and the A16's
+precondition `(GICD_CTLR & 0x80000012) == 0x12` does not hold. The stage does not rely on this reading: it decodes the value it reads, plans G
+only if EnableGrp1A is clear, and refuses otherwise. With DS = 0 IGROUPR0 is RAZ/WI to non-secure writes, so none is made; ISENABLER0 reading
+back shows whether PPI 26 is ours (else R_NOT_HELD). The GTDT's non-secure EL2 timer (GSIV 26, level, active high) is OBSERVED.
+
+The study of the monitor entry (read-only), checked against the code: the monitor's report ends below out + 0x10000
+(section 5); it arms CNTHP and sets IMO and FMO itself (probes/xnuboot.S:172-178; VBAR_EL2 at :116, DAIF masked at :82); its lower-EL IRQ vector
+is +0x480 (:260); its tick path reads HPPIR1, IAR1, re-arms and ends (probes/xnuboot/async.c:90-106) and its stop path (:165-171) never reads
+IAR. Two differences: the study cites :158-170 for the stop path (a few lines off), and says the guest runs with PSTATE.I set at EL1 where the
+brief says clear. The code enters the guest masked (`mov x12, #0x3c5`, xnuboot.S:158; the comment at :175 says EL1 cannot mask). Window 2 runs
+with I clear, as the brief says. That an IRQ routed to EL2 is not masked by PSTATE.I at EL1 is INFERRED, UNKNOWN on the unit: a third phase
+with I set would answer it, at the price of one more outcome and one more authorisation.
+
+Deviations: T before V, so that no exception can arise between installing the table and opening the window (the brief's order was G, R, C, V,
+T); PREPARED written by the arm; the extra census entries of section 8; one code for every GIC refusal.
+UNIMPLEMENTED: the monitor entry, the real M1 stop, secondaries, waking a redistributor, the ITS, LPIs. UNKNOWN: U3, ICC and CNTHP access at EL2
+on the unit, the latency, the group and security of PPI 26, the I-set EL1 entry. Risks: the stub's fetch depends on the identity map and on
+cache maintenance that QEMU cannot show; a stuck-high line can never clear its pending bit, so it ends NOT_RESTORED (loud; the series stops).
+
+Change requests (the frozen files are untouched): (1) GIC_NOT_READY (82) says "did not read back as written" in `probes/sp11-stick-bundle.h` and
+`tools/sp11_stick_bundle.py`; docs/SP11-STICK-BUNDLE.md now widens it (documentation only) to every refusal and failure of this stage,
+`refusal_detail` naming the outcome of section 10. (2) The interface should name the extension-record rule of
+section 5.
+
+Hardware status: NOT RUN.

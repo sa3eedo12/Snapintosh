@@ -7,7 +7,8 @@
  *
  * This build of the wrapper contains no monitor and never calls one: nothing here arms a timer, touches the GIC or writes an EL2
  * system register. UNIMPLEMENTED: the monitor entry (work items 4b, 8 and 11). The stages PREPARED, MONITOR_ENTERED and
- * MONITOR_RETURNED are never written and the report fields that belong to them stay zero.
+ * MONITOR_RETURNED are never written and the report fields that belong to them stay zero. The opt-in SNAP_SP11_STICK_GIC=1 build adds
+ * the stage of sp11-stick-gic.c, which does arm a timer and write GIC and EL2 registers (and writes PREPARED), still without a monitor.
  *
  * Evidence: EXPERIMENTAL; hardware NOT RUN. */
 #include "sp11-stick-hw.h"
@@ -36,6 +37,15 @@ _Static_assert(!(SP11_STICK_HASH_POLICY & ~(SP11SB_HASH_CHUNKS | SP11SB_HASH_FIL
  * default would make the comparison with the pin trivially true. */
 #if !defined(SNAP_GICD_BASE) || !defined(SNAP_GICR_FIRST) || !defined(SNAP_GICR_LIMIT) || !defined(SNAP_GICR_STRIDE) || !defined(SNAP_TIMER_INTID)
 #error "SNAP_SP11_STICK=1 needs the five GIC macros of the monitor build (SNAP_GICD_BASE, SNAP_GICR_FIRST, SNAP_GICR_LIMIT, SNAP_GICR_STRIDE, SNAP_TIMER_INTID)"
+#endif
+
+/* The store classes this build uses, which stage_observed passes as build_stores: a bundle that does not list one is refused before
+ * anything but REPORT.DAT is stored to. The dry run stores RAM only; the GIC and stop stage adds the EL2 system register class and the
+ * GIC class (SP11SB_STORE_*, the frozen format's three bits), so that a PIN.DAT authorised for the dry run alone cannot run it. */
+#if SNAP_SP11_STICK_GIC
+#define SW_BUILD_STORES (SP11SB_STORE_RAM | SP11SB_STORE_EL2_SYSREG | SP11SB_STORE_GIC)
+#else
+#define SW_BUILD_STORES SP11SB_STORE_RAM
 #endif
 
 /* Test-only faults (tools/test-sp11-stick-wrapper.py proves the tests can fail by building each). They exist only in the host build. */

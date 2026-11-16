@@ -5,7 +5,9 @@
  * maintenance, hashes the copy again from DRAM, reports, and returns. IT NEVER CALLS A MONITOR: this build has none, and no code
  * path arms a timer, touches the GIC or writes an EL2 system register. UNIMPLEMENTED: the monitor entry, the stop timer and the GIC
  * bring-up (work items 4b, 8 and 11, each behind a later gate). The stages PREPARED, MONITOR_ENTERED and MONITOR_RETURNED are never
- * written and the report fields that belong to them stay zero.
+ * written and the report fields that belong to them stay zero. (The opt-in SNAP_SP11_STICK_GIC=1 build, SNAPMON-GIC.BIN, adds one stage
+ * between COPIED and DONE, sp11-stick-gic.c, which does all of that but still calls no monitor: docs/SP11-STICK-GIC.md. With the gate at
+ * 0 this file compiles to the bytes that ran on the unit.)
  *
  * Order, one stage between steps, REPORT.DAT stored whole after each (so a hang is named by its last stage, on the panel by the last
  * line and in RAM by the head):
@@ -21,6 +23,9 @@
 
 #if SNAP_SP11_STICK
 #include "sp11-stick-wrapper.h"
+#if SNAP_SP11_STICK_GIC
+#include "sp11-stick-gic.h"
+#endif
 
 uint64_t payload_entry(const struct q1n1_payload_args *a);
 
@@ -197,8 +202,8 @@ static uint64_t stage_pin(struct sw_ctx *c)
 }
 
 /* Raw reads first, stored and printed, then compared: a refusal then shows what the unit said. Only reads: CurrentEL was read at
- * entry, and nothing here writes a register. The GIC macros are the monitor build's (this build has no monitor and no GIC code), and
- * the store classes this build uses are RAM and nothing else. */
+ * entry, and nothing here writes a register. The GIC macros are the monitor build's (this build has no monitor; the GIC code of the
+ * opt-in build is the stage after COPIED), and the store classes this build uses are SW_BUILD_STORES: RAM and nothing else by default. */
 static uint64_t stage_observed(struct sw_ctx *c)
 {
     const struct q1n1_payload_args *a = c->a;
@@ -218,7 +223,7 @@ static uint64_t stage_observed(struct sw_ctx *c)
     o.build_gicr_limit = SNAP_GICR_LIMIT;
     o.build_gicr_stride = SNAP_GICR_STRIDE;
     o.build_timer_intid = SNAP_TIMER_INTID;
-    o.build_stores = SP11SB_STORE_RAM;
+    o.build_stores = SW_BUILD_STORES;
     o.fb_base = a->fb_base;
     o.fb_bytes = a->fb_bytes;
     o.fb_width = a->fb_width;
@@ -396,6 +401,9 @@ uint64_t payload_entry(const struct q1n1_payload_args *a)
     if ((ret = stage_files(&c)) != 0 || (ret = stage_pin(&c)) != 0 || (ret = stage_observed(&c)) != 0 ||
         (ret = stage_place(&c)) != 0 || (ret = stage_guest(&c)) != 0 || (ret = stage_copy(&c)) != 0)
         return ret;
+#if SNAP_SP11_STICK_GIC
+    if ((ret = sw_gic_stage(&c)) != 0) return ret;
+#endif
     sw_set_stage(&c, SP11SB_STAGE_DONE);
     sw_begin(&l);
     pl_text(&l, "TICKS");
@@ -407,7 +415,13 @@ uint64_t payload_entry(const struct q1n1_payload_args *a)
     stage_begin(&c, &l);
     pl_text(&l, " RETURN=0");
     sw_emit(&c, &l, 1);
+#if SNAP_SP11_STICK_GIC
+    sw_begin(&l);                       /* the GIC variant's page is longer; the line that says what this build did not do is kept */
+    pl_text(&l, "MONITOR NOT CALLED: UNIMPLEMENTED IN THIS BUILD");
+    sw_emit(&c, &l, 1);
+#else
     sw_say(&c, "MONITOR NOT CALLED: UNIMPLEMENTED IN THIS BUILD");
+#endif
     sw_head_flush(&c);
     return 0;
 }

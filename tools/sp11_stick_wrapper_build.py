@@ -4,7 +4,10 @@
 monitor in it, and SNAPREP.BIN, the read-only reporter, with the recipe of q1n1's stick payloads.
 
     export Q1N1_SP11_TREE=<q1n1 checkout with platform/uefi/Makefile and payloads/>     (absent or wrong: REFUSED=Q1N1_TREE_ABSENT)
-    python3 tools/sp11_stick_wrapper_build.py --out build/sp11-wrapper [--profile config/monitor-profile-sp11-m1.json]
+    python3 tools/sp11_stick_wrapper_build.py --out build/sp11-wrapper [--profile config/monitor-profile-sp11-m1.json] [--gic]
+
+With --gic the tool builds the opt-in GIC and stop variant instead, SNAPMON-GIC.BIN and SNAPREP-GIC.BIN (-DSNAP_SP11_STICK_GIC=1 on top of the
+same recipe; docs/SP11-STICK-GIC.md). Without it the output is, byte for byte, what ran on the unit.
 
 The recipe is q1n1's and is read from its Makefile, not copied: PAYLOAD_CFLAGS and PAYLOAD_LDFLAGS (the flags, --emit-relocs among
 them), payloads/start.S first, payloads/payload.ld, then llvm-objcopy -O binary, then q1n1's tools/sp11_payload_elfcheck.py on each ELF.
@@ -30,8 +33,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = ('SNAPMON.BIN', 'SNAPREP.BIN')
+GIC_NAMES = ('SNAPMON-GIC.BIN', 'SNAPREP-GIC.BIN')
 SOURCES = {'SNAPMON.BIN': ('probes/sp11-stick-wrapper.c', 'probes/sp11-stick-load.c', 'probes/sp11-stick-report.c', 'platform/uefi/sha256.c'),
-           'SNAPREP.BIN': ('probes/sp11-stick-reporter.c',)}
+           'SNAPREP.BIN': ('probes/sp11-stick-reporter.c',),
+           # The opt-in GIC and stop variant (docs/SP11-STICK-GIC.md): the same sources and the stage in two halves (the arm and put-back, then the
+           # dry run's own); the vector tables are assembly in a C file.
+           'SNAPMON-GIC.BIN': ('probes/sp11-stick-wrapper.c', 'probes/sp11-stick-load.c', 'probes/sp11-stick-report.c', 'probes/sp11-stick-gic.c',
+                               'probes/sp11-stick-gic-dry.c', 'probes/sp11-stick-gic-vec.c', 'platform/uefi/sha256.c'),
+           'SNAPREP-GIC.BIN': ('probes/sp11-stick-reporter.c',)}
 GIC_MACROS = ('SNAP_GICD_BASE', 'SNAP_GICR_FIRST', 'SNAP_GICR_LIMIT', 'SNAP_GICR_STRIDE', 'SNAP_TIMER_INTID')
 Q1N1_INPUTS = ('platform/uefi/Makefile', 'payloads/start.S', 'payloads/payload.ld', 'payloads/payload-util.h', 'platform/uefi/sp11-payload-abi.h',
                'platform/uefi/preload.h', 'platform/uefi/efi.h', 'platform/uefi/sha256.c', 'platform/uefi/sha256.h', 'tools/sp11_payload_elfcheck.py')
@@ -153,7 +162,8 @@ def build_one(name, tree, cflags, ldflags, defines, out):
     stem = name.split('.')[0].lower()
     obj = out / 'obj' / stem
     obj.mkdir(parents=True)
-    flags = [*cflags, f'-I{tree / "payloads"}', '-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1', *(defines if name == 'SNAPMON.BIN' else [])]
+    flags = [*cflags, f'-I{tree / "payloads"}', '-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1', *(['-DSNAP_SP11_STICK_GIC=1'] if name in GIC_NAMES else []),
+             *(defines if name in ('SNAPMON.BIN', 'SNAPMON-GIC.BIN') else [])]
     objects = []
     for source in ('payloads/start.S', *SOURCES[name]):
         base = tree if source.startswith(('payloads/', 'platform/')) else ROOT
@@ -171,25 +181,29 @@ def build_one(name, tree, cflags, ldflags, defines, out):
     binary = out / name
     run([objcopy, '-O', 'binary', str(elf), str(binary)], f'flattening {name}')
     data = binary.read_bytes()
-    if name == 'SNAPREP.BIN' and len(data) >= REPORTER_MAX:
+    if name.startswith('SNAPREP') and len(data) >= REPORTER_MAX:
         raise Refused('REPORTER_TOO_BIG', f'{len(data)} bytes; the reporter is under {REPORTER_MAX}')
     return data
 
 
-def build(out_arg, profile, force=False):
-    """Build both payloads below `out_arg`; returns the report dict, which is also written as build-report.json."""
+def build(out_arg, profile, force=False, gic=False):
+    """Build both payloads below `out_arg` (with `gic`, the opt-in GIC and stop variant, SNAPMON-GIC.BIN and SNAPREP-GIC.BIN); returns the
+    report dict, which is also written as build-report.json. The default build and its report are what they were before the variant existed."""
     tree = q1n1_tree()
     out = check_out(out_arg, force)
     cflags, ldflags = recipe_flags(tree)
     defines = gic_defines(profile)
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
-    files = {name: build_one(name, tree, cflags, ldflags, defines, out) for name in NAMES}
+    files = {name: build_one(name, tree, cflags, ldflags, defines, out) for name in (GIC_NAMES if gic else NAMES)}
     shown = [f.replace(str(tree), '<q1n1>') for f in cflags]
     report = {'files': {n: {'bytes': len(d), 'sha256': sha(d)} for n, d in files.items()},
               'q1n1_inputs': {rel: sha((tree / rel).read_bytes()) for rel in Q1N1_INPUTS}, 'cflags': shown, 'ldflags': ldflags,
               'added': ['-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1'], 'gic_macros': defines, 'monitor': 'none: the wrapper never enters one',
               'hardware': 'NOT RUN'}
+    if gic:
+        report['added'].append('-DSNAP_SP11_STICK_GIC=1')
+        report['variant'] = 'gic: the stage after COPIED arms the EL2 timer and writes GIC and EL2 registers (docs/SP11-STICK-GIC.md)'
     (out / REPORT_NAME).write_text(json.dumps(report, indent=1, sort_keys=True) + '\n')
     return report
 
@@ -199,14 +213,15 @@ def main(argv=None):
     parser.add_argument('--out', required=True, help='a directory below build/ (empty or absent)')
     parser.add_argument('--profile', default=str(ROOT / 'config/monitor-profile-sp11-m1.json'), help='the monitor profile whose GIC macros the wrapper compares with PIN.DAT')
     parser.add_argument('--force', action='store_true', help='replace an earlier build of this tool')
+    parser.add_argument('--gic', action='store_true', help='build the opt-in GIC and stop variant (SNAPMON-GIC.BIN, SNAPREP-GIC.BIN) instead of the dry run')
     args = parser.parse_args(argv)
     try:
-        report = build(args.out, args.profile, args.force)
+        report = build(args.out, args.profile, args.force, args.gic)
     except Refused as error:
         print(error.detail, file=sys.stderr)
         print(f'REFUSED={error.name}')
         return 1
-    for name in NAMES:
+    for name in (GIC_NAMES if args.gic else NAMES):
         print(f'{name} {report["files"][name]["bytes"]} bytes sha256 {report["files"][name]["sha256"]}')
     for rel, digest in report['q1n1_inputs'].items():
         print(f'INPUT q1n1:{rel} sha256 {digest}')

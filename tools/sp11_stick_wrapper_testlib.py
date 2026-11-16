@@ -125,13 +125,14 @@ class Fixtures:
         self.monitor = write(self.root / 'in/monitor.bin', b'PLACEHOLDER SNAPMON.BIN\n' * 4)
         self.reporter = write(self.root / 'in/reporter.bin', b'PLACEHOLDER SNAPREP.BIN\n' * 4)
 
-    def bundle(self, name, base, guest_mib=256, sizes=(8, 1, 4), monitor=None, reporter=None):
+    def bundle(self, name, base, guest_mib=256, sizes=(8, 1, 4), monitor=None, reporter=None, stores='ram,el2_sysreg', extra=()):
         """A bundle below root/out/<name>: files PIN.DAT, GUEST.DAT, REPORT.DAT (and the placeholders or the given payloads). `sizes` are
-        the image, tables and SPTM data in MiB; None leaves the builder's defaults (a GUEST.DAT of 144 MB)."""
+        the image, tables and SPTM data in MiB; None leaves the builder's defaults (a GUEST.DAT of 144 MB). `stores` and `extra` (more
+        builder options, such as --gic-stop) are for the GIC and stop tests; the defaults are the dry run's."""
         out = self.root / 'out' / name
         if not (out / 'build-report.json').exists():
             opts = ['--facts', self.facts, '--base', hex(base), '--guest-mib', str(guest_mib), '--monitor', monitor or self.monitor,
-                    '--reporter', reporter or self.reporter, '--stores', 'ram,el2_sysreg', '--time-box-s', '5']
+                    '--reporter', reporter or self.reporter, '--stores', stores, '--time-box-s', '5', *extra]
             if sizes:
                 opts += ['--image-mib', str(sizes[0]), '--tables-mib', str(sizes[1]), '--sptm-data-mib', str(sizes[2])]
             opts += [x for d in self.dumps for x in ('--dump', d)]
@@ -579,8 +580,10 @@ def dataflow(instructions):
             dest = reg_of(operands[0])
             if dest:
                 sources = [reg_of(o) for o in operands[1:3 if mnemonic == 'add' else 2]]
-                derived = mnemonic in ('add', 'sub', 'mov') and any(s in (stack | {'sp'}) for s in sources)
-                from_argument = mnemonic in ('add', 'sub', 'mov') and any(s in args for s in sources)
+                if mnemonic in ('madd', 'umaddl', 'smaddl') and len(operands) > 3:
+                    sources = [reg_of(operands[3])]     # base + index * size: the base is the addend, the index only moves within the object
+                derived = mnemonic in ('add', 'sub', 'mov', 'madd', 'umaddl', 'smaddl') and any(s in (stack | {'sp'}) for s in sources)
+                from_argument = mnemonic in ('add', 'sub', 'mov', 'madd', 'umaddl', 'smaddl') and any(s in args for s in sources)
                 carried = mnemonic == 'mov' and sources[:1] and sources[0] in ops
                 stack.discard(dest)
                 ops.discard(dest)

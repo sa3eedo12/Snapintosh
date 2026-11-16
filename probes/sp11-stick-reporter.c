@@ -14,7 +14,9 @@
  *   a refusal at COPYING or after   the same, the copy counters and the placement, "placement written"
  *   the dry run completed           the head's summary: stage, policy, counters, ticks, placement, descriptor, GUEST.DAT's base
  * UNIMPLEMENTED: the decode of the monitor's window and the comparison of the raw reads with PIN.DAT's pinned values (work item 4b); the
- * wrapper of this build never enters a monitor, so the window is all zero and nothing is said about it.
+ * wrapper of this build never enters a monitor, so the window is all zero and nothing is said about it. (Under the opt-in
+ * SNAP_SP11_STICK_GIC=1, SNAPREP-GIC.BIN, the first bytes of that window are the GIC and stop stage's record, which this prints after
+ * the head's summary: at most 23 more lines, from the same bytes and the same function as the wrapper's page. Read only, as before.)
  *
  * Returns 0 after a decoded report or an empty one, 0x1000 + code when it refused its own arguments, a slot or the head, and 2 when
  * the guarded read of REPORT.DAT failed. Evidence: EXPERIMENTAL; hardware NOT RUN. */
@@ -22,6 +24,9 @@
 
 #if SNAP_SP11_STICK
 #include "sp11-stick-common.h"
+#if SNAP_SP11_STICK_GIC
+#include "sp11-stick-gic-record.h"
+#endif
 
 #define RP_RETURN_UNREADABLE UINT64_C(2)
 
@@ -161,6 +166,39 @@ SC_INLINE void rp_decode(const struct q1n1_payload_args *a, const uint8_t *repor
     rp_emit(a, &l, lines);
 }
 
+#if SNAP_SP11_STICK_GIC
+/* The GIC and stop record, the first extension record after the monitor's window (sp11-stick-gic-record.h), in the order a reader wants it:
+ * the verdict, then what was read, old and new, the timer, what the windows showed (each interrupt on a line of its own), what EL1 was
+ * given, and the final values. A slot that is still zero says the stage did not run; a record that fails its check is named and not
+ * printed. At most 23 lines. */
+SC_INLINE void rp_gic(const struct q1n1_payload_args *a, const uint8_t *report, uint32_t *lines)
+{
+    static const uint8_t order[] = {SG_L_VERDICT, SG_L_FRAMES, SG_L_GICD, SG_L_GICR, SG_L_CPU, SG_L_OLD, SG_L_NEW, SG_L_TIMER, SG_L_IRQ,
+                                    SG_L_CYC0, SG_L_CYC1, SG_L_CYC2, SG_L_CYC3, SG_L_DIAG, SG_L_EXC, SG_L_EL1, SG_L_CYC4, SG_L_DIAG1,
+                                    SG_L_HVC, SG_L_EXC1, SG_L_HCR, SG_L_VBAR1, SG_L_SCTLR1, SG_L_FINAL, SG_L_RESTORE};
+    const uint8_t *rec = report + SG_REC_AT;
+    struct pl_line l;
+    uint32_t i;
+    int code;
+    rp_begin(&l);
+    if (sp11sb_zero(rec, 8)) {
+        pl_text(&l, "GIC NO RECORD: THE STAGE DID NOT RUN");
+        rp_emit(a, &l, lines);
+        return;
+    }
+    if ((code = sg_record_check(rec, SG_REC_BYTES)) != 0) {
+        pl_text(&l, "GIC RECORD DAMAGED");
+        sc_key_dec(&l, " CODE=", (uint64_t)code);
+        rp_emit(a, &l, lines);
+        return;
+    }
+    for (i = 0; i < sizeof order; i++) {
+        rp_begin(&l);
+        if (sg_line(a, &l, order[i], rec)) rp_emit(a, &l, lines);
+    }
+}
+#endif
+
 uint64_t payload_entry(const struct q1n1_payload_args *a)
 {
     struct sp11sb_file files[SP11SB_FILES];
@@ -201,6 +239,9 @@ uint64_t payload_entry(const struct q1n1_payload_args *a)
         return ret;
     }
     rp_decode(a, report, &lines);
+#if SNAP_SP11_STICK_GIC
+    rp_gic(a, report, &lines);
+#endif
     return 0;
 }
 #endif /* SNAP_SP11_STICK */
