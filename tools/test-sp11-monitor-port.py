@@ -28,7 +28,7 @@ Conventions the document follows and this test enforces:
 
 Always run: size, ASCII, hygiene, sections, "NOT RUN", labels, tables, claims, state, the citations into this repository, the
 work-plan graph and the arithmetic the document quotes. Skipped, visibly (a skip is never a pass): the q1n1 citations when no
-checkout is found (set Q1N1_SP11_TREE to the one the document names, commit 1e7318f) and the facts read from the local,
+checkout is found (set Q1N1_SP11_TREE to the one the document names, commit b875620) and the facts read from the local,
 git-ignored unit dumps under downloads/ when they are absent (the ACPI figures and the adapter run on them).
 
 The last class feeds deliberately damaged copies of the document to the same checkers; each must be refused.
@@ -99,7 +99,7 @@ BUNDLE_SIZES = (('`PIN.DAT` (1024 bytes', 1024), ('`REPORT.DAT` (528,384 zero by
 WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                     2: ('BUILT, NOT RUN (q1n1 d8a5d2b)', 'the first is staged, ready to run, not run (`memhash`'),
                     3: ('BUILT for the synthetic path', '`real` NOT RUN'), 4: ('4a BUILT for the dry run, EXPERIMENTAL, NOT RUN (6151945',),
-                    5: ('BUILT, EXPERIMENTAL, host side',), 9: ('BUILT, NOT RUN (q1n1 1e7318f)', 'first code below EL2')}
+                    5: ('BUILT, EXPERIMENTAL, host side',), 9: ('BUILT, NOT RUN (q1n1 b875620)', 'first code below EL2')}
 # The tree as the document states it (matched on whitespace-collapsed text); the sources that decide them are read below.
 STATE_REQUIRED = (
     'is five files, the runner\'s whole manifest', 'bits that stick and trap nothing pass', 'a pass is UNKNOWN until T-HW2',

@@ -12,7 +12,7 @@ Surface"; **OBSERVED** measured on the unit or reported by the operator, one uni
 checked; **EXPERIMENTAL** code exists, unqualified; **UNIMPLEMENTED** no code; **UNKNOWN** not established, a named experiment
 would establish it.
 
-Citations: `path:line` is this repository, `q1n1:path:line` the sibling q1n1 checkout (1e7318f; its platform/ equals d48b0af's);
+Citations: `path:line` is this repository, `q1n1:path:line` the sibling q1n1 checkout (b875620; its platform/ equals d48b0af's);
 `fragment`[path:line] is a quoted fragment that `tools/test-sp11-monitor-port.py` finds on that line. Boots: 3 = X2 image v2;
 4 = payload chain psci, usbsmmu, timer; 5 = psci, usbsmmu; 6 = X2 image v3; 7 = payload cpuon; restart probe steps 1 to 3 =
 plain q1n1, cpuon, cpuon; restart control steps 1 and 2 = psci only (2026-11-16); X1 probe page = the first passive probe run
@@ -187,7 +187,7 @@ kernel" and the image is digest pinned (`docs/KERNEL-PATCHES.md`); only if O1 an
 **6.4 Experiments.** Host first: WI 9 (a counter-visibility matrix extending `tools/test-timer-offset-model.py`; a Mac-side
 kernelcache scan beside `probes/clockcontract.py`, NOT RUN: no kernelcache here). Hardware: **T-HW1** writes CNTHCTL_EL2 with the
 monitor's value, reads back, restores (no CNTPOFF); **T-HW2** is an EL1 stub reading CNTVCT_EL0 and the virtual timer under the traps
-and returning by HVC; both are BUILT, NOT RUN (q1n1 1e7318f; D3). T-HW1 failing eliminates O1; T-HW2 passing makes O1 the decision.
+and returning by HVC; both are BUILT, NOT RUN (q1n1 b875620; D3). T-HW1 failing eliminates O1; T-HW2 passing makes O1 the decision.
 
 ## 7. Interrupts and CPUs (Q5)
 
@@ -322,7 +322,7 @@ ISAR2; U6 bundle rate and placement; U7 guest in the bank; U8 PAC under QARMA5; 
 | 6 | **Authorisation package**: every payload named by SHA-256, each store class listed with its register, window and evidence; the builder prints the record text (`authorisation-template`) | 4, 5 | a recorded operator decision naming the digests | review against the runner's rule | no | D4, D7 |
 | 7 | **Bundle dry run**: a real-size data file, the wrapper stops before `_start` | 3, 4, 6 | all hashes agree before and after the bounce; copy and clean finish; timings and the firmware's placement of the big file are printed | host dry run of the wrapper; `hashbig` (WI 2) shows the rate and base earlier | 1 | resolves U6 |
 | 8 | **GIC and stop dry run**: the wrapper arms the stop timer, `_start` replaced by an immediate return | 7 | PPI 26 arrives, the stop is on time, EL2 state restored, the page alive afterwards | GIC register-sequence model, as `compat/el2-entry-model.c` does for entry | 1 | resolves U3; D2 |
-| 9 | **Timer probes** T-HW1 (`cnthctl`), then T-HW2 (`el1trap`; section 6.4): BUILT, NOT RUN (q1n1 1e7318f); `el1trap` is the first code below EL2 on the unit | none | T-HW1: `BITS13_14_STUCK=YES` and `RESTORED=YES`; T-HW2, only after it: EL1 reads arrive as traps with the scaled value | counter-visibility matrix; a model of the EL1 stub | 1 or 2 | resolves U2; D3 |
+| 9 | **Timer probes** T-HW1 (`cnthctl`), then T-HW2 (`el1trap`; section 6.4): BUILT, NOT RUN (q1n1 b875620); `el1trap` is the first code below EL2 on the unit | none | T-HW1: `BITS13_14_STUCK=YES` and `RESTORED=YES`; T-HW2, only after it: EL1 reads arrive as traps with the scaled value | counter-visibility matrix; a model of the EL1 stub | 1 or 2 | resolves U2; D3 |
 | 10 | **Restart survey**, before SMP work only (M1 does not need it); operator in the loop, one boot per sample. DONE: the psci-only control, alive at UPTIME 224 S and 268 S (section 10). Left: (a) film a cpuon page until it restarts (the last frame dates it: a video's `creationdate` and the stick's DONE marker times are both local time and agree within the FAT's 2 s); (b) a cpuon variant that starts and stops ONE core only; (c) a variant that leaves cores running | none | cpuon restarted in 2 of 3 boots, times unknown: (a) dates a restart or shows none up to a stated UPTIME; (b), (c) show whether one core, or cores left running, change it | payload-plan tests (`tools/test-sp11-autorun-payload.py`) | 1 or more each | narrows U4 |
 | 11 | **M1 run** | 3, 5, 8, 9 | the seven rows of section 2 | all of the above | 1 to 3 | resolves U7, U8, U10; D5, D8 |
 
