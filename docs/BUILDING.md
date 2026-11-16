@@ -296,6 +296,10 @@ python3 tools/test-sp11-timer-guard.py          # SP11 monitor: the CNTHCTL_EL2 
 python3 tools/test-sp11-m1-profile.py           # the M1 monitor profile: pinned flag set, the required NV2 record and every refusal of it, the build (SKIP without clang, lld and q1n1)
 python3 tools/test-sp11-stick-bundle.py         # the stick bundle interface (SP11-STICK-BUNDLE.md): C and Python validators, refusal codes, seeded bad records (ASan/UBSan; needs clang; Q1N1_SP11_TREE=<q1n1 checkout> adds the runner-header comparisons)
 python3 tools/test-sp11-stick-bundle-build.py   # the bundle builder (SP11-STICK-BUILD.md): synthetic bundles, every refusal, determinism (needs a q1n1 checkout through Q1N1_SP11_TREE, 3 tests SKIP without one; SP11_BUILD_SKIP_SLOW=1 skips the build at realistic sizes)
+python3 tools/test-sp11-stick-wrapper.py        # the stick wrapper and reporter (SP11-STICK-WRAPPER.md): the real sources on a fake machine (ASan/UBSan), the dry run, the copy and its faults, the reporter, seeded-bad wrappers (needs clang and a q1n1 checkout through Q1N1_SP11_TREE, SKIP without; SP11_WRAPPER_SKIP_SLOW=1 skips the default-size bundle)
+python3 tools/test-sp11-stick-wrapper-refusals.py  # the same harness: every damaged bundle refused with its code at its stage (the shared checks are tools/sp11_stick_wrapper_checks.py)
+python3 tools/test-sp11-stick-wrapper-build.py  # the wrapper's build tool (tools/sp11_stick_wrapper_build.py), the instructions in its two binaries, the default-off gate, file hygiene and the note (needs clang, ld.lld, the llvm tools and a q1n1 checkout)
+python3 tools/test-sp11-stick-wrapper-qemu.py   # the wrapper and reporter under the real runner at EL2 in QEMU (SKIP without QEMU, an EDK2 image, SP11_UEFI_SHELL or a q1n1 checkout)
 python3 tools/test-sp11-integration.py          # the units together: status bands, the 1<<36 boundary, cites, dump names, thermal, wiring
 ```
 
