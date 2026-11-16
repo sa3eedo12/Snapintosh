@@ -292,6 +292,8 @@ python3 tools/test-sp11-wifi-unixnu.py          # the Wi-Fi study's UniXNU compa
 python3 tools/test-sp11-unixnu-study.py         # the UniXNU survey: labels, pins, citations, stance, size (pinned checks need SP11_UNIXNU_REF)
 python3 tools/test-sam-frames.py                # Surface Aggregator frame codec: vectors, negative tests, fuzz, seeded bugs
 python3 tools/test-monitor-hardening.py         # SP11 monitor: the SSD adoption refusal (-145), GUEST_CPU_COUNT rules, the vCPU launch refusal (-146); needs clang, llvm-nm and ../q1n1 for the object checks
+python3 tools/test-sp11-timer-guard.py          # SP11 monitor: the CNTHCTL_EL2 read-back and CNTVOFF_EL2 refusals (-147, -148) against modelled worlds, and their call site (ASan/UBSan; needs clang; the object checks need llvm-objdump and q1n1)
+python3 tools/test-sp11-m1-profile.py           # the M1 monitor profile: pinned flag set, the required NV2 record and every refusal of it, the build (SKIP without clang, lld and q1n1)
 python3 tools/test-sp11-integration.py          # the units together: status bands, the 1<<36 boundary, cites, dump names, thermal, wiring
 ```
 
@@ -513,7 +515,11 @@ linked ELF.
 - Homebrew `llvm` and `lld` must be at the fixed paths in
   `tools/monitor_build_offline.py`, and q1n1 must sit beside the repository at
   `../q1n1`. `--tree TREE` captures another checkout, which needs its own
-  `../q1n1`.
+  `../q1n1`. For a layout without that sibling, `Q1N1_SP11_TREE=<q1n1 checkout>`
+  names the q1n1 whose `platform/uefi/sha256.c` and `sha256.h` the build uses
+  (here and in `tools/monitor_build_offline.py`; nothing is created outside the
+  repository). A value that is set and wrong is refused, never replaced by the
+  sibling.
 - The monitor is built with `-flto`, so a hash depends on the exact compiler and
   linker. Records from different toolchains are reported as incomparable, not
   waived: capture both on one toolchain.
@@ -575,6 +581,22 @@ python3 tools/monitor_build_offline.py . build/sp11-check config/monitor-flags.j
 The record is a machine-specific measurement: keep it under `build/` and never
 commit it. Do not add any SP11 flag to `config/monitor-flags.json` (it is the
 A16 recipe).
+
+The M1 profile (`sp11-m1`) is that flag set as a named recipe, with the record as
+a required input and two new refusals, -147 (`CNTHCTL_EL2` does not read back with
+the guest-counter traps set) and -148 (`CNTVOFF_EL2` is not zero):
+
+```sh
+python3 tools/sp11_m1_profile.py show  --nv2-record-header build/nv2-record.h
+python3 tools/sp11_m1_profile.py build --nv2-record-header build/nv2-record.h build/sp11-m1
+```
+
+Without `--nv2-record-header` it stops with exit status 2: which record to embed
+is an operator decision (D6) that the tool does not make. It also stops for a
+header that is damaged, edited, for another SoC or one the gate would deny
+whatever the live registers read, and prints the record's SoC, build id, MIDR,
+REVIDR and both ID registers as recorded. [SP11-MONITOR-PROFILE.md](SP11-MONITOR-PROFILE.md)
+is the interface note. Compile-checked only; hardware NOT RUN.
 
 `python3 tools/nv2_record.py show <measurement.log> --check` asks the same gate
 whether a record would let a launch through. With all four `--live-*` values it

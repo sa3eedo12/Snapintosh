@@ -549,7 +549,10 @@ EV_EARLY_STOP, EV_EARLY_STOP_REQUEST = 52, 53
 #                  inputs. The same number is stored in the physical NVMe state's `prepare` word.
 #   -146           SNAP_PLATFORM_SP11 vCPU count that needs the fair service lock and the build has none
 #                  (GUEST_CPU_STATUS_FAIR_LOCK, compat/cpu.h; returned first by xnuboot_prepare).
-#   -147 .. -255   unused; the next SP11 refusal that reaches the host takes the first free number here.
+#   -147 .. -148   SNAP_PLATFORM_SP11 timer guards, the last refusals of vcpu_arch_prepare (compat/sp11-timer-guard.h,
+#                  probes/xnuboot/prepare.c): -147 CNTHCTL_EL2 does not read back with EL1TVT and EL1TVCT set, -148 CNTVOFF_EL2
+#                  is not zero on that CPU. EV_OTHER pc 0x5443 holds CNTHCTL_EL2 as read back, CNTVOFF_EL2 and the status.
+#   -149 .. -255   unused; the next SP11 refusal that reaches the host takes the first free number here.
 #   -256           never returned: it would be enum ipag_reason 0, which means OK.
 #   -257 .. -274   SNAP_PLATFORM_SP11 stage-2 geometry, -(IPAG_HOOK_RETURN_BASE + enum ipag_reason)
 #                  (compat/ipa-geometry.h, probes/xnuboot/stage2.c).
@@ -682,6 +685,11 @@ PREPARE_FAILURES = {
     # SNAP_PLATFORM_SP11 launch configuration (compat/cpu.h): vCPUs spanning more than one cluster need the queued lock.
     -146: 'SP11 vCPU count: the guest vCPUs span more than one cluster and this build has no fair service lock '
           '(compat/topology.h NEEDS_FAIR_LOCK; build with -DSNAP_FAIR_TOKEN=1)',
+    # SNAP_PLATFORM_SP11 timer guards (compat/sp11-timer-guard.h): CNTHCTL_EL2 and CNTVOFF_EL2 as read just before the launch.
+    -147: 'SP11 timer guard: CNTHCTL_EL2 did not read back with EL1TVT and EL1TVCT both set, so the guest counter traps '
+          'do not stick (a read-back cannot show that they trap: that needs the EL1 test T-HW2)',
+    -148: 'SP11 timer guard: CNTVOFF_EL2 is not zero on this CPU, and the monitor mixes CNTVCT_EL0 with CNTPCT_EL0, which is '
+          'sound only at zero',
     # SNAP_PLATFORM_SP11 stage-2 geometry (compat/ipa-geometry.h): the monitor's own range list was refused
     # before stage2_build, as -(256 + enum ipag_reason). The reasons the host-only planner alone can give
     # (policy, overflow, unsorted, MMIO in DRAM, carve) never reach this path.

@@ -603,6 +603,22 @@ static int64_t vcpu_arch_prepare(struct context *c)
         __asm__ volatile("mrs %0, mdscr_el1":"=r"(mdscr));
         if((mdscr&NATIVE_WRITER_MDSCR)!=NATIVE_WRITER_MDSCR)return -37;
     }
+#if SNAP_PLATFORM_SP11
+    /* The two timer guards read the final state: CNTHCTL_EL2 as programmed above and CNTVOFF_EL2, on this CPU, with
+     * every register armed and the restore values of the debug and EL1 translation state already captured, so a
+     * refusal here needs no capture of its own and leaves through the same report as -23 and -26. Placed last on
+     * purpose: nothing after it can change either register, and the launch cannot be reached without passing it.
+     * Cannot show that the traps are effective (compat/sp11-timer-guard.h). */
+    {
+        struct snap_sp11_timer_view timer;
+        int64_t refused = snap_sp11_timer_guard(vcpu_of(c)->save_cnthctl, &timer);
+        if (refused) {
+            record(c, EV_OTHER, SNAP_SP11_EVENT_TIMER, timer.cnthctl, timer.cntvoff,
+                   (uint64_t)refused | (uint64_t)v->slot << 32);
+            return refused;
+        }
+    }
+#endif
     vcpu_of(c)->prepared = 1;
     if (SNAP_NATIVE_CALLS) native_exception_snapshot(c);
     return 0;

@@ -117,6 +117,7 @@ A16_BAND = range(-83, 0)
 LAUNCH_GATE_BAND = range(-95, -89)          # -95 .. -90: NV2 and PAuth (compat/nv2-gate.h, compat/oryon-idregs.h)
 NVME_WINDOW_BAND = range(-145, -95)         # -145 .. -96: NVMEH_E_SP11_* and NVMEH_SP11_STATUS_UNWIRED (compat/nvme-host.h)
 VCPU_COUNT_STATUS = -146                    # GUEST_CPU_STATUS_FAIR_LOCK (compat/cpu.h)
+TIMER_GUARD_BAND = range(-148, -146)        # -148 .. -147: SNAP_SP11_TIMER_STATUS_* (compat/sp11-timer-guard.h)
 STAGE2_BAND = range(-274, -256)             # -274 .. -257: -(256 + enum ipag_reason)
 # The reasons probes/xnuboot/stage2.c can return; the others exist only in the host-only planner.
 STAGE2_HOOK_REASONS = ('IPAG_BAD_IPA_BITS', 'IPAG_BAD_PARANGE', 'IPAG_NO_WINDOWS', 'IPAG_TOO_MANY_WINDOWS',
@@ -126,8 +127,9 @@ MONITOR_SOURCES = ('probes/xnuboot.c',)
 
 
 class StatusBands(unittest.TestCase):
-    """Reconciliation 1: nv2-pauth (-90..-95), the NVMe window (-96..-145), the vCPU count (-146), monitor-stage2
-    (-257..-274) and the A16 band never overlap, and every status that can reach the host has a name."""
+    """Reconciliation 1: nv2-pauth (-90..-95), the NVMe window (-96..-145), the vCPU count (-146), the timer guards
+    (-147..-148), monitor-stage2 (-257..-274) and the A16 band never overlap, and every status that can reach the host
+    has a name."""
 
     @classmethod
     def setUpClass(cls):
@@ -139,21 +141,23 @@ class StatusBands(unittest.TestCase):
         keys = set(self.failures)
         self.assertTrue(set(A16_STATUSES) <= keys, 'an A16 status lost its name')
         new = keys - set(A16_STATUSES)
-        sp11 = set(LAUNCH_GATE_BAND) | set(STAGE2_BAND) | set(NVME_WINDOW_BAND) | {VCPU_COUNT_STATUS}
+        sp11 = set(LAUNCH_GATE_BAND) | set(STAGE2_BAND) | set(NVME_WINDOW_BAND) | set(TIMER_GUARD_BAND) | {VCPU_COUNT_STATUS}
         for key in sorted(new):
             with self.subTest(status=key):
                 self.assertIn(key, sp11)
         self.assertEqual({k for k in new if k in LAUNCH_GATE_BAND}, set(LAUNCH_GATE_BAND))
         self.assertEqual({k for k in new if k in NVME_WINDOW_BAND}, set(NVME_WINDOW_BAND))
+        self.assertEqual({k for k in new if k in TIMER_GUARD_BAND}, set(TIMER_GUARD_BAND))
         self.assertIn(VCPU_COUNT_STATUS, new)
 
     def test_the_bands_are_disjoint_and_the_gap_numbers_are_unused(self):
-        bands = (set(A16_BAND), set(LAUNCH_GATE_BAND), set(NVME_WINDOW_BAND), {VCPU_COUNT_STATUS}, set(STAGE2_BAND))
+        bands = (set(A16_BAND), set(LAUNCH_GATE_BAND), set(NVME_WINDOW_BAND), {VCPU_COUNT_STATUS},
+                 set(TIMER_GUARD_BAND), set(STAGE2_BAND))
         for i, one in enumerate(bands):
             for two in bands[i + 1:]:
                 self.assertFalse(one & two)
         used = set(self.failures)
-        for gap in list(range(-89, -83)) + list(range(-255, -146)) + [-256] + list(range(-300, -274)):
+        for gap in list(range(-89, -83)) + list(range(-255, -148)) + [-256] + list(range(-300, -274)):
             self.assertNotIn(gap, used, f'{gap} is in an unallocated band')
 
     def test_the_headers_define_exactly_the_launch_gate_band(self):
@@ -187,9 +191,9 @@ class StatusBands(unittest.TestCase):
     def test_the_band_table_beside_the_names_matches(self):
         text = read('probes/run.py')
         block = text[text.index('# Status bands'):text.index('PREPARE_FAILURES = {')]
-        for needle in ('-1 .. -83', '-84 .. -89', '-90 .. -95', '-96 .. -145', '-146 ', '-147 .. -255',
+        for needle in ('-1 .. -83', '-84 .. -89', '-90 .. -95', '-96 .. -145', '-146 ', '-147 .. -148', '-149 .. -255',
                        '-257 .. -274', 'IPAG_HOOK_RETURN_BASE', 'NVMEH_E_SP11_', 'NVMEH_SP11_STATUS_UNWIRED',
-                       'GUEST_CPU_STATUS_FAIR_LOCK'):
+                       'GUEST_CPU_STATUS_FAIR_LOCK', 'compat/sp11-timer-guard.h', '0x5443'):
             self.assertIn(needle, block)
 
     def test_every_nvme_window_status_has_a_decodable_text_that_is_the_contracts_own(self):
@@ -226,6 +230,21 @@ class StatusBands(unittest.TestCase):
         self.assertIn('fair', self.failures.get(VCPU_COUNT_STATUS, '').lower())
         self.assertIn('SNAP_FAIR_TOKEN', self.failures.get(VCPU_COUNT_STATUS, ''))
         self.assertIn('return GUEST_CPU_STATUS_FAIR_LOCK;', read('probes/xnuboot/prepare.c'))
+
+    def test_the_timer_guard_statuses_are_the_headers_and_the_ones_the_monitor_returns(self):
+        header = strip_c_comments(read('compat/sp11-timer-guard.h'))
+        defined = {name: int(value) for name, value in
+                   re.findall(r'#define\s+(SNAP_SP11_TIMER_STATUS_[A-Z]+)\s+\((-\d+)\)', header)}
+        self.assertEqual(sorted(defined.values()), sorted(TIMER_GUARD_BAND), defined)
+        events = re.findall(r'#define\s+SNAP_SP11_EVENT_TIMER\s+(0x[0-9a-fA-F]+)', header)
+        self.assertEqual([int(value, 16) for value in events], [0x5443])
+        for name, text in (('SNAP_SP11_TIMER_STATUS_CNTHCTL', 'CNTHCTL_EL2'), ('SNAP_SP11_TIMER_STATUS_CNTVOFF', 'CNTVOFF_EL2')):
+            with self.subTest(status=name):
+                self.assertIn(text, self.failures.get(defined[name], ''))
+                self.assertTrue(self.failures[defined[name]].startswith('SP11 timer guard:'), defined[name])
+        prepare = read('probes/xnuboot/prepare.c')
+        self.assertEqual(prepare.count('snap_sp11_timer_guard('), 1)
+        self.assertIn('return refused;', prepare)
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -562,7 +581,8 @@ class FairLock(unittest.TestCase):
 # --------------------------------------------------------------------------------------------------------------
 # 7. Wiring
 
-SP11_ONLY_HEADERS = ('board-info.h', 'nv2-gate.h', 'oryon-idregs.h', 'topology.h', 'ipa-geometry.h', 'hamoa-thermal.h')
+SP11_ONLY_HEADERS = ('board-info.h', 'nv2-gate.h', 'oryon-idregs.h', 'topology.h', 'ipa-geometry.h', 'hamoa-thermal.h',
+                     'sp11-timer-guard.h')
 SP11_UNITS = ('compat/board-info.c', 'compat/nv2-gate.c', 'compat/oryon-idregs.c', 'compat/topology.c',
               'compat/ipa-geometry.c', 'compat/hamoa-thermal.c')
 SP11_FLAGS = ('-DSNAP_PLATFORM_SP11=1', '-DSNAP_FAIR_TOKEN=1', '-DSNAP_GICD_BASE=0x17000000',
@@ -634,6 +654,9 @@ class Wiring(unittest.TestCase):
         clang = find_tool('clang')
         if not clang or not find_tool('ld.lld'):
             self.skipTest('clang and ld.lld are needed')
+        uefi, why = import_tool('monitor_build_offline').locate_q1n1(ROOT)
+        if uefi is None:
+            self.skipTest(f'no q1n1 to link: {why}')
         out = BUILD / name
         shutil.rmtree(out, ignore_errors=True)
         env = dict(os.environ, PATH=os.pathsep.join(list(CLANG_DIRS) + ['/opt/homebrew/opt/lld/bin', os.environ['PATH']]))
@@ -655,6 +678,8 @@ class Wiring(unittest.TestCase):
             with self.subTest(count=count):
                 done, _ = self.build_monitor(f'sp11-n{count}', '-DSNAP_PLATFORM_SP11=1', f'-DGUEST_CPU_COUNT={count}')
                 self.assertNotEqual(done.returncode, 0)
+                # A build that cannot find q1n1 fails too: only a static assertion of the count rules is the reason.
+                self.assertIn('static assertion failed', done.stderr)
 
 
 if __name__ == '__main__':

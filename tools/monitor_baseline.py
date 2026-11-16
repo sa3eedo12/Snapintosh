@@ -20,8 +20,8 @@ captured from the same checkout path. Hashes depend on the exact compiler and li
 another toolchain proves nothing and is refused rather than waived. Every refusal (a bad or existing label, a
 missing prerequisite, a failed build, a damaged record) exits 2 with the reason on stderr.
 
-TREE is a Snapintosh checkout whose ../q1n1 exists (default: this one). Capture "before" ahead of an edit to
-shared code and "after" once it is done. Nothing here touches hardware."""
+TREE is a Snapintosh checkout whose ../q1n1 exists, or whose q1n1 $Q1N1_SP11_TREE names (tools/monitor_build_offline.py)
+(default: this one). Capture "before" ahead of an edit to shared code and "after" once it is done. Nothing here touches hardware."""
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import argparse
@@ -115,8 +115,8 @@ def capture(tree, label, results):
     """Build every set twice and write results/label.json; returns the record."""
     tree, results = Path(tree).resolve(), Path(results)
     check_label(label)
-    need((tree.parent / 'q1n1/platform/uefi').is_dir(),
-         f'{tree.parent}/q1n1/platform/uefi is missing: the monitor build links the q1n1 checkout beside the tree')
+    uefi, why = monitor_build_offline.locate_q1n1(tree)
+    need(uefi is not None, why)
     record_path, work = results / f'{label}.json', results / label
     partial = record_path.with_suffix('.json.partial')
     for leftover in (record_path, work, partial):

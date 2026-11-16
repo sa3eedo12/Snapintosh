@@ -1,0 +1,38 @@
+{
+  "profile": "sp11-m1",
+  "target": "SP11 milestone M1 (docs/SP11-MONITOR-PORT.md section 2): the A16 monitor on the Surface Pro 11 boot CPU, six vCPU records with one released, the stock J700 kernel",
+  "qualification": "Build recipe only. Compile-checked on the host, never run on a Surface Pro 11 (hardware NOT RUN). A boot needs the operator's authorisation of the monitor's SHA-256 (docs/SP11-MONITOR-PORT.md section 12).",
+  "base_flags": "config/monitor-flags.json",
+  "defines": [
+    "-DSNAP_PLATFORM_SP11=1",
+    "-DSNAP_FAIR_TOKEN=1",
+    "-DSNAP_GICD_BASE=0x17000000",
+    "-DSNAP_GICR_FIRST=0x17080000",
+    "-DSNAP_GICR_LIMIT=0x17380000",
+    "-DSNAP_GICR_STRIDE=0x40000",
+    "-DSNAP_TIMER_INTID=26"
+  ],
+  "required_base_defines": [
+    "-DSNAP_NATIVE_CALLS=1",
+    "-DSNAP_NATIVE_WRITER_ADMISSION=1",
+    "-DSNAP_NATIVE_WRITER_BREAKPOINTS=1"
+  ],
+  "required_input": {
+    "define": "SNAP_NV2_RECORD_HEADER",
+    "meaning": "path of a header written by tools/nv2_record.py; which measurement to embed is operator decision D6 and is never chosen here",
+    "soc": "x1e80100"
+  },
+  "forbidden_define_names": [
+    "SNAP_BOOT_RELOCATE",
+    "SNAP_NV2_RECORD_HEADER"
+  ],
+  "forbidden_define_substrings": [
+    "THERMAL"
+  ],
+  "runtime_contract": {
+    "x4": 0,
+    "x4_meaning": "no host secondary configuration, so no physical secondary is started",
+    "early_stop_thermal_bit": "clear",
+    "early_stop_thermal_meaning": "compat/a16-thermal.c reads A16 physical addresses; EARLY_STOP_F_THERMAL must stay clear in the launch parameters"
+  }
+}

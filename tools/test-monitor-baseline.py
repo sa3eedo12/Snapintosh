@@ -11,6 +11,7 @@ from unittest import mock
 import hashlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -67,11 +68,21 @@ class Workspace(unittest.TestCase):
     def setUp(self):
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
+        environment = mock.patch.dict(os.environ)       # a $Q1N1_SP11_TREE of the caller must not decide these tests
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop(mb.monitor_build_offline.Q1N1_ENV, None)
         self.base = Path(scratch.name).resolve()
         self.tree, self.results = self.base / 'Snapintosh', self.base / 'results'
         self.tree.mkdir()
         self.results.mkdir()
-        (self.base / 'q1n1/platform/uefi').mkdir(parents=True)
+        self.make_q1n1(self.base / 'q1n1')
+
+    @staticmethod
+    def make_q1n1(root):
+        (root / 'platform/uefi').mkdir(parents=True)
+        for name in mb.monitor_build_offline.UEFI_FILES:
+            (root / 'platform/uefi' / name).write_text('')
 
     @contextmanager
     def fakes(self, toolchain=TOOLCHAIN, revision=REVISION, **faults):
@@ -170,6 +181,25 @@ class CaptureTests(Workspace):
         shutil.rmtree(self.base / 'q1n1')
         self.assertIn('q1n1', self.refused(self.capture, 'before'))
         self.assertEqual(list(self.results.iterdir()), [])
+
+    def test_a_q1n1_without_the_sha256_sources_is_refused_before_any_build(self):
+        (self.base / 'q1n1/platform/uefi/sha256.h').unlink()
+        self.assertIn('lacks sha256.h', self.refused(self.capture, 'before'))
+        self.assertEqual(list(self.results.iterdir()), [])
+
+    def test_a_q1n1_named_by_the_environment_replaces_a_missing_sibling(self):
+        shutil.rmtree(self.base / 'q1n1')
+        self.make_q1n1(self.base / 'elsewhere/q1n1')
+        os.environ[mb.monitor_build_offline.Q1N1_ENV] = str(self.base / 'elsewhere/q1n1')
+        self.assertEqual(tuple(self.capture('before')[0]['sets']), mb.SETS)
+
+    def test_a_q1n1_named_by_the_environment_is_never_replaced_by_the_sibling(self):
+        # The sibling is complete: only the named one decides, so a wrong name cannot pass on the sibling's credit.
+        for value in ('', '   ', str(self.base / 'nowhere'), str(self.results)):
+            with self.subTest(value=value):
+                os.environ[mb.monitor_build_offline.Q1N1_ENV] = value
+                self.assertIn(mb.monitor_build_offline.Q1N1_ENV, self.refused(self.capture, 'before'))
+                self.assertEqual(list(self.results.iterdir()), [])
 
     def test_a_failed_build_leaves_the_label_free_for_a_retry(self):
         with self.fakes(failing={'control'}):
@@ -322,6 +352,58 @@ class DamagedRecordTests(Workspace):
             self.rewrite(label, lambda record: record['sets']['base'].pop('elf_sha256'))
         code, out, _ = self.cli('compare', 'before', 'after')
         self.assertEqual((code, out), (2, ''))
+
+
+class BuildSourceTests(Workspace):
+    """monitor_build_offline.build reads q1n1's sha256.c and sha256.h from the sibling, or only from $Q1N1_SP11_TREE
+    when it is set. The compiler is replaced by a recorder, so these run without LLVM."""
+
+    def setUp(self):
+        super().setUp()
+        (self.tree / 'probes').mkdir()
+        (self.tree / 'probes/run.py').write_text(
+            "MULTI = {'xnuboot': ['probes/a.c', '../q1n1/platform/uefi/sha256.c']}\n")
+
+    def build(self):
+        calls = []
+        offline = mb.monitor_build_offline
+
+        def record(argv, check):
+            self.assertTrue(check)
+            calls.append([str(word) for word in argv])
+            if argv[0] == offline.LLD:
+                Path(argv[argv.index('-o') + 1]).write_text('elf')
+            elif str(argv[0]).endswith('llvm-objcopy'):
+                Path(argv[-1]).write_bytes(b'bin')
+        with mock.patch.object(offline.subprocess, 'run', record):
+            result = offline.build(self.tree, self.base / 'out', ['-O1'])
+        compiles = [call for call in calls if '-c' in call]
+        return result, {Path(call[call.index('-c') + 1]).name: call for call in compiles}
+
+    def test_the_sibling_layout_keeps_the_spelling_it_always_had(self):
+        _, compiles = self.build()
+        self.assertEqual(compiles['sha256.c'][compiles['sha256.c'].index('-c') + 1],
+                         str(self.tree.resolve() / '../q1n1/platform/uefi/sha256.c'))
+        self.assertIn(f'-I{self.base}/q1n1/platform/uefi', compiles['sha256.c'])
+
+    def test_the_named_q1n1_supplies_both_the_source_and_the_include_directory(self):
+        self.make_q1n1(self.base / 'elsewhere/q1n1')
+        shutil.rmtree(self.base / 'q1n1')
+        os.environ[mb.monitor_build_offline.Q1N1_ENV] = str(self.base / 'elsewhere/q1n1')
+        _, compiles = self.build()
+        uefi = self.base / 'elsewhere/q1n1/platform/uefi'
+        sha = compiles['sha256.c']
+        self.assertEqual(sha[sha.index('-c') + 1], str(uefi / 'sha256.c'))
+        self.assertIn(f'-I{uefi}', sha)
+        self.assertEqual(compiles['a.c'][compiles['a.c'].index('-c') + 1], str(self.tree.resolve() / 'probes/a.c'))
+        self.assertFalse([w for call in compiles.values() for w in call if str(self.base / 'q1n1') in w])
+
+    def test_without_a_usable_q1n1_nothing_is_built_and_no_output_directory_is_left(self):
+        shutil.rmtree(self.base / 'q1n1')
+        with self.assertRaises(SystemExit) as stop:
+            self.build()
+        self.assertIn('beside the tree', str(stop.exception))
+        self.assertFalse((self.base / 'out').exists())
 
 
 class RecipeTests(unittest.TestCase):

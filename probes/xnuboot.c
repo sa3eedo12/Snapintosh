@@ -59,6 +59,7 @@
 #include "../compat/mmio.h"
 #if SNAP_PLATFORM_SP11
 #include "../compat/board-info.h"
+#include "../compat/sp11-timer-guard.h"
 #endif
 /* What the host puts in memory for us. Laid out by probes/xnuboot.py; the two
  * sides are checked against each other by the size assertion below. */

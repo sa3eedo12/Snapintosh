@@ -1,41 +1,37 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Keeps docs/SP11-MONITOR-PORT.md honest: its citations, quotations, labels, size and structure.
+"""Keeps docs/SP11-MONITOR-PORT.md honest: its citations, quotations, labels, size, structure and reported state.
 
 Run from the repository root:  python3 -B tools/test-sp11-monitor-port.py
 
-Conventions the document follows and this test enforces (stated here because the document itself only describes them):
+Conventions the document follows and this test enforces:
 
-  citation   `path:line` or `path:first-last` in backticks. The path is relative to the repository root, or starts with
-             `q1n1:` and is then relative to the sibling q1n1 checkout. The file must exist and the lines must lie
-             inside it.
-  quotation  `fragment`[path:line] or `fragment`[path:first-last]: a backticked fragment of source text directly followed
-             by a bracketed citation. The fragment (a table-cell `\\|` read as `|`) must occur on the cited lines. A
-             quotation is how the document says "this exact code is there"; a moved line fails here.
-  bare path  a backticked path with a directory part and a file extension and no line: the file must exist.
+  citation   `path:line` or `path:first-last` in backticks; the path is relative to the repository root, or starts with
+             `q1n1:` (the sibling q1n1 checkout). The file must exist and the lines lie inside it.
+  quotation  `fragment`[path:line]: a backticked fragment of source text directly followed by a bracketed citation; it
+             must occur on the cited lines (a table-cell `\\|` reads as `|`), so a moved line fails here.
+  bare path  a backticked path with a directory part and an extension, no line: the file must exist.
   labels     VERIFIED, OBSERVED, INFERRED, EXPERIMENTAL, UNIMPLEMENTED, UNKNOWN. A table with a `Label` column holds only
-             these (parenthesised notes aside), and an OBSERVED row names its source (a boot number, the restart probe, an
-             operator report, a test id or a dump). A list of look-alike labels (ASSUMED, CONFIRMED, ...) must not occur
-             anywhere.
-  tables     every block of `|` lines has a header, an exact `| --- |` separator row and rows of the header's width: a
-             table that loses a newline renders as prose and slips past every label check.
-  claims     statements that were wrong once and must not come back (the restart section): a restart time or UPTIME
-             budget read off the page's `UPTIME 16 S`, which was only the first heartbeat after the cpuon chain; an
-             UPTIME window derived from the DONE marker gap, which holds the operator's power cycle; a plan that "runs
-             unattended" across a self-restart, after which the firmware does not return to the stick; the read-only
-             runner flow "observed only to UPTIME 10 S", since the restart control kept it alive to UPTIME 224 S and
-             268 S. The restart numbers, the survey (WI 10, needed before SMP work only, so the M1 run does not wait
-             for it), the EL2 entry state of the secondaries, and the unit's DFR0 and ISAR0 values (X1 probe page)
-             with everything the document decodes from them are pinned.
+             these (parenthesised notes aside); an OBSERVED row names its source (a boot, the restart probe or control, an
+             operator report, a test id, a dump). Look-alike labels (ASSUMED, CONFIRMED, ...) occur nowhere.
+  tables     every block of `|` lines has a header, an exact `| --- |` separator and rows of the header's width.
+  claims     statements that were wrong once and must not come back: a restart time or UPTIME budget read off boot 7's
+             `UPTIME 16 S` (the first heartbeat after the cpuon chain), an UPTIME window derived from the DONE marker gap
+             (it holds the operator's power cycle), a plan that "runs unattended" across a self-restart, the read-only
+             runner flow "observed only to UPTIME 10 S" (the restart control: alive at 224 S and 268 S), an adapter that
+             "accepts" the unit's tables. The restart numbers, the survey (WI 10, before SMP work only), the secondaries'
+             EL2 entry state and the unit's DFR0 and ISAR0 values are pinned.
+  state      what the document says about the tree as it is, held against its source: the timer guards' status values
+             (compat/sp11-timer-guard.h), the five bundle files in the interface's order and sizes, the work items'
+             statuses (built is not run), the low placement limit (288 MiB fits, 320 does not), the unit's MADT and MCFG
+             and the adapter's behaviour on them (GICD and redistributors resolved; the ECAM rule, D11, refuses).
 
-What always runs: size, ASCII and hygiene, the section list, "NOT RUN" for the port, the label rules, the table and claim
-checks, the citations into this repository, the work-plan graph, and arithmetic the document quotes (recomputed from the
-sources). What is skipped,
-visibly (a skip is never a pass): citations into the q1n1 checkout when none is found (set Q1N1_SP11_TREE to the checkout the
-document names, commit d48b0af, to force it), and facts read from the local, git-ignored unit dumps under downloads/ when
-they are absent.
+Always run: size, ASCII, hygiene, sections, "NOT RUN", labels, tables, claims, state, the citations into this repository, the
+work-plan graph and the arithmetic the document quotes. Skipped, visibly (a skip is never a pass): the q1n1 citations when no
+checkout is found (set Q1N1_SP11_TREE to the one the document names, commit 1e7318f) and the facts read from the local,
+git-ignored unit dumps under downloads/ when they are absent (the ACPI figures and the adapter run on them).
 
-The last classes feed deliberately damaged copies of the document to the same checkers; each must be refused.
+The last class feeds deliberately damaged copies of the document to the same checkers; each must be refused.
 """
 import os
 import re
@@ -61,12 +57,10 @@ BARE = re.compile(r'`' + PATH + r'`(?!\[)')
 SOURCE_OF_OBSERVED = re.compile(r'\bboots? \d|restart (?:probe|control)|X1 probe|\bsteps? [123]\b|operator report|\bT0\d|\bX2\b'
                                 r'|\bdump\b|\bboot-\d', re.I)
 SEPARATOR = re.compile(r'^\|(\s*:?-{3,}:?\s*\|)+\s*$')
-# Statements that were wrong once. UPTIME is q1n1's page counter, started before the payload runner, so the cpuon chain
-# (two 8 s waits) is inside it: `UPTIME 16 S` on boot 7's last photograph was the first heartbeat after the chain, not
-# the time of the restart. The 90 s between the DONE2 and DONE3 markers holds the operator's power cycle, and a
-# self-restart ends the stick's plan: the firmware boots its own order, so no plan runs unattended. The restart control
-# (2026-11-16) photographed the read-only runner flow alive at UPTIME 224 S and 268 S: it is no longer observed only to
-# UPTIME 10 S (boot 5).
+# Statements that were wrong once. UPTIME starts before the runner, so the cpuon chain is inside it: boot 7's `UPTIME 16 S`
+# was the first heartbeat after the chain, not the restart time. The DONE2 to DONE3 gap holds the operator's power cycle,
+# and after a self-restart the firmware boots its own order, so no plan runs unattended. The restart control (2026-11-16)
+# kept the read-only runner flow alive to UPTIME 224 S and 268 S, not only to UPTIME 10 S.
 REFUTED = (
     (r'(?:under|below|within|inside|at most|less than)\s+(?:that\s+|the\s+|about\s+)?(?:16|30)\s*s\b',
      'a 16 s or 30 s UPTIME budget has no basis'),
@@ -80,10 +74,11 @@ REFUTED = (
      'the restart control observed the read-only runner flow alive at UPTIME 224 S and 268 S, not only to UPTIME 10 S'),
     (r'U5 DFR0|values not in my sources|(?:DFR0|ISAR0)[^.|]{0,40}T01 page only|ISAR0 \(RNDR\), FGT and AMU values',
      'DFR0, ISAR0, FGT and AMU are known since the X1 probe page; only the OS lock, MDCR_EL2, ICC_SRE_EL2, DFR1 and ISAR2 are not'),
+    (r'from_hamoa`? (?:accepts|passes|is no longer blocked|is unblocked)',
+     'the adapter still refuses the unit\'s tables at the ECAM rule (D11); only its GICD and redistributor rules are resolved'),
 )
-# ID registers of the unit, from the X1 probe page (2026-11-11, a photograph; one unit, one boot; passive reads at EL2).
-# They are facts of the coordinator's fact file, not of this repository, so they are pinned here: the document's hex
-# values and every field it decodes must agree with them, and the monitor's gates are held against them below.
+# The unit's ID registers (X1 probe page, 2026-11-11, one photograph, passive reads at EL2) are facts of the coordinator's
+# fact file, pinned here: the document's hex values and decoded fields must agree, and the monitor's gates are held against them.
 DFR0, ISAR0, ISAR1 = 0x000F01F010305719, 0x1221111110212120, 0x0110111101211052
 FIELDS = {'DebugVer': (DFR0, 0), 'BRPs': (DFR0, 12), 'WRPs': (DFR0, 20), 'RNDR': (ISAR0, 60), 'APA': (ISAR1, 4),
           'GPA': (ISAR1, 24)}
@@ -97,6 +92,24 @@ REQUIRED = ('first heartbeat after the chain', 'not at one fixed UPTIME', 'UPTIM
 SECONDARY_STATE = ('0X200', '0X300', '0X10000', '0X10100', '0X10300', '0X20000', '0X20100', '0x80000000', '0X100',
                    '0X10200', '0x1488000038', 'survived its own CPU_OFF and CPU_ON', '0X20200 and 0X20300 UNKNOWN',
                    'must not assume VBAR_EL2 or HCR_EL2 are reset')
+GUARD_HEADER, BUNDLE_DOC = 'compat/sp11-timer-guard.h', 'docs/SP11-STICK-BUNDLE.md'
+BUNDLE_FILES = ('SNAPMON.BIN', 'SNAPREP.BIN', 'GUEST.DAT', 'PIN.DAT', 'REPORT.DAT')
+BUNDLE_SIZES = (('`PIN.DAT` (1024 bytes', 1024), ('`REPORT.DAT` (528,384 zero bytes', 528384))
+# Built is not run: what each work item may claim (its row must keep these words).
+WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
+                    2: ('BUILT, NOT RUN (q1n1 d8a5d2b)', 'the first is staged, ready to run, not run (`memhash`'),
+                    3: ('BUILT for the synthetic path', '`real` NOT RUN'), 4: ('IN PROGRESS elsewhere, not audited here',),
+                    5: ('BUILT, EXPERIMENTAL, host side',), 9: ('BUILT, NOT RUN (q1n1 1e7318f)', 'first code below EL2')}
+# The tree as the document states it (matched on whitespace-collapsed text); the sources that decide them are read below.
+STATE_REQUIRED = (
+    'is five files, the runner\'s whole manifest', 'bits that stick and trap nothing pass', 'a pass is UNKNOWN until T-HW2',
+    'a 288 MiB guest passes `place-check` on all six local maps and 320 MiB is refused in all six',
+    '12 GICC entries of 80 bytes', 'one GICD structure of 25 bytes (ACPI: 24; the extra byte is 0)',
+    'then the ITS structure, no GICR-range structure', 'MCFG: eight allocations, segments 0 to 7', 'segment 2 at 0x6000000000',
+    'RESOLVED in e3844fa', 'a1fb91c (redistributors from the per-CPU GICC bases',
+    'then `check_hamoa_platform` refuses at `ecam-mismatch`', 'a descriptor holds at most four ECAM entries',
+    'the adapter demands set equality',
+    'the MCFG lists eight allocations, a descriptor holds four, the adapter demands equality', 'an eight-entry descriptor is refused')
 
 
 def q1n1_tree():
@@ -366,9 +379,54 @@ def check_id_registers(text):
     return problems
 
 
+def check_port_state(text):
+    """The document's statements about the tree as it is, held against the sources that decide them."""
+    flat = squash(text)
+    problems = [f'state lacks: {needle}' for needle in STATE_REQUIRED if needle not in flat]
+    header, interface = (ROOT / GUARD_HEADER).read_text(), (ROOT / BUNDLE_DOC).read_text()
+    for define, shown in (('SNAP_SP11_TIMER_STATUS_CNTHCTL', '-147'), ('SNAP_SP11_TIMER_STATUS_CNTVOFF', '-148'),
+                          ('SNAP_SP11_EVENT_TIMER', '0x5443')):
+        if not re.search(rf'{define}\s+\(?{shown}\)?', header) or shown not in flat:
+            problems.append(f'{GUARD_HEADER} and the document disagree on {define} = {shown}')
+    names = tuple(re.findall(r'^\| \d \| `([A-Z0-9]+\.[A-Z]+)` \|', interface, re.M))
+    if names != BUNDLE_FILES:
+        problems.append(f'{BUNDLE_DOC} lists {names}, not the five files the document names')
+    for needle, size in BUNDLE_SIZES:
+        if f'exactly {size} bytes' not in interface or needle not in flat:
+            problems.append(f'the interface and the document disagree on {needle}')
+    start = flat.find('is five files, the runner\'s whole manifest')
+    places = [flat.find(f'`{name}`', start) for name in BUNDLE_FILES]
+    if start < 0 or -1 in places or places != sorted(places):
+        problems.append('the bundle paragraph must name the five files in the interface\'s order')
+    rows = plan_rows(text)
+    for number, needles in WORK_ITEM_STATUS.items():
+        row = squash(' '.join(rows.get(number, {}).values()))
+        problems += [f'WI {number} lacks: {needle}' for needle in needles if needle not in row]
+    if rows.get(11, {}).get('Depends') != '3, 5, 8, 9':
+        problems.append('the M1 run (WI 11) depends on 3 (the real path), 5, 8 and 9')
+    if 'D11' not in rows.get(3, {}).get('UNKNOWN / decision', '') or '- D11 The ECAM rule' not in text.split('## 15.')[-1]:
+        problems.append('WI 3 is gated by D11 and section 15 keeps it: the ECAM rule')
+    return problems
+
+
+def load_adapter():
+    """(board_descriptor, bootcontract, the descriptor tests' boot-ready fixture)."""
+    import importlib.util
+    import sys
+    for sub in ('probes', 'tools'):
+        if str(ROOT / sub) not in sys.path:
+            sys.path.insert(0, str(ROOT / sub))
+    import board_descriptor
+    import bootcontract
+    spec = importlib.util.spec_from_file_location('descriptor_fixture', ROOT / 'tools' / 'test-board-descriptor.py')
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    return board_descriptor, bootcontract, fixture
+
+
 def check_all(text, tree):
     problems = (check_structure(text) + check_labels(text) + check_plan(text) + check_tables(text) + check_claims(text) +
-                check_id_registers(text))
+                check_id_registers(text) + check_port_state(text))
     cite_problems, _ = check_citations(text, tree)
     return problems + cite_problems
 
@@ -438,6 +496,9 @@ class Claims(unittest.TestCase):
     def test_the_id_registers_the_document_decodes(self):
         self.assertEqual(check_id_registers(TEXT), [])
 
+    def test_the_state_of_the_tree_as_the_document_states_it(self):
+        self.assertEqual(check_port_state(TEXT), [])
+
     def test_the_restart_probe_is_a_source_for_observed_rows(self):
         table = '| Item | Label |\n| --- | --- |\n| entry state | OBSERVED (restart probe, step 3) |\n'
         self.assertEqual(check_labels(table), [])
@@ -460,11 +521,22 @@ class Arithmetic(unittest.TestCase):
         reserve = max(0x3000000, ((span + 0xfffffff) // 0x10000000 + 1) * 0x1000000)
         self.assertEqual((work >> 20, guest, reserve >> 20), (240, 384, 48))
         self.assertEqual((span + reserve + work) >> 20, 672)
-        small = 256 << 20
-        small_reserve = max(0x3000000, ((small + 0xfffffff) // 0x10000000 + 1) * 0x1000000)
-        self.assertEqual((small + small_reserve + work) >> 20, 544)
-        for needle in ('672 MiB', '544 MiB', '240 MiB', '48 reserve', '384 guest'):
+        for needle in ('672 MiB', '240 MiB', '48 reserve', '384 guest'):
             self.assertIn(needle, TEXT)
+
+    def test_the_low_placement_limit_lies_between_288_and_320_mib(self):
+        """With the loader's 240 MiB work area and reserve, 288 MiB fits the largest low extent (590 MiB, 576 on the 32 MiB
+        grid) and 320 MiB does not: the `place-check` results the document quotes."""
+        reserve = lambda guest: max(0x3000000, (((guest << 20) + 0xfffffff) // 0x10000000 + 1) * 0x1000000) >> 20
+        self.assertIn('return max(0x3000000, ((guest_span+0xfffffff)//0x10000000+1)*0x1000000)',
+                      self.source('probes/xnuboot.py'))
+        total = lambda guest: guest + reserve(guest) + 240
+        self.assertEqual((reserve(288), total(288), total(320)), (48, 576, 608))
+        self.assertEqual([g for g in range(32, 416, 32) if total(g) <= 576][-1], 288)
+        self.assertTrue(288 <= 590 - 240 - 48 < 320)          # the unaligned bound, 302 MiB, lies between the two
+        flat = squash(TEXT)
+        for needle in ('unless the guest is 288 MiB or less', '288 MiB fits, 320 does not', 'so the low limit lies between them'):
+            self.assertIn(needle, flat)
 
     def test_the_el2_regime_decodes_as_the_document_says(self):
         tcr = 0x80843514
@@ -500,28 +572,73 @@ class Arithmetic(unittest.TestCase):
         for needle in ('590 MiB', '576 MiB', '30720 MiB', '32105 MiB'):
             self.assertIn(needle, TEXT)
 
-    def test_the_gic_and_timer_facts_of_the_acpi_dump(self):
+    @staticmethod
+    def acpi_dumps():
+        names = ('RSDP', 'XSDT', 'APIC', 'MCFG', 'GTDT')
+        return [d for d in sorted((ROOT / 'downloads/sp11').glob('x*-run*')) if all((d / f'{n}.bin').is_file() for n in names)]
+
+    @staticmethod
+    def mcfg_rows(dump):
+        """(base, segment, first bus, last bus) of every MCFG allocation, by segment."""
         import struct
-        run = ROOT / 'downloads/sp11/x2-run12'
-        if not (run / 'APIC.bin').is_file() or not (run / 'GTDT.bin').is_file():
-            self.skipTest('the local boot-6 ACPI dump is absent: GIC and timer figures are not recomputed')
-        madt = (run / 'APIC.bin').read_bytes()
-        frames, gicd, its, offset = [], None, None, 44
-        while offset < len(madt):
-            kind, length = madt[offset], madt[offset + 1]
-            if kind == 0xB:
-                frames.append(struct.unpack_from('<Q', madt, offset + 60)[0])
-            elif kind == 0xC:
-                gicd = struct.unpack_from('<Q', madt, offset + 8)[0]
-            elif kind == 0xF:
-                its = struct.unpack_from('<Q', madt, offset + 8)[0]
-            offset += length
-        self.assertEqual((gicd, its, len(frames)), (0x17000000, 0x17040000, 12))
-        self.assertEqual(frames, [0x17080000 + n * 0x40000 for n in range(12)])
-        self.assertEqual(frames[-1] + 0x40000, 0x17380000)
-        self.assertEqual(struct.unpack_from('<I', (run / 'GTDT.bin').read_bytes(), 72)[0], 26)
+        mcfg = (dump / 'MCFG.bin').read_bytes()
+        rows = (struct.unpack_from('<QHBBI', mcfg, 44 + 16 * i)[:4] for i in range((len(mcfg) - 44) // 16))
+        return sorted(rows, key=lambda row: row[1])
+
+    def test_the_acpi_tables_of_the_local_dumps(self):
+        """Sections 7 and 15, in every local dump: twelve 80-byte GICC entries (redistributors 0x17080000 + n x 0x40000), a
+        GICD at 0x17000000 one byte over ACPI's 24 (extra byte zero), the ITS at 0x17040000 right after it, no GICR-range
+        structure; the EL2 timer GSIV 26; eight MCFG allocations, segment 2 at 0x6000000000."""
+        import struct
+        dumps = self.acpi_dumps()
+        if not dumps:
+            self.skipTest('no local ACPI dump: the MADT, MCFG and GTDT figures are not recomputed')
+        for dump in dumps:
+            madt, offset, found = (dump / 'APIC.bin').read_bytes(), 44, []
+            while offset < len(madt):
+                found.append((madt[offset], madt[offset + 1], offset))
+                offset += madt[offset + 1]
+            base = lambda at: struct.unpack_from('<Q', madt, at)[0]
+            gicc, (gicd,), (its,) = ([f for f in found if f[0] == kind] for kind in (0xB, 0xC, 0xF))
+            self.assertEqual((madt[8], [kind for kind, _, _ in found]), (5, [0xB] * 12 + [0xC, 0xF]), dump.name)
+            self.assertEqual({length for _, length, _ in gicc}, {80})
+            self.assertEqual([base(at + 60) for _, _, at in gicc], [0x17080000 + n * 0x40000 for n in range(12)])
+            self.assertEqual((gicd[1], madt[gicd[2] + 24], its[1]), (25, 0, 20))
+            self.assertEqual((base(gicd[2] + 8), base(its[2] + 8)), (0x17000000, 0x17040000))
+            self.assertEqual(struct.unpack_from('<I', (dump / 'GTDT.bin').read_bytes(), 72)[0], 26)
+            rows = self.mcfg_rows(dump)
+            self.assertEqual([(s, f, l) for _, s, f, l in rows], [(n, 0, 255 if n < 3 else 1) for n in range(8)])
+            self.assertEqual(rows[2][0], 0x6000000000)
+            self.assertGreaterEqual(rows[2][0], 1 << 36)
         for needle in ('0x17380000', 'GSIV 26'):
             self.assertIn(needle, TEXT)
+
+    def test_the_adapter_reads_the_units_tables_up_to_the_ecam_rule(self):
+        """Sections 7 and 15, run in memory: with a boot-ready board the adapter passes the CPU, GICD, redistributor and ITS
+        rules on every local dump, then refuses the MCFG's eight allocations; raising the entry limit alone does not help
+        (segment 2 lies beyond 1<<36). When the owner changes the rule this fails: update D11 and sections 7 and 13."""
+        dumps = self.acpi_dumps()
+        if not dumps:
+            self.skipTest('no local ACPI dump: the adapter is not run on the unit tables')
+        descriptor, adapter, fixture = load_adapter()
+        board = fixture.board()
+        for dump in dumps:
+            tables = {n: (dump / f'{n}.bin').read_bytes() for n in ('RSDP', 'XSDT', 'APIC', 'MCFG')}
+            with self.assertRaises(adapter.BootContractError) as caught:
+                adapter.check_hamoa_platform(board, tables)
+            self.assertEqual(caught.exception.code, 'ecam-mismatch', dump.name)
+        saved, description = descriptor.MAX_ECAM, fixture.synthetic()
+        description['pcie']['ecam'] = [{'segment': s, 'base': f'{b:#x}', 'start_bus': f, 'end_bus': l}
+                                       for b, s, f, l in self.mcfg_rows(dumps[0])]
+        descriptor.MAX_ECAM = 16
+        try:
+            with self.assertRaises(descriptor.BoardDescriptorError) as refused:
+                descriptor.validate(description)
+        finally:
+            descriptor.MAX_ECAM = saved
+        self.assertEqual(saved, 4)
+        self.assertIn('pcie.ecam2: [0x6000000000', str(refused.exception))
+        self.assertIn('extends beyond 1<<36', str(refused.exception))
 
     def test_the_id_registers_decode_and_the_monitors_gates_pass(self):
         field = lambda value, lsb: (value >> lsb) & 15
@@ -540,8 +657,8 @@ class Arithmetic(unittest.TestCase):
         self.assertFalse((ISAR0 >> 60) == 0 or ((ISAR1 >> 4) & 255) == 0)
 
     def test_the_restart_timing_arithmetic(self):
-        """The inputs are facts of the restart probe from the coordinator's fact file, not from this repository (marker
-        times are local, the FAT has a 2 s resolution); they are pinned here so that section 10 cannot drift from them."""
+        """Facts of the restart probe (the coordinator's fact file; marker times are local, FAT resolution 2 s), pinned so
+        that section 10 cannot drift from them."""
         from datetime import datetime
         clock = lambda text: datetime.strptime(text, '%H:%M:%S')
         gap = (clock('21:42:50') - clock('21:41:20')).seconds             # DONE3 minus DONE2
@@ -556,10 +673,9 @@ class Arithmetic(unittest.TestCase):
             self.assertIn(needle, flat)
 
     def test_the_restart_control_numbers(self):
-        """Facts of the restart control (2026-11-16) from the coordinator's fact file, not from this repository: the
-        read-only chain was photographed alive at UPTIME 224 S and 268 S in two boots, while cpuon was followed by a restart
-        in 2 of 3 boots. Had the runner flow itself restarted 2 of 3 boots, both control boots would have survived with
-        probability (1/3)^2. Marker times are local; each page starts about 4 s after its marker."""
+        """Facts of the restart control (2026-11-16, the coordinator's fact file): the read-only chain was alive at UPTIME
+        224 S and 268 S in two boots, cpuon was followed by a restart in 2 of 3. Had the runner flow itself restarted 2 of 3
+        boots, both control boots would have survived with probability (1/3)^2; each page starts about 4 s after its marker."""
         from datetime import datetime, timedelta
         clock = lambda text: datetime.strptime(text, '%H:%M:%S')
         self.assertEqual(round(100 * (1 - 2 / 3) ** 2), 11)
@@ -698,7 +814,7 @@ class SeededBad(unittest.TestCase):
         self.assertTrue([p for p in problems if 'section 10 must give the restart control' in p])
 
     def test_the_m1_run_waiting_for_the_restart_survey_or_a_budget_without_its_low_weight_is_refused(self):
-        waiting = self.damaged('| 11 | **M1 run** | 5, 8, 9 |', '| 11 | **M1 run** | 5, 8, 9, 10 |')
+        waiting = self.damaged('| 11 | **M1 run** | 3, 5, 8, 9 |', '| 11 | **M1 run** | 3, 5, 8, 9, 10 |')
         self.assertTrue([p for p in check_claims(waiting) if p.startswith('the M1 run (WI 11)')])
         bound = self.damaged('as a precaution of low weight (earliest plausible restart, in a cpuon run,',
                              'as a bound (earliest plausible restart, in a cpuon run,')
@@ -707,6 +823,36 @@ class SeededBad(unittest.TestCase):
     def test_the_unknowns_that_the_x1_probe_page_closed_stay_closed(self):
         reopened = self.damaged('U5 OS lock, MDCR_EL2, ICC_SRE_EL2, DFR1, ISAR2', 'U5 DFR0, OS lock')
         self.assertTrue([p for p in check_claims(reopened) if p.startswith('refuted')])
+
+    def test_a_wrong_state_of_the_tree_is_refused(self):
+        # each seed contradicts a source or a measurement: the unit's tables, the adapter's refusal, the guards' limits,
+        # the bundle, the work items' statuses, the low placement limit
+        cases = (('then `check_hamoa_platform` refuses at `ecam-mismatch`', 'then `check_hamoa_platform` accepts them'),
+                 ('one GICD structure of 25 bytes (ACPI: 24; the extra byte is 0)', 'one GICD structure of 24 bytes'),
+                 ('then the ITS structure, no GICR-range structure', 'then the ITS structure and a GICR-range structure'),
+                 ('MCFG: eight allocations, segments 0 to 7', 'MCFG: four allocations, segments 0 to 3'),
+                 ('bits that stick and trap nothing pass', 'bits that stick prove the traps work'),
+                 ('`real` NOT RUN', '`real` PASS'), ('IN PROGRESS elsewhere, not audited here', 'DONE'),
+                 ('BUILT, NOT RUN (q1n1 d8a5d2b)', 'BUILT, PASS (q1n1 d8a5d2b)'),
+                 ('the first is staged, ready to run, not run', 'the first has run'),
+                 ('first code below EL2', 'first code at EL2'),
+                 ('is five files, the runner\'s whole manifest', 'is four files, the runner\'s whole manifest'),
+                 ('`REPORT.DAT` (528,384 zero bytes', '`REPORT.DAT` (524,288 zero bytes'),
+                 ('a 288 MiB guest passes', 'a 320 MiB guest passes'))
+        for old, new in cases:
+            self.assertTrue(check_port_state(self.damaged(old, new)), old)
+
+    def test_the_bundle_in_the_wrong_order_is_refused(self):
+        swapped = self.damaged('`SNAPMON.BIN` (payload 0', '`REPORT.DAT` (payload 0')
+        self.assertTrue([p for p in check_port_state(swapped) if 'interface' in p])
+
+    def test_an_unblocked_adapter_and_a_dropped_ecam_decision_are_refused(self):
+        unblocked = self.damaged('It reads the MADT itself (section 7), not through `from_hamoa`.',
+                                 'It reads the MADT itself (section 7); `from_hamoa` is no longer blocked.')
+        self.assertTrue([p for p in check_claims(unblocked) if p.startswith('refuted')])
+        dropped = self.damaged('- D11 The ECAM rule', '- D12 The ECAM rule')
+        self.assertTrue([p for p in check_plan(dropped) if 'D11' in p])
+        self.assertTrue([p for p in check_port_state(dropped) if 'D11' in p])
 
 
 if __name__ == '__main__':
