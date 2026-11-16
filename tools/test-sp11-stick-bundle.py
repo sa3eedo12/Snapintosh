@@ -345,7 +345,7 @@ CASES = [
                                                                     sb.pin_digest(s.pin))),
     ('pin_midr_zero', 'PIN_VALUE', 'preflight', PIN_AT(0xE0, 0)),
     ('pin_cntfrq_0', 'PIN_VALUE', 'preflight', P(cntfrq_hz=0)),
-    ('pin_gicr_stride_small', 'PIN_VALUE', 'preflight', P(gicr_stride=0x10000)),
+    ('pin_gicr_stride_small', 'PIN_VALUE', 'preflight', P(gicr_stride=0x10000, gicr_limit=0x17080000 + 12 * 0x10000)),
     ('pin_gicr_limit_wrong', 'PIN_VALUE', 'preflight', P(gicr_limit=0x17370000)),
     ('pin_gicd_inside_window', 'PIN_VALUE', 'preflight', P(gicd_base=0x17090000)),
     ('pin_timer_not_a_ppi', 'PIN_VALUE', 'preflight', P(timer_intid=32)),
@@ -390,7 +390,7 @@ CASES = [
     ('obs_gop_width', 'GOP_MISMATCH', 'preflight', O(fb_width=1800)),
     ('obs_gop_base', 'GOP_MISMATCH', 'preflight', O(fb_base=0xE4800000 + 0x1000)),
     ('obs_store_class_not_authorised', 'STORE_NOT_AUTH', 'preflight', O(build_stores=7)),
-    ('map_stride_below_descriptor', 'MAP_BAD', 'preflight', lambda s: setattr(s, 'stride', 32)),
+    ('map_stride_below_descriptor', 'MAP_BAD', 'preflight', lambda s: (setattr(s, 'stride', 32), setattr(s, 'map', struct.pack('<IIQQQ', 7, 0, LOW_BASE, 0, PLACED['place_size'] >> 12) + struct.pack('<IIQQQ', 15, 0, 0x1000, 0, 1)))),
     ('map_size_not_multiple', 'MAP_BAD', 'preflight', set_attr('map', lambda b: b + b'\0')),
     ('map_empty', 'MAP_BAD', 'preflight', lambda s: setattr(s, 'map', b'')),
     ('map_null', 'MAP_BAD', 'preflight', lambda s: setattr(s, 'map', None)),
@@ -658,7 +658,7 @@ class Fuzz(Native):
                 self.assertEqual(lines, self.python_lines(s, which, seed, iterations, limit))
                 codes = {int(c) for line in lines for c in line.split()[5:]}
                 self.assertLessEqual(codes, known)
-                self.assertIn(0, codes | {0})
+                self.assertIn(0, codes)
 
     def test_the_mutations_reach_acceptance_and_many_different_refusals(self):
         column = lambda which, seed, n, limit, c: {int(line.split()[5 + c]) for line in self.python_lines(fixture(), which, seed, n, limit)}

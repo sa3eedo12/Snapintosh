@@ -21,7 +21,7 @@ this note: they belong to the run that made them.
 | This note | `docs/SP11-STICK-BUNDLE.md` | EXPERIMENTAL |
 | Layouts, constants, refusal table and the pure checks, freestanding C | `probes/sp11-stick-bundle.h` | EXPERIMENTAL |
 | Pack, unpack and the same checks in Python, an independent implementation | `tools/sp11_stick_bundle.py` | EXPERIMENTAL |
-| Host test, native harness under AddressSanitizer and UndefinedBehaviorSanitizer | `tools/test-sp11-stick-bundle.py`, `tools/test-sp11-stick-bundle.c` | EXPERIMENTAL |
+| Host tests, native harness under AddressSanitizer and UndefinedBehaviorSanitizer | `tools/test-sp11-stick-bundle.py`, `tools/test-sp11-stick-bundle-edges.py`, `tools/test-sp11-stick-bundle.c` | EXPERIMENTAL |
 | Wrapper (`SNAPMON.BIN`), reporter (`SNAPREP.BIN`), bundle builder tool, the `SNAP_SP11_STICK` sources | none | UNIMPLEMENTED |
 
 ## 2. The five files
@@ -32,7 +32,7 @@ a name `<stem>.BIN` marking a payload and every other file data that is never ca
 
 | Index | File | Kind | Content | Size rule |
 | --- | --- | --- | --- | --- |
-| 0 | `SNAPMON.BIN` | payload, called first | `BTI c; B payload_entry`, the wrapper, the loader and the monitor (311,359 bytes as built: audit section 4) | 1 byte to 256 MiB |
+| 0 | `SNAPMON.BIN` | payload, called first | `BTI c; B payload_entry`, the wrapper, the loader and the monitor (the monitor alone was 311,359 bytes in audit section 4 and is 314,871 with the M1 profile; the dry-run wrapper, which has no monitor, is 35,164) | 1 byte to 256 MiB |
 | 1 | `SNAPREP.BIN` | payload, called second | the report renderer, read-only | 1 byte to 256 MiB |
 | 2 | `GUEST.DAT` | data | the chunk container of section 4 | 192 bytes to 256 MiB |
 | 3 | `PIN.DAT` | data | the pinned facts of section 3 | exactly 1024 bytes |
@@ -172,7 +172,7 @@ report records the policy used. Throughput of hashing 115 MiB on the unit is UNK
 
 | Rule | Check | Code |
 | --- | --- | --- |
-| Grid | `guest_base` and `guest_size` multiples of 32 MiB (`REGION_ALIGN = 0x2000000`[probes/xnuboot.py:451]); `reserve_size` of 16 MiB; `work_base` of 64 KiB | PLACE_ALIGN |
+| Grid | `guest_base` and `guest_size` multiples of 32 MiB (`REGION_ALIGN = 0x2000000`[probes/xnuboot.py:451]); `reserve_size` of 16 MiB; `work_base` of 64 KiB; `place_base` and `place_size` of 16 MiB (the Shape rule implies it, but this rule runs first: a misaligned one is PLACE_ALIGN, not PLACE_LAYOUT, `(pb \| ps) & (SP11SB_RESERVE_ALIGN - 1)`[probes/sp11-stick-bundle.h:514]) | PLACE_ALIGN |
 | Shape | `guest_size` >= 192 MiB (a floor: the SPTM data of the small layout ends at 167 MiB, `probes/xnuboot.py:323`; `place()` is the authority and its `large` branch needs 256 MiB), `reserve_size` >= 48 MiB, `work_size` = 240 MiB, `work_base` = the end of the reserve, `place_base` = `guest_base`, `place_size` = the sum | PLACE_LAYOUT |
 | Stage-2 limit | the end is at most 2^36 (`IPA_LIMIT = 1 << 36`[probes/monitor_work.py:12]); ending exactly there is allowed and starting at or beyond it is not, as `shadow/stage2.c` checks | PLACE_LIMIT |
 | One descriptor | inside exactly one EFI descriptor of type 7 (conventional) of the final map, and no other descriptor touches it | PLACE_NOT_CONV |
@@ -300,10 +300,21 @@ The gate must not change: any existing object or its flags; `probes/xnuboot.S` a
 
 ## 8. Refusal codes
 
-Names are capitals, digits and `_`, at most 24 characters (the panel font); the number never changes meaning inside a version. Side: B the host builder, W the wrapper, R the reporter. The wrapper takes the checks in this order and the first
-failure wins, so a record that is wrong twice gets the same code from the host tool and the wrapper: runner arguments, the five slots, PIN.DAT (header, digest, fields, placement arithmetic, store classes, authorisation), the registers
-and pins, the placement against the map, GUEST.DAT (head, binding, chunks, kinds), the table digest, the chunk digests, the file digest. Within each record the checks run in the order of its rows. Codes 80 to 82 are raised by
-the wrapper's runtime steps; no pure check returns them.
+Names are capitals, digits and `_`, at most 24 characters (the panel font); the number never changes meaning inside a version. Side: B the host builder, W the wrapper, R the reporter. The wrapper takes the checks in the order below and the first
+failure wins, so a record that is wrong twice gets the same code from the host tool and the wrapper (one exception, item 2). The rows of the table are in code order, not in check order.
+Codes 80 to 82 are raised by the wrapper's runtime steps; no pure check returns them.
+
+1. Runner arguments: ARGS_BAD.
+2. The five slots: FILE_COUNT, then slot 0 to slot 4 and in each slot FILE_ROLE, FILE_BASE, FILE_SIZE, so slot 0's size is refused before slot 1's role. The wrapper checks REPORT.DAT's slot alone first (section 6): when that slot and an earlier one are both bad, the wrapper returns the REPORT.DAT slot's code and the host tool the earlier slot's.
+3. PIN.DAT: the header (PIN_TRUNCATED, PIN_MAGIC, PIN_VERSION, PIN_SIZE), PIN_DIGEST, then PIN_FLAGS (an undefined store bit too), PIN_STRING, PIN_COUNT, PIN_RESERVED, PIN_ORDER, PIN_VALUE, then the placement arithmetic (PLACE_ALIGN; PLACE_LIMIT when a sum wraps; PLACE_LAYOUT; PLACE_LIMIT when the end is over 2^36), then STORE_NOT_AUTH, last NO_AUTHORISATION.
+4. The registers and pins: NOT_EL2, E2H_SET, EL2_REGIME, MIDR_MISMATCH, MPIDR_MISMATCH, CNTFRQ_MISMATCH, GIC_MISMATCH, GOP_MISMATCH, then STORE_NOT_AUTH for the wrapper build's own store classes.
+5. The placement against the map: PLACE_LAYOUT for a placement of zero bytes or one that wraps (PIN.DAT's checks have refused it already), then MAP_BAD (the whole map is read first, so a bad descriptor after the one that holds the placement still counts), PLACE_NOT_CONV, PLACE_ATTR, PLACE_DECLARED, PLACE_FB, PLACE_AVOID.
+6. GUEST.DAT, the head: GUEST_TRUNCATED (under 128 bytes), GUEST_MAGIC, GUEST_VERSION, GUEST_FLAGS, GUEST_SIZE (`head_size`, `entry_size`, `table_offset`), GUEST_RESERVED, GUEST_TRUNCATED (shorter than `file_size`), GUEST_SIZE (longer than `file_size`, or over 256 MiB),
+   GUEST_COUNT (also when the table does not fit), GUEST_SIZE (`data_offset`), GUEST_LOAD, GUEST_PIN. Then the chunks one at a time in table order, each through CHUNK_KIND, CHUNK_FLAGS, CHUNK_RESERVED, CHUNK_ZERO, CHUNK_GEOMETRY, CHUNK_RANGE, CHUNK_ORDER, CHUNK_OVERLAP and, for a data chunk,
+   CHUNK_EOF, CHUNK_OFFSET, PAD_NONZERO: the first bad chunk decides, so chunk 0's offset is refused before chunk 3's kind. Last GUEST_SIZE for bytes after the last chunk, CHUNK_DUP, CHUNK_MISSING.
+7. The digests: HASH_POLICY, GUEST_COUNT (the step reads the count again so that it is safe on its own), INDEX_DIGEST, then each data chunk in table order through CHUNK_EOF (its range must lie inside the file) and CHUNK_DIGEST (the first failing index goes to `refusal_detail`), last FILE_DIGEST.
+
+SNAPREP reads REPORT.DAT in the order REPORT_SIZE (the length), REPORT_MAGIC, REPORT_VERSION, REPORT_SIZE (`head_size`), REPORT_RESERVED, REPORT_VALUE.
 
 | Code | Name | Side | Check |
 | --- | --- | --- | --- |
@@ -375,7 +386,7 @@ the wrapper's runtime steps; no pure check returns them.
 | 91 | `REPORT_MAGIC` | --R | the magic is not `SNAPBRPT` |
 | 92 | `REPORT_VERSION` | --R | the version is not 1 |
 | 93 | `REPORT_RESERVED` | --R | a byte of page 0 after the head is nonzero |
-| 94 | `REPORT_VALUE` | --R | an unknown stage, refusal or verdict code; counters out of order; a policy bit; more than 30 lines; a refusal recorded after the monitor was entered |
+| 94 | `REPORT_VALUE` | --R | an unknown stage, refusal or verdict code; `chunks_copied` or `chunks_hashed` over `chunks_total`, or `chunks_total` over 1024; a policy bit; more than 30 lines; a refusal with stage MONITOR_RETURNED or DONE, `(refusal && stage > SP11SB_STAGE_MONITOR_ENTERED)`[probes/sp11-stick-bundle.h:755] (a refusal that carries MONITOR_ENTERED itself is accepted; no tick or byte counter is checked) |
 
 ## 9. Versioning
 
@@ -414,9 +425,9 @@ only the runner's current behaviour (VERIFIED, not promised) keeps for SNAPREP. 
 
 | Work item | Left to do with this interface |
 | --- | --- |
-| 3 builder | build PIN.DAT and GUEST.DAT with `tools/sp11_stick_bundle.py`: classify `xnuboot.build()`'s chunks into kinds, pad and order them, pin the digests and the placement from `xnuboot.place()`; take the facts from the dump and refuse a disagreement; write REPORT.DAT and the manifest (5 files); cross-check the PARAMS chunk's `mem_low` and `mem_high` against the placement; U9 needs the Mac's kernelcache |
-| 4 wrapper, reporter | call the checks in the order of section 8 and write the stage between them; copy with cache maintenance; the guarded probe of the placement; the GIC; the call; the head; the reporter's lines within 30 and 40; the `SNAP_SP11_STICK` sources through the `OPTIONAL` table; no `memcpy` or `memset` call (the header compiles without any) |
-| 6 authorisation | the record whose digest PIN.DAT pins; the store classes; the digests of the two payloads |
+| 3 builder | BUILT for the synthetic path: `tools/sp11_stick_bundle_build.py` builds PIN.DAT, GUEST.DAT, REPORT.DAT and the manifest with this interface, takes the facts from the dumps and refuses a disagreement ([SP11-STICK-BUILD.md](SP11-STICK-BUILD.md)). Left: the `real` path (`xnuboot.build()`'s chunks from the Mac's kernelcache, U9) and a boot-ready descriptor |
+| 4 wrapper, reporter | BUILT for the dry run (`probes/sp11-stick-*`, [SP11-STICK-WRAPPER.md](SP11-STICK-WRAPPER.md)): the checks in the order of section 8 with the stage written between them, the copy with cache maintenance, the guarded probe of the placement, the reporter's lines. Left (4b): the GIC, the monitor call, the head's remaining stages, and the `SNAP_SP11_STICK` sources through the `OPTIONAL` table; no `memcpy` or `memset` call: the header compiles without any, but `= {0}` or a by-value copy of one of its structures can compile to one even under `-ffreestanding` (with the monitor's flags clang calls `memcpy` for a copy of the 296-byte report head and `memset` for its `= {0}`; GCC does so for the environment structure too), so freestanding code initialises and stores such structures word by word, as the wrapper does |
+| 6 authorisation | the record whose digest PIN.DAT pins; the store classes; the digests of the two payloads (`authorisation-template` prints it, with an optional note that is part of the digest: SP11-STICK-BUILD.md section 6) |
 | 7 dry run | the hash policy from the measured throughput (U6); where `AllocateAnyPages` puts GUEST.DAT; that REPORT.DAT is readable by SNAPREP after the wrapper returns |
 
 ## 13. Checking this note
@@ -424,3 +435,7 @@ only the runner's current behaviour (VERIFIED, not promised) keeps for SNAPREP. 
 `python3 tools/test-sp11-stick-bundle.py` builds the harness with AddressSanitizer and UndefinedBehaviorSanitizer and holds both implementations to the same bytes: the layout of every record, every constant and the refusal table; more than 30 seeded
 bad records, each refused with the same code by the C and the Python checks; deterministic single-bit mutations of every record; SHA-256 against `hashlib` and, with `Q1N1_SP11_TREE` (or a checkout the test finds), the runner's own `sha256.c`
 and constants; a freestanding compile with the monitor's flags that needs no libc and no absolute pointer; and this note's tables and citations. Without clang the native tests SKIP; without a q1n1 checkout the runner comparisons SKIP.
+
+`python3 tools/test-sp11-stick-bundle-edges.py` adds the boundaries, each case through the same harness and the Python checks: every limit at, one below and one above (a file of 256 MiB, 1024 chunks, a 192 MiB guest, an end at 2^36, the INTID, T0SZ and TG0 bounds, 1024 map
+descriptors); the wrap guards of the placement sums; a hand-built GUEST.DAT whose table digest is right and whose entries point past the end of the file, which the digest step must refuse without reading outside it; a sparse 256 MiB GUEST.DAT; the order of section 8 as pairs of
+faults; and the bound of `unpack_guest`, which refuses a hostile `entry_count` before it loops.

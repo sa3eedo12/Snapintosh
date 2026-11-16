@@ -8,7 +8,8 @@
  *   harness batch  < scenarios     one verdict line per RUN
  *   harness fuzz   < scenario      deterministic single-bit mutations of one blob, one line each
  *
- * A scenario is text, one command per line; blobs are hex, "-" for a null pointer and "=" for an empty blob. Every blob is
+ * A scenario is text, one command per line; blobs are hex, "-" for a null pointer and "=" for an empty blob; "hex+count" is the bytes
+ * followed by count (hex) zero bytes, so a 256 MiB GUEST.DAT needs no 512 MiB of text. Every blob is
  * copied into a heap block of exactly its length (a path into exactly 256 bytes, like the runner's table), so
  * AddressSanitizer reports any read past what a check was told it may read.
  *   BEGIN name | ARGS magic version size | FILE path base size | OBS <19 hex words> | PIN b | GUEST b | REPORT b |
@@ -210,14 +211,17 @@ static void scenario_reset(struct scenario *s)
 static int hexval(int c) { return isdigit(c) ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1; }
 static void blob_set(struct blob *b, const char *text)
 {
-    size_t len = strlen(text), i;
+    const char *plus = strchr(text, '+');
+    size_t len = plus ? (size_t)(plus - text) : strlen(text), i;
+    uint64_t zeros = plus ? strtoull(plus + 1, NULL, 16) : 0;
     blob_free(b);
     if (!strcmp(text, "-")) return;
-    if (!strcmp(text, "=")) { b->p = malloc(1); return; }
+    if (!strcmp(text, "=")) { b->p = malloc(0); return; }
     if (len % 2) { fprintf(stderr, "odd hex length\n"); exit(2); }
-    b->n = len / 2;
-    b->p = malloc(b->n);
-    for (i = 0; i < b->n; i++) {
+    b->n = len / 2 + zeros;
+    b->p = b->n ? calloc((size_t)b->n, 1) : malloc(0);
+    if (!b->p) { fprintf(stderr, "no memory for %llu bytes\n", (unsigned long long)b->n); exit(2); }
+    for (i = 0; i < len / 2; i++) {
         int hi = hexval(text[2 * i]), lo = hexval(text[2 * i + 1]);
         if (hi < 0 || lo < 0) { fprintf(stderr, "bad hex\n"); exit(2); }
         b->p[i] = (uint8_t)(hi << 4 | lo);

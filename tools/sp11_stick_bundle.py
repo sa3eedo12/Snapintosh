@@ -112,6 +112,14 @@ def error_name(code):
     return _NAME.get(code, 'UNKNOWN')
 
 
+class Refusal(ValueError):
+    """A record that is refused before a parser can read it safely; `code` is the refusal code the C checks give for the same bytes."""
+
+    def __init__(self, code):
+        super().__init__(f'{error_name(code)} ({code})')
+        self.code = code
+
+
 # name, offset, width, kind: s bytes, I u32, Q u64, H u16. Arrays of structures are one 's' member; their elements are below.
 PIN_LAYOUT = (
     ('magic', 0x000, 8, 's'), ('version', 0x008, 4, 'I'), ('size', 0x00C, 4, 'I'), ('flags', 0x010, 4, 'I'),
@@ -276,10 +284,16 @@ def unpack(buf, layout):
 
 
 def unpack_guest(buf):
-    """(head, [chunk, ...]) as dicts; no validation."""
+    """(head, [chunk, ...]) as dicts. Only the table is bounded, before an entry is read and as sp11sb_guest_head_check bounds it: a buffer
+    under the 128-byte head raises Refusal(GUEST_TRUNCATED); an entry_count of 0, over CHUNKS_MAX or whose table does not fit the buffer
+    raises Refusal(GUEST_COUNT), so a hostile head costs no loop. Nothing else is validated."""
+    if len(buf) < GUEST_HEAD_BYTES:
+        raise Refusal(E.GUEST_TRUNCATED)
     head = unpack(buf, GUEST_LAYOUT)
-    return head, [unpack(buf[GUEST_HEAD_BYTES + CHUNK_BYTES * i:GUEST_HEAD_BYTES + CHUNK_BYTES * (i + 1)], CHUNK_LAYOUT)
-                  for i in range(head['entry_count'])]
+    count = head['entry_count']
+    if not 1 <= count <= CHUNKS_MAX or GUEST_HEAD_BYTES + CHUNK_BYTES * count > len(buf):
+        raise Refusal(E.GUEST_COUNT)
+    return head, [unpack(buf[GUEST_HEAD_BYTES + CHUNK_BYTES * i:GUEST_HEAD_BYTES + CHUNK_BYTES * (i + 1)], CHUNK_LAYOUT) for i in range(count)]
 
 
 # ---- Checks: the same order as the header --------------------------------------------------------------------------
