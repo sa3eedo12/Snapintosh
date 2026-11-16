@@ -6,7 +6,7 @@
     sp11_stick_bundle_build.py place-check  --base A --guest-mib N [--reserve-mib N] [--facts F] [--dump DIR ...] [--declared BASE:SIZE ...]
     sp11_stick_bundle_build.py synthetic    --out DIR ...     a complete bundle from deterministic filler: no Apple material
     sp11_stick_bundle_build.py authorisation-template synthetic|real [--note FILE] ...    the record the operator approves, on stdout
-    sp11_stick_bundle_build.py real         --kernelcache K ...   NOT RUN: no kernelcache exists on the machine this was written on
+    sp11_stick_bundle_build.py real         --kernelcache K ...   the same from a kernelcache (docs/SP11-STICK-REAL.md): EXPERIMENTAL, host only
 
 The bundle is the five files of docs/SP11-STICK-BUNDLE.md, q1n1's PAYLOAD.MAN and, with --base-tree, a stage tree that the stager verifies.
 A refusal prints `REFUSED=<NAME>` and exits 1: the interface's name (tools/sp11_stick_bundle.py) where it has one, else BUILDER_REFUSALS.
@@ -38,7 +38,7 @@ NAMES = ('SNAPMON.BIN', 'SNAPREP.BIN', 'GUEST.DAT', 'PIN.DAT', 'REPORT.DAT')
 SLBOUNCE, RUNNER = 'SLBOUNCE-DEVHE-MARK.EFI', 'Q1N1-PAYLOAD.EFI'
 STEP = f'{SLBOUNCE} {RUNNER} --el2'
 FACTS_FORMAT, REPORT_NAME = 'sp11-bundle-facts-1', 'build-report.json'
-AFFINITY = 0xFF00FFFFFF     # Aff3:Aff2:Aff1:Aff0 of MPIDR_EL1, the part ACPI states
+AFFINITY = ch.AFFINITY      # Aff3:Aff2:Aff1:Aff0 of MPIDR_EL1, the part ACPI states
 GICR_STRIDE = {3: 0x20000, 4: 0x40000}
 STORES = {'ram': sb.STORE_RAM, 'el2_sysreg': sb.STORE_EL2_SYSREG, 'gic': sb.STORE_GIC}
 TAGS = {'EL2_UNREACHABLE': 1, 'DEVICE_OWNED': 2, 'OPERATOR': 3}
@@ -487,49 +487,12 @@ def descriptor_digest(a, facts, kind):
         bd.require_boot_ready(board)
     except (bd.BoardDescriptorError, UnicodeDecodeError) as error:
         raise Refused('DESCRIPTOR_NOT_READY', str(error)) from None
-    bad = [n for n, want in (('gicd_base', board.gicd[0]), ('gicr_first', board.gicr[0]), ('gicr_stride', board.gicr[1]), ('gicr_limit', board.gicr[0] + board.gicr[2]),
-                             ('its_base', board.its[1] if board.its[0] else 0), ('cntfrq_hz', board.timer_hz), ('timer_intid', board.timer_ppi[3])) if facts[n] != want]
-    if any(not any(v & mask == mid & mask for mid, mask in board.midr) for v in facts['midr']):
-        bad.append('midr')
-    if facts['boot_mpidr'] & AFFINITY not in board.mpidrs:
-        bad.append('boot_mpidr')
-    if bad:
+    if bad := ch.descriptor_mismatches(board, facts):
         raise Refused('FACTS_DISAGREE', f'the facts disagree with the descriptor on {bad}')
     return hashlib.sha256(data).digest(), 'boot-ready'
 
 
-def place_layout(xb, place):
-    try:
-        xb.place(place['guest_base'], place['guest_size'] + place['reserve_size'], guest_span=place['guest_size'])
-    except (ValueError, SystemExit) as error:       # the loader's own rule: the large layout needs 232 MiB for the image and its tables
-        raise Refused('PLACE_LAYOUT', str(error)) from None
-
-
-def real_built(a, xb, place, facts):
-    """NOT RUN: no kernelcache exists on the machine this was written on. probes/run.py's sequence, with the choices as arguments."""
-    stale = sorted(k for k in os.environ if k.startswith('SNAP_'))
-    if stale:
-        raise Refused('ENV_SNAP_SET', f'{stale}: the build reads SNAP_* variables, so an inherited one would change the guest: unset them')
-    if not Path(a.kernelcache).is_file():
-        raise Refused('KERNELCACHE_MISSING', 'the kernelcache is Apple material: it is read from a local path and never committed')
-    xb.configure_guest()
-    xb.configure_txm_arena()
-    xb.configure_adreno_va_wide()
-    xb.HOST_TIMEBASE_HZ = facts['cntfrq_hz']
-    place_layout(xb, place)
-    xb.FRAMEBUFFER = None if a.panel == 'withheld' else (facts['fb_base'], facts['fb_width'], facts['fb_height'], facts['fb_stride'] * 4, 32)
-    env = {'SNAP_NATIVE_CALLS': '1', 'SNAP_SPTM_HVC_CALLS': str(a.sptm_hvc_calls)}
-    os.environ.update(env)
-    try:
-        built = xb.build(str(a.kernelcache))
-    except (OSError, ValueError, SystemExit) as error:
-        raise Refused('BUILT_SHAPE', f'probes/xnuboot.py build() refused: {error}') from None
-    finally:
-        for key in env:
-            os.environ.pop(key, None)
-    built['watchdog'] = a.time_box_s
-    built['chunks'][xb.PARAMS_PA] = xb.params_blob(built)       # run.py serialises the parameters once more, after its run-time overrides
-    return built
+place_layout, real_built = ch.place_layout, ch.real_built       # the real `built` is made beside the synthetic one (tools/sp11_stick_bundle_chunks.py)
 
 
 def stores_of(text):
@@ -594,11 +557,13 @@ def prepare(a, kind, before_filler=None):
     if before_filler:
         before_filler()
     xb = xnuboot()
+    real = None
     if kind == 'synthetic':
         place_layout(xb, place)
         built = ch.synthetic_built(xb, int(a.image_mib * MIB), int(a.tables_mib * MIB), int(a.sptm_data_mib * MIB), a.seed, a.time_box_s)
     else:
         built = real_built(a, xb, place, facts)
+        real = dict(kernelcache_sha256=sha(built['image'].data), guest_profile=built['guest_profile'], panel=a.panel, sptm_hvc_calls=a.sptm_hvc_calls, seed=a.seed)
     lay = ch.layout_of(xb)
     chunks = ch.chunks_from_built(built, lay)
     guest = ch.guest_from_chunks(place, chunks)
@@ -610,7 +575,7 @@ def prepare(a, kind, before_filler=None):
                               reporter=(len(reporter), sha(reporter)), note=note,
                               guest=dict(size=len(guest), sha256=sha(guest), chunks=len(table), index=head['index_sha256'].hex())))
     return dict(facts=facts, dumps=dumps, place=place, stores=stores, descriptor=descriptor, state=state, monitor=monitor, reporter=reporter,
-                guest=guest, maps=maps, lines=lines, record=record, declared=declared)
+                guest=guest, maps=maps, lines=lines, record=record, declared=declared, real=real)
 
 
 def finish(p, digest):
@@ -699,7 +664,8 @@ def report_of(a, kind, p, files, digest, manifest, staged):
         facts_sha256=p['facts']['sha256'], dumps=[d.name for d in p['dumps']], maps=[dict(dump=n, descriptors=c, result=sb.error_name(code)) for n, c, code in p['maps']],
         checked=['facts against every dump', 'placement against every map', 'PIN.DAT and GUEST.DAT (structure, table, chunk and file digests) by the interface checks',
                  'PARAMS memory range and watchdog', 'file count, roles and sizes'],
-        not_run=['the wrapper and the reporter (work item 4)', 'any hardware'] + (['the kernelcache path'] if kind == 'synthetic' else []))
+        not_run=['the wrapper and the reporter (work item 4)', 'any hardware'] + (['the kernelcache path'] if kind == 'synthetic' else []),
+        **({'real': p['real']} if p['real'] else {}))
 
 
 def build(a, kind):
@@ -753,6 +719,7 @@ def build_opts(p, kind, template=False):
         p.add_argument('--kernelcache', required=True)
         p.add_argument('--panel', choices=('handed', 'withheld'), required=True, help='D9: SNAP_NO_FB')
         p.add_argument('--sptm-hvc-calls', choices=(0, 1), type=int, required=True, help='D9: the SPTM HVC kernel patch')
+        p.add_argument('--seed', default='sp11-stick-bundle', help='label of the guest\'s boot random seed (SNAP_SEED): the same label, the same bytes')
     if not template:
         for flag, kw in (('--out', dict(required=True)), ('--force', dict(action='store_true')), ('--allow-under', dict(action='append', default=[])),
                          ('--authorisation', dict(help='the approved record')), ('--authorisation-sha256', dict()),
