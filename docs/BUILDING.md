@@ -29,8 +29,26 @@ python3 tools/extract-firmware.py downloads/UniversalMac_27.0_26A428_Restore.ips
 `fetch-ipsw.py` resumes interrupted downloads. `extract-firmware.py` reads
 `BuildManifest.plist`, picks the `j700ap` identity, and unwraps its kernelcache,
 device tree, TXM, iBoot and SEP images into `downloads/extracted/j700ap/`
-(`--output` to change it). Every later step is pinned against these exact
+(`--out` to change it). Every later step is pinned against these exact
 images.
+
+The 25 GB image need not be stored. Given an `https://` URL instead of a path,
+`extract-firmware.py` reads the archive in place with HTTP Range requests
+(`tools/ipsw_remote.py`, standard library only) and fetches only the zip's
+central directory, `BuildManifest.plist` and the boot-set members, under a
+hard cap (`--max-fetch-mib`, default 1024); `--dry-run` fetches only the first
+two and prints what the members would cost:
+
+```sh
+python3 tools/extract-firmware.py <ipsw-url> j700ap --dry-run   # lists the members and the bytes they cost; extracts nothing
+python3 tools/extract-firmware.py <ipsw-url> j700ap
+python3 tools/test-ipsw-remote.py                                # host tests, no network
+```
+
+Any doubt is a refusal: a server that ignores Range, an object that changes
+between requests, a redirect that is not https, a plan over the cap. Whether
+Apple's CDN honours Range is INFERRED from `fetch-ipsw.py`'s resumes; the real
+CDN has not been contacted by these tools. The local-path form behaves as before.
 
 Install the 26A428 KDK from Apple's developer downloads.
 
@@ -297,6 +315,7 @@ python3 tools/test-sp11-m1-profile.py           # the M1 monitor profile: pinned
 python3 tools/test-sp11-stick-bundle.py         # the stick bundle interface (SP11-STICK-BUNDLE.md): C and Python validators, refusal codes, seeded bad records (ASan/UBSan; needs clang; Q1N1_SP11_TREE=<q1n1 checkout> adds the runner-header comparisons)
 python3 tools/test-sp11-stick-bundle-build.py   # the bundle builder (SP11-STICK-BUILD.md): synthetic bundles, every refusal, determinism (needs a q1n1 checkout through Q1N1_SP11_TREE, 3 tests SKIP without one; SP11_BUILD_SKIP_SLOW=1 skips the build at realistic sizes)
 python3 tools/test-sp11-stick-bundle-record.py  # the builder's authorisation record: its note and the store-class lines (SP11-STICK-BUILD.md section 6; needs no q1n1 checkout)
+python3 tools/test-ipsw-remote.py               # extract-firmware.py over HTTP Range requests: a fake transport and a loopback server, no network
 python3 tools/test-sp11-stick-wrapper.py        # the stick wrapper and reporter (SP11-STICK-WRAPPER.md): the real sources on a fake machine (ASan/UBSan), the dry run, the copy and its faults, the reporter, seeded-bad wrappers (needs clang and a q1n1 checkout through Q1N1_SP11_TREE, SKIP without; SP11_WRAPPER_SKIP_SLOW=1 skips the default-size bundle)
 python3 tools/test-sp11-stick-wrapper-refusals.py  # the same harness: every damaged bundle refused with its code at its stage (the shared checks are tools/sp11_stick_wrapper_checks.py)
 python3 tools/test-sp11-stick-wrapper-build.py  # the wrapper's build tool (tools/sp11_stick_wrapper_build.py), the instructions in its two binaries, the default-off gate, file hygiene and the note (needs clang, ld.lld, the llvm tools and a q1n1 checkout)
