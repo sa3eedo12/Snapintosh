@@ -12,8 +12,28 @@ device tree, iBoot and SEP, and those are what come out.
 
 Each component is unwrapped from its IM4P container and decompressed if it was
 compressed, so what lands on disk is the raw image a loader would place in DRAM.
+
+The IPSW may also be an https:// URL, read in place with HTTP Range requests
+(tools/ipsw_remote.py) so the 25 GB image is never stored. Only the zip's central
+directory, BuildManifest.plist and the components above are fetched: a few hundred
+MB, in whole 1 MiB blocks. Run --dry-run first. It fetches just the central
+directory and the manifest, prints every member it would read with its size and the
+bytes that will cost, and extracts nothing.
+
+    tools/extract-firmware.py --dry-run <https url of the IPSW> j700ap
+    tools/extract-firmware.py <https url of the IPSW> j700ap --max-fetch-mib 512
+
+A URL run prints that plan before it extracts, refuses with exit status 2 when the
+plan would fetch more than --max-fetch-mib (default 1024), and ends with the
+requests and bytes it used. Without --out it writes downloads/extracted/<board>
+under the repository root, not next to a URL; a local file is handled as before,
+including its default output directory beside the IPSW. Only https is followed.
+Nothing here chooses a URL or contacts Apple by itself: whether to fetch Apple's
+public restore image is the operator's decision, and how its CDN answers Range
+requests is unverified until a first --dry-run.
 """
 import argparse
+import importlib.util
 import pathlib
 import plistlib
 import struct
@@ -112,37 +132,51 @@ def identify(blob: bytes) -> str:
     return 'raw'
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('ipsw')
-    ap.add_argument('board', help='device class, e.g. j700ap')
-    ap.add_argument('--out', default=None,
-                    help='output directory (default downloads/extracted/<board>)')
-    args = ap.parse_args()
+def is_url(text):
+    return text.lower().startswith(('http://', 'https://'))
 
-    ipsw = pathlib.Path(args.ipsw)
-    out = pathlib.Path(args.out) if args.out else \
-        ipsw.parent / 'extracted' / args.board
-    out.mkdir(parents=True, exist_ok=True)
 
-    zf = zipfile.ZipFile(ipsw)
-    manifest = plistlib.loads(zf.read('BuildManifest.plist'))
+def repo_root():
+    return pathlib.Path(__file__).resolve().parents[1]
+
+
+def load_remote():
+    """tools/ipsw_remote.py, imported only when an IPSW is a URL.
+
+    Loaded by path, and shared through sys.modules, so that tools which import
+    this file by path (extract-root-hash.py, cycle_lib) need nothing else on
+    sys.path and see one set of exception classes.
+    """
+    module = sys.modules.get('ipsw_remote')
+    if module is None:
+        spec = importlib.util.spec_from_file_location(
+            'ipsw_remote', pathlib.Path(__file__).resolve().with_name('ipsw_remote.py'))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules['ipsw_remote'] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            del sys.modules['ipsw_remote']
+            raise
+    return module
+
+
+def find_identity(manifest, board):
     identity = next((i for i in manifest['BuildIdentities']
-                     if i.get('Info', {}).get('DeviceClass') == args.board
+                     if i.get('Info', {}).get('DeviceClass') == board
                      and i.get('Info', {}).get('RestoreBehavior') == 'Erase'), None)
     if identity is None:
         classes = sorted({i.get('Info', {}).get('DeviceClass', '?')
                           for i in manifest['BuildIdentities']})
-        raise SystemExit(f'no Erase identity for {args.board}. Boards: {" ".join(classes)}')
+        raise SystemExit(f'no Erase identity for {board}. Boards: {" ".join(classes)}')
+    return identity
 
-    chip = identity.get('ApChipID', '?')
-    print(f'{args.board}: ApChipID {chip}, ApBoardID {identity.get("ApBoardID", "?")}, '
-          f'build {manifest.get("ProductBuildVersion", "?")}')
 
+def components(identity, names, chip):
+    """Component name -> member path for everything this tool extracts."""
     # SPTM is named per SoC and is not always listed in the identity's manifest,
     # so it is resolved from the chip ID against what the IPSW actually carries.
     soc = f't{int(str(chip), 16):x}' if str(chip).startswith('0x') else None
-    names = zf.namelist()
     extra = {}
     if soc:
         for entry in names:
@@ -157,7 +191,11 @@ def main():
         if path:
             todo[key] = path
     todo.update(extra)
+    return todo
 
+
+def extract_components(zf, todo, names, out):
+    """Unwrap, decompress and write each component: the one extraction path for a file and a URL."""
     for key, path in todo.items():
         if path not in names:
             print(f'  {key:<28} MISSING ({path})')
@@ -171,8 +209,116 @@ def main():
         target.write_bytes(blob)
         print(f'  {key:<28} {target.name:<34} {len(blob):>12,}  {identify(blob)}')
 
+
+def print_plan(zf, todo, names, remote):
+    """List the members that will be read; for a URL also what that costs.
+
+    Returns the bytes a URL run will have fetched once it has read them (the
+    bytes already fetched plus the whole blocks still missing), None for a file.
+    """
+    print('plan: members to read (compressed bytes in the archive)')
+    total, spans = 0, []
+    for key, path in todo.items():
+        if path not in names:
+            print(f'  {key:<28} {"MISSING":>14}  {path}')
+            continue
+        info = zf.getinfo(path)
+        total += info.compress_size
+        print(f'  {key:<28} {info.compress_size:>14,}  {path}')
+        if remote is not None:
+            spans.append(load_remote().member_span(info))
+    print(f'  {"total":<28} {total:>14,}')
+    if remote is None:
+        return None
+    later = remote.bytes_to_fetch(spans)
+    projected = remote.bytes_fetched + later
+    print(f'remote archive of {remote.size:,} bytes; so far {remote.bytes_fetched:,} bytes fetched in '
+          f'{remote.requests} requests (first block, central directory, BuildManifest.plist)')
+    print(f'  the members need {later:,} more bytes, in whole blocks of {remote.block_size:,}')
+    # A local header's extra field can be longer than its directory entry's, which moves a member's end by a few bytes.
+    print(f'  total fetch {projected:,} bytes = {100 * projected / remote.size:.2f}% of the archive, '
+          f'give or take one block per member; cap {remote.max_fetch:,} bytes')
+    return projected
+
+
+def extract(args, remote):
+    """Everything after argument parsing; remote is an open ipsw_remote.RangeFile or None for a file."""
+    if remote is None:
+        ipsw = pathlib.Path(args.ipsw)
+        out = pathlib.Path(args.out) if args.out else \
+            ipsw.parent / 'extracted' / args.board
+        if not args.dry_run:
+            out.mkdir(parents=True, exist_ok=True)
+        zf = zipfile.ZipFile(ipsw)
+    else:
+        out = pathlib.Path(args.out) if args.out else \
+            repo_root() / 'downloads' / 'extracted' / args.board
+        zf = load_remote().open_zip(remote)
+    manifest = plistlib.loads(zf.read('BuildManifest.plist'))
+    identity = find_identity(manifest, args.board)
+
+    chip = identity.get('ApChipID', '?')
+    print(f'{args.board}: ApChipID {chip}, ApBoardID {identity.get("ApBoardID", "?")}, '
+          f'build {manifest.get("ProductBuildVersion", "?")}')
+
+    names = zf.namelist()
+    todo = components(identity, names, chip)
+    if args.dry_run or remote is not None:
+        projected = print_plan(zf, todo, names, remote)
+        if remote is not None and projected > remote.max_fetch:
+            print(f'refused: the plan fetches {projected:,} bytes, over the --max-fetch-mib cap of '
+                  f'{remote.max_fetch:,} bytes; nothing was extracted', file=sys.stderr)
+            return 2
+        if args.dry_run:
+            print('dry run: nothing extracted')
+            return 0
+
+    out.mkdir(parents=True, exist_ok=True)
+    extract_components(zf, todo, names, out)
+
     print(f'\n{len(todo)} components in {out}')
+    if remote is not None:
+        print(f'remote: {remote.summary()}')
     return 0
+
+
+def main(argv=None, remote_factory=None):
+    """remote_factory(url, max_fetch=bytes) replaces ipsw_remote.RangeFile; tests use it to supply a transport."""
+    ap = argparse.ArgumentParser()
+    ap.add_argument('ipsw', help='the restore IPSW: a path, or an https:// URL read in place with Range requests')
+    ap.add_argument('board', help='device class, e.g. j700ap')
+    ap.add_argument('--out', default=None,
+                    help='output directory (default downloads/extracted/<board>)')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='print the members that would be read (and what a URL would fetch), extract nothing')
+    ap.add_argument('--max-fetch-mib', type=int, default=None,
+                    help='URL only: refuse to fetch more than this many MiB in total (default 1024)')
+    args = ap.parse_args(argv)
+
+    if not is_url(args.ipsw):
+        if args.max_fetch_mib is not None:
+            ap.error('--max-fetch-mib applies only to an http(s):// IPSW')
+        return extract(args, None)
+
+    if args.max_fetch_mib is not None and args.max_fetch_mib < 1:
+        ap.error('--max-fetch-mib must be at least 1')
+    ipsw_remote = load_remote()
+    cap = args.max_fetch_mib << 20 if args.max_fetch_mib else ipsw_remote.DEFAULT_MAX_FETCH
+    remote = None
+    try:
+        remote = (remote_factory or ipsw_remote.RangeFile)(args.ipsw, max_fetch=cap)
+        return extract(args, remote)
+    except ipsw_remote.FetchCapExceededError as error:
+        refusal, code = error, 2
+    except (ipsw_remote.RemoteZipError, zipfile.BadZipFile) as error:
+        refusal, code = error, 1
+    finally:
+        if remote is not None:
+            remote.close()
+    print(f'refused: {refusal}', file=sys.stderr)
+    if remote is not None:
+        print(f'remote: {remote.summary()}', file=sys.stderr)
+    return code
 
 
 if __name__ == '__main__':
