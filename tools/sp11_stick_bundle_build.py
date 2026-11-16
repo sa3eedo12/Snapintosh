@@ -35,6 +35,7 @@ import sp11_stick_bundle as sb  # noqa: E402
 import sp11_stick_bundle_chunks as ch  # noqa: E402
 import sp11_stick_bundle_m1 as m1  # noqa: E402
 import sp11_stick_bundle_record as rec  # noqa: E402
+import sp11_stick_bundle_record_gic as gq  # noqa: E402
 
 Refused = ch.Refused
 MIB = sb.MIB
@@ -494,6 +495,8 @@ def prepare(a, kind, before_filler=None):
     gic_stop = getattr(a, 'gic_stop', False)
     if gic_stop and not stores & sb.STORE_GIC:
         raise Refused('OPTIONS_BAD', '--gic-stop is the record of the GIC and stop dry run, which stores in the gic class: --stores must include gic')
+    gic_quarantine = getattr(a, 'gic_quarantine', False)
+    gq.check_options(gic_stop, gic_quarantine)
     m1_path = getattr(a, 'm1_run', None)
     if m1_path is not None:         # an empty path is the kind with a file that cannot be read, never the other kind
         m1.check_options(stores, gic_stop, a.time_box_s)
@@ -502,6 +505,7 @@ def prepare(a, kind, before_filler=None):
     m1.refuse_monitor_reporter(reporter)        # every kind, the M1 kind too: the reporter slot is executed in the same boot
     if m1_path is None:
         m1.refuse_monitor_wrapper(monitor)
+        gq.check_wrapper(monitor, gic_quarantine, bool(stores & sb.STORE_GIC))
     m1_facts = m1.read_report(read_m1_report(m1_path), monitor, reporter) if m1_path is not None else None
     declared = declared_ranges(a.declared)
     early = pack_pin(pin_fields(facts, place, stores, DUMMY, DUMMY, dict(guest_file_size=1024, guest_chunk_count=1, guest_file_sha256=DUMMY,
@@ -531,7 +535,7 @@ def prepare(a, kind, before_filler=None):
         m1.check_launch(chunks)
     head, table = sb.unpack_guest(guest)
     record = rec.record_text(dict(place=place, stores=stores, time_box_s=a.time_box_s, label=facts['build_label'], monitor=(len(monitor), sha(monitor)),
-                                  reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop, m1=m1_facts,
+                                  reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop, gic_quarantine=gic_quarantine, m1=m1_facts,
                                   guest=dict(size=len(guest), sha256=sha(guest), chunks=len(table), index=head['index_sha256'].hex()),
                                   real=real and dict(real, descriptor_sha256=descriptor.hex(), board_id=board.board_id, board_status=board.status,
                                                      ecam_windows=len(board.ecam))))
@@ -672,6 +676,7 @@ def build_opts(p, kind, template=False):
                      ('--reporter', dict(required=True, help='SNAPREP.BIN: payload 1, the reporter')),
                      ('--stores', dict(required=True, help='ram,el2_sysreg[,gic]: the store classes authorised (D4)')),
                      ('--gic-stop', dict(action='store_true', help='the record of the GIC and stop dry run (docs/SP11-STICK-GIC.md); needs gic in --stores')),
+                     (gq.OPTION, dict(action='store_true', help='with --gic-stop: the text for pass 5 of the stage, the quarantine; --monitor must be a pass 5 wrapper')),
                      ('--m1-run', dict(metavar='BUILD_REPORT', help='the record of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10): the build-report.json of '
                                                                    'tools/sp11_stick_wrapper_build.py --monitor, which made the SNAPMON-M1.BIN and SNAPREP-M1.BIN given '
                                                                    'as --monitor and --reporter; needs ram, el2_sysreg and gic in --stores and a time box of 1 to 5 s')),

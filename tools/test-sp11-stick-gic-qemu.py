@@ -6,7 +6,7 @@
     python3 tools/test-sp11-stick-gic-qemu.py
 
 The REAL runner (q1n1's Q1N1-PAYLOAD.EFI), the REAL GIC and stop wrapper and reporter (tools/sp11_stick_wrapper_build.py --gic, with QEMU's
-GIC bases as the five macros that PIN.DAT is compared with) and a small synthetic bundle (tools/sp11_stick_bundle_build.py synthetic --gic-stop,
+GIC bases as the five macros that PIN.DAT is compared with) and a small synthetic bundle (tools/sp11_stick_bundle_build.py synthetic --gic-stop --gic-quarantine,
 whose facts are those of this QEMU: MIDR, MPIDR, CNTFRQ, the framebuffer, a GICv3 with one redistributor frame at 0x080A0000) are laid out as the
 stick is laid out and booted with the machinery of tools/test-sp11-stick-wrapper-qemu.py (imported, not copied), which in turn imports q1n1's
 own harness. Cases: (1) the happy path: the wrapper reads the GIC, announces its first store and waits eight seconds, stores, arms the EL2
@@ -93,7 +93,7 @@ class GicQemu(base.WrapperQemu):
         facts_path = T.write(root / 'facts.json', json.dumps(facts).encode())
         opts = ['--facts', facts_path, '--base', hex(placement), '--guest-mib', str(base.GUEST_MIB), '--monitor', str(BUILD / 'units' / 'SNAPMON-GIC.BIN'),
                 '--reporter', str(BUILD / 'units' / 'SNAPREP-GIC.BIN'), '--stores', 'ram,el2_sysreg,gic' if gic else 'ram,el2_sysreg', '--time-box-s', '5',
-                '--image-mib', '8', '--tables-mib', '1', '--sptm-data-mib', '4', '--dump', str(dump), *(['--gic-stop'] if gic else [])]
+                '--image-mib', '8', '--tables-mib', '1', '--sptm-data-mib', '4', '--dump', str(dump), *(['--gic-stop', '--gic-quarantine'] if gic else [])]
         code, text, err = T.run_builder(['authorisation-template', 'synthetic', *opts])
         assert code == 0, (text, err)
         record = T.write(root / 'authorisation.txt', text.encode())

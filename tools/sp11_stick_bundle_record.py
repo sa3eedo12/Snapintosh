@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sp11_stick_bundle as sb  # noqa: E402
 import sp11_stick_bundle_chunks as ch  # noqa: E402
+import sp11_stick_bundle_record_gic as gq  # noqa: E402
 
 ch.KNOWN_REFUSALS.add('NOTE_BAD')       # the builder lists it among its own refusals too
 MIB = sb.MIB
@@ -308,9 +309,11 @@ def record_text(r):
     (the interface's placement), stores (the mask), time_box_s, label, monitor and reporter ((size, sha256)), guest (size, sha256, chunks,
     index), note (lines or None), gic_stop (the record of the GIC and stop dry run), m1 (None, else the facts of the monitor entry run that
     tools/sp11_stick_bundle_m1.py read_report returns: section 1b, the touches of M1_TOUCHES, section 4 with the time budget and two stop rules)
-    and real (None for a synthetic build, else real_lines' argument)."""
+    and real (None for a synthetic build, else real_lines' argument). gic_quarantine, with gic_stop, chooses the pass 5 text of
+    tools/sp11_stick_bundle_record_gic.py in place of GIC_STOP_TOUCHES."""
     p, g, m1 = r['place'], r['guest'], r.get('m1')
     assert not (m1 and r.get('gic_stop')), 'a record is of one kind'
+    assert not r.get('gic_quarantine') or r.get('gic_stop'), 'the pass 5 text is a variant of the GIC and stop record'
     lines = [
         f'SNAPINTOSH SP11 STICK BUNDLE - AUTHORISATION RECORD (format 1, label {r["label"]})', '',
         'Status: operator decision NOT RECORDED. Hardware: NOT RUN. This text is a template until the operator approves it.',
@@ -332,15 +335,17 @@ def record_text(r):
         f'work_base {p["work_base"]:#x}  work_size {p["work_size"] // MIB} MiB',
         f'   place_base {p["place_base"]:#x}  place_end {p["place_base"] + p["place_size"]:#x}  (limit 2^36)', '',
         f'3. Store classes authorised (PIN.DAT authorised_stores = {r["stores"]})']
-    touches = M1_TOUCHES if m1 else GIC_STOP_TOUCHES if r.get('gic_stop') else TOUCHES
+    touches = M1_TOUCHES if m1 else (gq.TOUCHES if r.get('gic_quarantine') else GIC_STOP_TOUCHES) if r.get('gic_stop') else TOUCHES
     if r.get('gic_stop'):
         lines.append('   Record of the GIC and stop dry run (docs/SP11-STICK-GIC.md): payload 0 is SNAPMON-GIC.BIN; no monitor is called.')
+        lines += gq.HEAD_LINES if r.get('gic_quarantine') else ()
     if m1:
         lines.append('   Record of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10): payload 0 is SNAPMON-M1.BIN.')
     for name in STORES:
         if r['stores'] & STORES[name]:
             first, *rest = touches[name]
             lines += [f'   {name}: {first}', *(f'      {line}' for line in rest)]
+    lines += gq.FACT_LINES if r.get('gic_quarantine') else ()
     lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.', '',
               *(m1_time_lines(r['time_box_s'], p) if m1 else
                 [f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.']), '',
