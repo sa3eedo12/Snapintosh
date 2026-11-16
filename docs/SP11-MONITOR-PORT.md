@@ -110,7 +110,7 @@ wrapper, loader, the monitor; the wrapper is WI 4); `SNAPREP.BIN` (payload 1: th
 **The host tool** (WI 3, EXPERIMENTAL, host only, hardware NOT RUN): `tools/sp11_stick_bundle_build.py` (`docs/SP11-STICK-BUILD.md`).
 `facts-check`, `place-check`, `synthetic` and `authorisation-template` run from a facts file and the local dumps; `real` RAN end to end on the
 J700 kernelcache (not a hardware result: `docs/SP11-STICK-REAL.md`), with a boot-ready `--descriptor`: the guest view of N2 (section 15), not the committed
-`config/boards/sp11.json`, which `is a template and is refused`[docs/SP11-STICK-BUILD.md:168]. U9 is answered. It reads the MADT itself (section 7), not through
+`config/boards/sp11.json`, which `is a template and is refused`[docs/SP11-STICK-BUILD.md:181]. U9 is answered. It reads the MADT itself (section 7), not through
 `from_hamoa`. `real` needs `pcie.ecam` non-null, not the adapter's MCFG equality.
 
 ## 5. Memory (Q3)

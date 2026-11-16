@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Tests for the authorisation record of tools/sp11_stick_bundle_build.py (docs/SP11-STICK-BUILD.md section 6): the optional note that is
-appended to it, so that the operator's approval covers it, and what its store-class lines say about the dry-run wrapper
-(docs/SP11-STICK-WRAPPER.md section 4).
+"""Tests for the authorisation record of tools/sp11_stick_bundle_build.py (docs/SP11-STICK-BUILD.md section 6): the text itself, which lives in
+tools/sp11_stick_bundle_record.py and must not change when it moves or when a real build's lines are added, the optional note that is appended
+to it, so that the operator's approval covers it, and what its store-class lines say about the dry-run wrapper (docs/SP11-STICK-WRAPPER.md
+section 4).
 
     python3 tools/test-sp11-stick-bundle-record.py
     Q1N1_SP11_TREE=/nonexistent python3 tools/test-sp11-stick-bundle-record.py      (no test here needs q1n1's manifest tool)
 
 The fixtures are those of tools/test-sp11-stick-bundle-build.py, which is at its size limit, loaded here with a scratch directory of its own
-(build/sp11-bundle-record-scratch/, deleted at the end) so that both files can run at the same time. No hardware: NOT RUN."""
+(build/sp11-bundle-record-scratch/, deleted at the end) so that both files can run at the same time. The lines a real build adds to the record
+are tested in tools/test-sp11-stick-bundle-real.py, which has the stand-in for the loader. No hardware: NOT RUN."""
 import importlib.util
 import os
 import sys
@@ -17,13 +19,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS, THIS = ROOT / 'tools', Path(__file__).resolve()
+RECORD, BUILDER, DOC = TOOLS / 'sp11_stick_bundle_record.py', TOOLS / 'sp11_stick_bundle_build.py', ROOT / 'docs' / 'SP11-STICK-BUILD.md'
+REAL_DOC = ROOT / 'docs' / 'SP11-STICK-REAL.md'
 sys.path.insert(0, str(TOOLS))
 spec = importlib.util.spec_from_file_location('sp11_stick_bundle_build_tests', TOOLS / 'test-sp11-stick-bundle-build.py')
 BT = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(BT)
+import sp11_stick_bundle_record as rec  # noqa: E402
+
+bb, sb = BT.bb, BT.sb
 SCRATCH = ROOT / 'build' / 'sp11-bundle-record-scratch'
 NOTE = ['DRY RUN NOTE: part of this record\'s digest.', '', '   an indented line and a trailing space ', 'SNAPMON.BIN is the wrapper of docs/SP11-STICK-WRAPPER.md.']
 SECTION = '\n6. Notes of this build (part of the digest)\n'
+# What the record of a synthetic build said before its text moved out of the builder: the SHA-256 of record_text for these fixed inputs, taken from
+# that text. The operator approves a record by its digest, so a changed byte is another record and an earlier approval stops matching.
+FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=3, time_box_s=5, label='DRYRUN-A', monitor=(35164, '1' * 64), reporter=(21076, '2' * 64),
+             note=None, gic_stop=False, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
+BEFORE_THE_MOVE = {
+    'the plain record': (dict(), '269d1cc7090d64b349288ec4d8076431b80077fdb97574d9df97a80d53467f37'),
+    'the gic class': (dict(stores=7), '0b8bd0fa75d14a929efb2a090efd09d1579058004e3588171fbc363e5af3d664'),
+    'the gic and stop dry run': (dict(stores=7, gic_stop=True), '018b1bb55c188253896812146b5f014cb52770630531b0ef9618008eafc4f896'),
+    'a note': (dict(note=['a note', '', 'its third line']), '0a68164d4a9995da8ba75d6695f7ab269523ad8803b66690284d42ef3103831a')}
 
 
 def setUpModule():
@@ -98,11 +114,37 @@ class Record(BT.Case):
         self.refused('NOTE_BAD', BT.template('real', note=bad, **real))
         self.refused('DESCRIPTOR_NOT_READY', BT.template('real', note=good, **real))      # the note passed: the next refusal is the descriptor's
 
-    def test_this_file_is_licensed_small_and_free_of_machine_text(self):
-        text = THIS.read_text()
-        self.assertTrue(text.isascii() and 'SPDX-License-Identifier: MIT' in text[:100])
-        self.assertLess(len(text.encode()), 50 * 1024)
-        self.assertEqual([p for p in BT.MACHINE_PATHS if p in text], [])
+    def test_the_text_of_a_synthetic_record_is_what_it_was_before_it_moved_out_of_the_builder(self):
+        for name, (over, digest) in BEFORE_THE_MOVE.items():
+            with self.subTest(name):
+                r = {**FIXED, **over}
+                self.assertEqual(BT.sha(rec.record_text(r).encode()), digest)
+                self.assertEqual(rec.record_text({**r, 'real': None}), rec.record_text(r))       # kind synthetic: no line of a real build
+
+    def test_the_text_of_the_record_is_defined_once_and_the_builder_uses_it(self):
+        source, home = BUILDER.read_text(), RECORD.read_text()
+        for needle in ('def record_text', 'TOUCHES = {', 'NOTE_LINES, NOTE_COLUMNS =', 'def note_lines'):
+            self.assertNotIn(needle, source)
+            self.assertIn(needle, home)
+        for name in ('record_text', 'TOUCHES', 'GIC_STOP_TOUCHES', 'STORES'):       # the names that tests and documents reach in the builder stay
+            self.assertIs(getattr(bb, name), getattr(rec, name), name)
+
+    def test_the_notes_say_where_the_record_lives_and_what_a_real_record_adds(self):
+        build = ' '.join(DOC.read_text().split())
+        for needle in ('tools/sp11_stick_bundle_record.py', 'section 1a of its record', '--seed LABEL', '--gic-stop', 'an APF device slice'):
+            self.assertIn(needle, build)
+        real = ' '.join(REAL_DOC.read_text().split())
+        for needle in ('tools/sp11_stick_bundle_record.py', '1a. What this build is', 'descriptor_sha256', 'board_id', 'board_status', 'a default, not an operator decision',
+                       'guest view: pcie.ecam empty; D11 proper open', 'byte for byte what it was before'):
+            self.assertIn(needle, real)
+
+    def test_these_files_are_licensed_small_and_free_of_machine_text(self):
+        for path in (THIS, RECORD):
+            text = path.read_text()
+            self.assertTrue(text.isascii() and 'SPDX-License-Identifier: MIT' in text[:100], path.name)
+            self.assertLess(len(text.splitlines()), 1500, path.name)
+            self.assertLess(len(text.encode()), 50 * 1024, path.name)
+            self.assertEqual([p for p in BT.MACHINE_PATHS if p in text], [], path.name)
 
 
 if __name__ == '__main__':

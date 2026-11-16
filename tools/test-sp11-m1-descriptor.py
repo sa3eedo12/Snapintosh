@@ -122,7 +122,8 @@ class Derive(Case):
         path = SCRATCH / 'out/derived.json'
         board = bd.load(path)
         self.assertIs(bd.require_boot_ready(board), board)
-        digest, state = bb.descriptor_digest(types.SimpleNamespace(descriptor=path), ST.facts, 'real')
+        digest, state, board = bb.descriptor_digest(types.SimpleNamespace(descriptor=path), ST.facts, 'real')
+        self.assertEqual((board.board_id, board.status, board.ecam), ('sp11', 'EXPERIMENTAL', ()))
         self.assertEqual((digest.hex(), state), (BT.sha(path.read_bytes()), 'boot-ready'))
         self.assertIn(f'sha256 {digest.hex()}', text)
         self.assertEqual(path.read_bytes(), ST.data)

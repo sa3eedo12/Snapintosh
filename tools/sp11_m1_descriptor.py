@@ -217,7 +217,7 @@ def run_derive(a):
     gate(data, facts)
     write_new(out, data)
     try:
-        digest, state = bb.descriptor_digest(argparse.Namespace(descriptor=out), facts, 'real')      # the file `real` will read, through the gate `real` applies
+        digest, state, _ = bb.descriptor_digest(argparse.Namespace(descriptor=out), facts, 'real')      # the file `real` will read, through the gate `real` applies
     except Refused:
         out.unlink()
         raise

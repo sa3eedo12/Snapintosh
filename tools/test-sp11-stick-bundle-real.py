@@ -113,6 +113,13 @@ def snap_env():
     return [k for k in os.environ if k.startswith('SNAP_')]
 
 
+def section_1a(text):
+    """The lines of section 1a of a record, its heading first: what a real build says it is."""
+    lines = text.split('\n')
+    start = next(i for i, line in enumerate(lines) if line.startswith('1a. '))
+    return lines[start:lines.index('', start)]
+
+
 # ---- The real pipeline around a stand-in loader ----------------------------------------------------------------------------------
 class Pipeline(BT.Case):
     def test_the_loader_is_driven_as_probes_run_py_drives_it_for_each_d9_choice(self):
@@ -157,6 +164,71 @@ class Pipeline(BT.Case):
         code, _, err, out = BT.build_cli('no-real-section', extra=['--no-manifest'])
         self.assertEqual(code, 0, err)
         self.assertNotIn('real', json.loads((out / bb.REPORT_NAME).read_text()))
+
+    def test_a_synthetic_record_has_no_line_of_a_real_build(self):
+        for stores in ('ram,el2_sysreg', 'ram,el2_sysreg,gic'):
+            self.assertNotIn('1a. ', BT.template(stores=stores)[1])
+
+    def test_a_real_record_names_the_kernelcache_and_the_d9_choices_the_build_used(self):
+        words = {'withheld': 'the guest is given no framebuffer', 'handed': 'the guest is given the unit\'s framebuffer',
+                 0: 'a stock kernel', 1: 'the loader replaces the kernel\'s SPTM call words'}
+        records = []
+        for panel in ('withheld', 'handed'):
+            for hvc in (0, 1):
+                with self.subTest(panel=panel, hvc=hvc), stand_in_loader([]):
+                    code, text, err = template(panel=panel, sptm_hvc_calls=hvc)
+                    self.assertEqual(code, 0, err)
+                    records.append(text)
+                    self.assertEqual(section_1a(text)[:4], [
+                        '1a. What this build is (the host-side real path of docs/SP11-STICK-REAL.md: GUEST.DAT is made from a kernelcache)',
+                        f'   kernelcache  guest profile stand-in  sha256 {sha(STAND_IN_IMAGE)}',
+                        f'   D9 as built  panel {panel}: {words[panel]}', f'                SPTM HVC call patch {hvc}: {words[hvc]}'])
+        self.assertEqual(len(set(records)), 4)
+
+    def test_the_seed_line_calls_only_the_default_label_a_default(self):
+        default = '   boot seed    label sp11-stick-bundle (a default, not an operator decision; boot entropy UNIMPLEMENTED)'
+        with stand_in_loader([]):
+            self.assertEqual(section_1a(template()[1])[4], default)
+            self.assertEqual(section_1a(template(seed='sp11-stick-bundle')[1])[4], default)
+            self.assertEqual(section_1a(template(seed='another')[1])[4], '   boot seed    label another (given with --seed)')
+
+    def test_a_real_record_names_the_descriptor_and_calls_a_view_without_config_windows_a_guest_view(self):
+        def no_windows(board):
+            board['pcie']['ecam'] = []
+
+        def observed(board):
+            no_windows(board)
+            board['board']['status'] = 'OBSERVED'
+        view = ['                guest view: pcie.ecam empty; D11 proper open']
+        for name, edit, status, tail in (('one window', None, 'EXPERIMENTAL', []), ('no window', no_windows, 'EXPERIMENTAL', view), ('no window, OBSERVED', observed, 'OBSERVED', [])):
+            path = descriptor(re.sub(r'\W+', '-', name) + '.json', edit)
+            with self.subTest(name), stand_in_loader([]):
+                code, text, err = template(descriptor=path)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(section_1a(text)[5:], [f'   descriptor   sha256 {sha(Path(path).read_bytes())} (PIN.DAT descriptor_sha256)',
+                                                        f'                board synthetic  status {status}', *tail])
+
+    def test_the_approved_record_covers_the_descriptor_so_another_descriptor_is_another_record(self):
+        other = descriptor('another.json', lambda board: board['board'].update(name='The same board under another name'))
+        self.assertNotEqual(Path(other).read_bytes(), Path(real()['descriptor']).read_bytes())
+        with stand_in_loader([]):
+            approved = BT.write(SCRATCH / 'records/approved.txt', template()[1].encode())
+            argv = ['real', *BT.opts('real', **real(descriptor=other)), '--out', SCRATCH / 'out/another-descriptor', '--no-manifest', '--authorisation', approved]
+            self.refused('AUTH_RECORD_MISMATCH', BT.cli(argv))
+        self.assertFalse((SCRATCH / 'out/another-descriptor').exists())
+
+    def test_the_report_names_the_descriptor_that_pin_dat_pins_whether_or_not_one_was_given(self):
+        with stand_in_loader([]):
+            code, text, err, out = build('names-descriptor')
+        self.assertEqual(code, 0, (text, err))
+        report, digest = json.loads((out / bb.REPORT_NAME).read_text()), sha(Path(real()['descriptor']).read_bytes())
+        self.assertEqual((report['descriptor'], report['descriptor_sha256'], report['board_id'], report['board_status']), ('boot-ready', digest, 'synthetic', 'EXPERIMENTAL'))
+        self.assertEqual((out / 'bundle/SP11/PIN.DAT').read_bytes()[0x40:0x60].hex(), digest)
+        code, _, err, out = BT.build_cli('names-no-descriptor', extra=['--no-manifest'])
+        self.assertEqual(code, 0, err)
+        report = json.loads((out / bb.REPORT_NAME).read_text())
+        self.assertEqual((report['descriptor_sha256'], report['board_id'], report['board_status']), (sha(b'synthetic bundle: no board descriptor given'), None, None))
+        self.assertEqual((out / 'bundle/SP11/PIN.DAT').read_bytes()[0x40:0x60].hex(), report['descriptor_sha256'])
 
     def test_the_boot_seed_is_a_label_the_build_is_a_function_of(self):
         records, seen = {}, []

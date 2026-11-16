@@ -12,7 +12,7 @@ The bundle is the five files of docs/SP11-STICK-BUNDLE.md, q1n1's PAYLOAD.MAN an
 A refusal prints `REFUSED=<NAME>` and exits 1: the interface's name (tools/sp11_stick_bundle.py) where it has one, else BUILDER_REFUSALS.
 Output is deterministic and is written only below --out, which must be under build/ (or --allow-under). The placement (D1), the stores (D4),
 the time box (D5), the panel and the call patch (D9) are arguments without defaults: nothing is decided here. The chunk plumbing is in
-tools/sp11_stick_bundle_chunks.py."""
+tools/sp11_stick_bundle_chunks.py, the text of the authorisation record in tools/sp11_stick_bundle_record.py."""
 import argparse
 import dataclasses
 import hashlib
@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT / 'tools'))
 import board_descriptor as bd  # noqa: E402
 import sp11_stick_bundle as sb  # noqa: E402
 import sp11_stick_bundle_chunks as ch  # noqa: E402
+import sp11_stick_bundle_record as rec  # noqa: E402
 
 Refused = ch.Refused
 MIB = sb.MIB
@@ -40,7 +41,8 @@ STEP = f'{SLBOUNCE} {RUNNER} --el2'
 FACTS_FORMAT, REPORT_NAME = 'sp11-bundle-facts-1', 'build-report.json'
 AFFINITY = ch.AFFINITY      # Aff3:Aff2:Aff1:Aff0 of MPIDR_EL1, the part ACPI states
 GICR_STRIDE = {3: 0x20000, 4: 0x40000}
-STORES = {'ram': sb.STORE_RAM, 'el2_sysreg': sb.STORE_EL2_SYSREG, 'gic': sb.STORE_GIC}
+STORES = rec.STORES
+record_text, TOUCHES, GIC_STOP_TOUCHES = rec.record_text, rec.TOUCHES, rec.GIC_STOP_TOUCHES      # the record's home is tools/sp11_stick_bundle_record.py
 TAGS = {'EL2_UNREACHABLE': 1, 'DEVICE_OWNED': 2, 'OPERATOR': 3}
 KIND_NAME = {v: k[12:] for k, v in sb.CONSTANTS.items() if k.startswith('SP11SB_KIND_') and k != 'SP11SB_KIND_MAX'}
 DUMMY = b'\x01' * 32        # a nonzero stand-in digest for the early checks, before GUEST.DAT exists
@@ -374,111 +376,16 @@ def placement_of(a):
 
 
 # ---- The authorisation record ------------------------------------------------------------------------------------------------
-# Wrapped by hand: the record's digest is the operator's approval, so it must not depend on how a library version breaks lines.
-# The sentences about the dry-run wrapper restate docs/SP11-STICK-WRAPPER.md section 4 and name it as their source; a build whose
-# SNAPMON.BIN does more than that wrapper has to say so in a note (section 6 of the record).
-TOUCHES = {
-    'ram': ('RAM inside the placement only: the copy of the chunks, zero fills, the monitor work area and out buffer, and',
-            'the report written into REPORT.DAT. No disk, no device, no RAM outside the placement. What the dry-run wrapper',
-            'does to the machine is in docs/SP11-STICK-WRAPPER.md section 4: RAM stores only to page 0 of REPORT.DAT and,',
-            'after the stage COPYING, to the chunk destinations; cache maintenance by VA; AT S1E2W and AT S1E2R (they set',
-            'PAR_EL1); MRS reads; nothing else.'),
-    'el2_sysreg': ('required in every PIN.DAT by the interface (STORE_REQUIRED), so always listed. The dry-run wrapper',
-                   'stores no EL2 system register (docs/SP11-STICK-WRAPPER.md section 4: MRS reads, no MSR). A monitor entry',
-                   'would write and restore HCR_EL2, VBAR_EL2, TPIDR_EL2, VTCR_EL2, VTTBR_EL2, CNTHCTL_EL2, MDCR_EL2 and the',
-                   'OS lock (docs/SP11-MONITOR-PORT.md section 12; read from the sources, not run).'),
-    'gic': ('GIC registers for the timer stop (PPI 26). Which registers is UNKNOWN until the wrapper (work item 4) and its',
-            'register list (work item 6) exist: do not approve this class before they do.')}
-# The same three classes for the GIC and stop dry run (--gic-stop; docs/SP11-STICK-GIC.md sections 4 and 5), where payload 0 is the wrapper
-# built with SNAP_SP11_STICK_GIC=1. A register named here is one the binary's census lists (tools/test-sp11-stick-gic-build.py checks it).
-GIC_STOP_TOUCHES = {
-    'ram': ('RAM inside the placement only, as the dry-run wrapper: the copy of the chunks, zero fills and the report in',
-            'REPORT.DAT. One more RAM store of the GIC and stop stage: its record, 1376 bytes at REPORT.DAT offset 0x11000',
-            '(after the monitor\'s 64 KiB window), which is inside the report. No other RAM.'),
-    'el2_sysreg': ('required in every PIN.DAT by the interface (STORE_REQUIRED). The GIC and stop wrapper writes these',
-                   'registers of the boot CPU, each read first, put back and verified by read-back: class C ICC_PMR_EL1,',
-                   'ICC_BPR1_EL1, ICC_IGRPEN1_EL1; class T CNTHP_CVAL_EL2 and CNTHP_CTL_EL2 (the EL2 physical timer, armed',
-                   'for a time box of 2 s in the default build, in each of two windows, then disabled); class V VBAR_EL2 (the',
-                   'wrapper\'s own vector table) and DAIF.I (cleared only inside a window of at most twice the time box); in',
-                   'the handlers ICC_EOIR1_EL1 (ICC_DIR_EL1 when EOImode is set), SPSR_EL2 and ELR_EL2. Class E, only after a',
-                   'first window passed and a second announcement and 8 s: HCR_EL2 (RW and IMO, TGE clear), VBAR_EL1 and',
-                   'SCTLR_EL1 (MMU and caches off) for one ERET to a stub at EL1 that spins on CNTPCT_EL0 for at most twice',
-                   'the time box and ends by HVC; its lines are made visible with DC CIVAC and IC IVAU. It writes no',
-                   'CNTHCTL_EL2, TPIDR_EL2 or other register, executes no SMC, SVC or TLBI, and calls no monitor. Total',
-                   'time of the two windows and the two 8 s waits: about 20 s.'),
-    'gic': ('memory-mapped GIC registers in the pinned frames only (PIN.DAT gicd_base, gicr_first, gicr_stride,',
-            'gicr_count). Class G: GICD_CTLR, only when the value read shows group 1 disabled: EnableGrp1A is set, and',
-            'EnableGrp1 too unless DS is set (a read of 0x10 becomes 0x13); the old value is saved and put back. Class R: in',
-            'this CPU\'s own redistributor (found by matching GICR_TYPER to MPIDR; the other',
-            'frames are read for GICR_TYPER only) the SGI frame of INTID 26: IPRIORITYR byte, ISENABLER0 bit, ICFGR1',
-            'field if it reads edge, IGROUPR0 bit if the distributor shows one security state, and the put-backs',
-            'ICENABLER0 and ICPENDR0. Never the ITS, another interrupt, SMMU, PCIe, USB or the framebuffer.')}
-NOTE_LINES, NOTE_COLUMNS = 40, 120
-
-
+# Its text, the rules of its note and the lines of a real build are in tools/sp11_stick_bundle_record.py; here are the file reading and the approval.
 def read_note(path):
-    """The lines of the --note file, or None without one. They are appended to the record the operator approves, so they must read on a
-    terminal exactly as they are stored: printable ASCII and line feeds only (a carriage return, a backspace or an escape sequence could hide
-    or overwrite a word), at most NOTE_LINES lines of NOTE_COLUMNS characters. A refusal quotes no byte of the file."""
+    """The lines of the --note file, or None without one: a regular file read through read_regular, then the record module's rules."""
     if path is None:
         return None
     try:
-        data = read_regular(path, '--note', cap=NOTE_LINES * (NOTE_COLUMNS + 1), minimum=0)
+        data = read_regular(path, '--note', cap=rec.NOTE_LINES * (rec.NOTE_COLUMNS + 1), minimum=0)
     except Refused as error:
         raise Refused('NOTE_BAD', error.detail) from None
-    if (bad := next((i for i, byte in enumerate(data) if byte != 10 and not 32 <= byte <= 126), None)) is not None:
-        raise Refused('NOTE_BAD', f'--note byte {bad} is not printable ASCII or a line feed')
-    lines = data.decode('ascii').split('\n')
-    if lines[-1] == '':
-        lines.pop()         # the terminator of the last line, not a line of its own
-    if not any(line.strip() for line in lines):
-        raise Refused('NOTE_BAD', '--note holds no text')
-    if len(lines) > NOTE_LINES:
-        raise Refused('NOTE_BAD', f'--note has {len(lines)} lines; at most {NOTE_LINES}')
-    if long := next((i for i, line in enumerate(lines, 1) if len(line) > NOTE_COLUMNS), None):
-        raise Refused('NOTE_BAD', f'--note line {long} has {len(lines[long - 1])} characters; at most {NOTE_COLUMNS}')
-    return lines
-
-
-def record_text(r):
-    """The text the operator approves (its SHA-256 is PIN.DAT's authorisation_sha256): deterministic, ASCII, no personal name."""
-    p, g = r['place'], r['guest']
-    lines = [
-        f'SNAPINTOSH SP11 STICK BUNDLE - AUTHORISATION RECORD (format 1, label {r["label"]})', '',
-        'Status: operator decision NOT RECORDED. Hardware: NOT RUN. This text is a template until the operator approves it.',
-        'Approval is the operator\'s alone: the SHA-256 of exactly this text, recorded as authorisation_sha256 of PIN.DAT; a changed byte is another',
-        'record. It names no person and stays local: it is never committed or published.', '',
-        '1. What may run (named by SHA-256; the runner hashes the payloads before each call)',
-        f'   payload 0  SNAPMON.BIN  {r["monitor"][0]} bytes  sha256 {r["monitor"][1]}',
-        f'   payload 1  SNAPREP.BIN  {r["reporter"][0]} bytes  sha256 {r["reporter"][1]}',
-        f'   data       GUEST.DAT    {g["size"]} bytes  sha256 {g["sha256"]}  chunks {g["chunks"]}  table sha256 {g["index"]}',
-        f'   data       REPORT.DAT   {sb.REPORT_BYTES} bytes, all zero, sha256 {sha(bytes(sb.REPORT_BYTES))}',
-        '   data       PIN.DAT      1024 bytes; it carries this record\'s digest, so its own digest cannot be named here', '',
-        '2. Placement (the one range the run may store to)',
-        f'   guest_base {p["guest_base"]:#x}  guest_size {p["guest_size"] // MIB} MiB  reserve {p["reserve_size"] // MIB} MiB  '
-        f'work_base {p["work_base"]:#x}  work_size {p["work_size"] // MIB} MiB',
-        f'   place_base {p["place_base"]:#x}  place_end {p["place_base"] + p["place_size"]:#x}  (limit 2^36)', '',
-        f'3. Store classes authorised (PIN.DAT authorised_stores = {r["stores"]})']
-    touches = GIC_STOP_TOUCHES if r.get('gic_stop') else TOUCHES
-    if r.get('gic_stop'):
-        lines.append('   Record of the GIC and stop dry run (docs/SP11-STICK-GIC.md): payload 0 is SNAPMON-GIC.BIN; no monitor is called.')
-    for name in STORES:
-        if r['stores'] & STORES[name]:
-            first, *rest = touches[name]
-            lines += [f'   {name}: {first}', *(f'      {line}' for line in rest)]
-    lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.', '',
-              f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.', '',
-              '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
-              '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',
-              '   - No page change for twice the time box after ENTER: note the last line and power cycle.',
-              '   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',
-              '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',
-              '     operator\'s power cycle, which writes nothing.']
-    if r['note']:
-        lines += ['', '6. Notes of this build (part of the digest)', *r['note']]
-    text = '\n'.join(lines) + '\n'
-    text.encode('ascii')
-    return text
+    return rec.note_lines(data)
 
 
 def need_authorisation(a):
@@ -504,10 +411,12 @@ def approve(a, text):
 
 # ---- Descriptor, the real build() call, files, PIN.DAT -----------------------------------------------------------------------
 def descriptor_digest(a, facts, kind):
+    """(the SHA-256 PIN.DAT pins, its state, the Board or None): `real` needs a boot-ready descriptor that states the facts; a synthetic build
+    may go without and pins a stand-in digest."""
     if not a.descriptor:
         if kind == 'real':
             raise Refused('DESCRIPTOR_NOT_READY', 'a real bundle needs --descriptor: a boot-ready board descriptor')
-        return hashlib.sha256(b'synthetic bundle: no board descriptor given').digest(), 'NOT GIVEN (a synthetic digest is pinned)'
+        return hashlib.sha256(b'synthetic bundle: no board descriptor given').digest(), 'NOT GIVEN (a synthetic digest is pinned)', None
     data = read_regular(a.descriptor, '--descriptor', cap=1 << 20)
     try:
         board = bd.loads(data.decode('utf-8'))
@@ -516,7 +425,7 @@ def descriptor_digest(a, facts, kind):
         raise Refused('DESCRIPTOR_NOT_READY', str(error)) from None
     if bad := ch.descriptor_mismatches(board, facts):
         raise Refused('FACTS_DISAGREE', f'the facts disagree with the descriptor on {bad}')
-    return hashlib.sha256(data).digest(), 'boot-ready'
+    return hashlib.sha256(data).digest(), 'boot-ready', board
 
 
 place_layout, real_built = ch.place_layout, ch.real_built       # the real `built` is made beside the synthetic one (tools/sp11_stick_bundle_chunks.py)
@@ -574,7 +483,7 @@ def prepare(a, kind, before_filler=None):
     gic_stop = getattr(a, 'gic_stop', False)
     if gic_stop and not stores & sb.STORE_GIC:
         raise Refused('OPTIONS_BAD', '--gic-stop is the record of the GIC and stop dry run, which stores in the gic class: --stores must include gic')
-    descriptor, state = descriptor_digest(a, facts, kind)
+    descriptor, state, board = descriptor_digest(a, facts, kind)
     monitor, reporter = read_regular(a.monitor, '--monitor', minimum=4), read_regular(a.reporter, '--reporter', minimum=4)
     declared = declared_ranges(a.declared)
     early = pack_pin(pin_fields(facts, place, stores, DUMMY, DUMMY, dict(guest_file_size=1024, guest_chunk_count=1, guest_file_sha256=DUMMY,
@@ -601,10 +510,12 @@ def prepare(a, kind, before_filler=None):
         raise Refused('BUILT_SHAPE', 'x3 of the monitor call, the PARAMS chunk destination, is not PARAMS_PA')
     ch.check_params(chunks, place, a.time_box_s)
     head, table = sb.unpack_guest(guest)
-    record = record_text(dict(place=place, stores=stores, time_box_s=a.time_box_s, label=facts['build_label'], monitor=(len(monitor), sha(monitor)),
-                              reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop,
-                              guest=dict(size=len(guest), sha256=sha(guest), chunks=len(table), index=head['index_sha256'].hex())))
-    return dict(facts=facts, dumps=dumps, place=place, stores=stores, descriptor=descriptor, state=state, monitor=monitor, reporter=reporter,
+    record = rec.record_text(dict(place=place, stores=stores, time_box_s=a.time_box_s, label=facts['build_label'], monitor=(len(monitor), sha(monitor)),
+                                  reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop,
+                                  guest=dict(size=len(guest), sha256=sha(guest), chunks=len(table), index=head['index_sha256'].hex()),
+                                  real=real and dict(real, descriptor_sha256=descriptor.hex(), board_id=board.board_id, board_status=board.status,
+                                                     ecam_windows=len(board.ecam))))
+    return dict(facts=facts, dumps=dumps, place=place, stores=stores, descriptor=descriptor, state=state, board=board, monitor=monitor, reporter=reporter,
                 guest=guest, maps=maps, lines=lines, record=record, declared=declared, real=real)
 
 
@@ -690,6 +601,7 @@ def report_of(a, kind, p, files, digest, manifest, staged):
         format='sp11-bundle-build-report-1', kind=kind, hardware='NOT RUN', evidence='EXPERIMENTAL', authorisation_sha256=digest.hex(), stage=staged,
         files={n: dict(size=len(files[n]), sha256=sha(files[n])) for n in NAMES}, manifest=manifest and dict(size=len(manifest), sha256=sha(manifest)),
         placement={k: f'{v:#x}' for k, v in p['place'].items()}, stores=p['stores'], time_box_s=a.time_box_s, descriptor=p['state'],
+        descriptor_sha256=p['descriptor'].hex(), board_id=p['board'] and p['board'].board_id, board_status=p['board'] and p['board'].status,
         guest=dict(chunks=len(table), bytes_by_kind=kinds, index_sha256=head['index_sha256'].hex(), params_dest=f'{sb.params_dest(files["GUEST.DAT"]):#x}'),
         facts_sha256=p['facts']['sha256'], dumps=[d.name for d in p['dumps']], maps=[dict(dump=n, descriptors=c, result=sb.error_name(code)) for n, c, code in p['maps']],
         checked=['facts against every dump', 'placement against every map', 'PIN.DAT and GUEST.DAT (structure, table, chunk and file digests) by the interface checks',
@@ -750,7 +662,7 @@ def build_opts(p, kind, template=False):
         p.add_argument('--kernelcache', required=True)
         p.add_argument('--panel', choices=('handed', 'withheld'), required=True, help='D9: SNAP_NO_FB')
         p.add_argument('--sptm-hvc-calls', choices=(0, 1), type=int, required=True, help='D9: the SPTM HVC kernel patch')
-        p.add_argument('--seed', default='sp11-stick-bundle', help='label of the guest\'s boot random seed (SNAP_SEED): the same label, the same bytes')
+        p.add_argument('--seed', default=rec.DEFAULT_SEED, help='label of the guest\'s boot random seed (SNAP_SEED): the same label, the same bytes')
     if not template:
         for flag, kw in (('--out', dict(required=True)), ('--force', dict(action='store_true')), ('--allow-under', dict(action='append', default=[])),
                          ('--authorisation', dict(help='the approved record')), ('--authorisation-sha256', dict()),
