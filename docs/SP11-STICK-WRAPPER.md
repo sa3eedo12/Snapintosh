@@ -68,8 +68,8 @@ freestanding SHA-256 the runner already uses; no hash code is carried here.
 ## 3. The wrapper
 
 **Order.** One stage between steps, the head of REPORT.DAT stored whole after each (37 words, then a clean of its lines and a DSB), so that a
-hang is named by the last stage in RAM and by the last line on the panel. A data abort in a payload lands in q1n1's fault page and says nothing,
-which is why every probe comes before the first access it guards.
+hang is named by the last stage in RAM and by the last line on the panel. A data abort in a payload lands in q1n1's fault page (ESR, ELR and FAR, then a
+halt), not in the wrapper's report, which is why every probe comes before the first access it guards.
 
 | Step | Reads | Stores | Stage when it passes |
 | --- | --- | --- | --- |

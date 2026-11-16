@@ -264,8 +264,8 @@ static uint64_t stage_observed(struct sw_ctx *c)
 }
 
 /* The placement against the final map, then the part only the unit can answer (U1: does EL2's own map reach it?): a guarded read of
- * its first and last word, and AT S1E2W over its pages. A data abort in a payload lands in q1n1's fault page and reports nothing, so
- * the answer has to come before the first store. The map itself is probed before it is read. */
+ * its first and last word, and AT S1E2W over its pages. A data abort in a payload lands in q1n1's fault page (ESR, ELR, FAR, then a halt), not
+ * in this wrapper's report, so the answer has to come before the first store. The map itself is probed before it is read. */
 static uint64_t stage_place(struct sw_ctx *c)
 {
     const struct q1n1_payload_args *a = c->a;
