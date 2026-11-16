@@ -356,10 +356,12 @@ def shared(tree, gic=None):
         return _objects[key]
 
 
-def harness(tree, name='base', defines=(), gic=None):
+def harness(tree, name='base', defines=(), gic=None, patches=()):
     """The executable of one variant: `defines` are -D flags (a seeded fault, a time box). Only the stage is compiled again for a seed;
-    the rest of the wrapper is the base variant's objects."""
-    key = (name, tuple(defines), tuple(sorted((gic or {}).items())))
+    the rest of the wrapper is the base variant's objects. `patches` are (source, old, new) text replacements made in memory in a copy of one source
+    below the scratch directory, which is then compiled instead of the real file: a mutant of the real stage that no seed names, which the tests that use
+    it must show to fail. `old` must occur exactly once, so that a mutant that no longer matches the source fails loudly and does not silently pass."""
+    key = (name, tuple(defines), tuple(sorted((gic or {}).items())), tuple(patches))
     objs = shared(tree, gic)
     with _lock:
         if key in _objects:
@@ -373,7 +375,18 @@ def harness(tree, name='base', defines=(), gic=None):
         for src in GIC_SOURCES:
             obj = out / (Path(src).stem + '.o')
             built.append(str(obj))
-            futures.append(pool.submit(T.clang, [*fl, '-c', str(ROOT / src), '-o', str(obj)], f'compiling {src} ({name})'))
+            edits = [p for p in patches if p[0] == src]
+            if edits:
+                text = (ROOT / src).read_text()
+                for _, old, new in edits:
+                    if text.count(old) != 1:
+                        raise AssertionError(f'the mutant {name!r} does not match {src} exactly once: {old!r}')
+                    text = text.replace(old, new)
+                path = out / Path(src).name
+                path.write_text(text)
+                futures.append(pool.submit(T.clang, [*fl, f'-I{ROOT / "probes"}', '-c', str(path), '-o', str(obj)], f'compiling the mutant {name} of {src}'))
+            else:
+                futures.append(pool.submit(T.clang, [*fl, '-c', str(ROOT / src), '-o', str(obj)], f'compiling {src} ({name})'))
         for future in futures:
             future.result()
     exe = out / 'harness'

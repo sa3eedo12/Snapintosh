@@ -16,7 +16,8 @@
  * everything back and reports. It never calls a monitor.
  *
  * Two halves, one source of truth. sp11-stick-gic.c is the arm and the put-back: the reads and decisions, the quarantine of the firmware's other
- * enabled interrupts, the stores of classes G, R and C with their read-back, PREPARED, and the exact put-back of the same classes. It has no
+ * enabled interrupts, the stores of the quarantine (first, a member of class R) and of classes G, R and C with their read-back, the check of ICC_HPPIR1_EL1
+ * (outcomes Q_NOT_HELD 22 and FOREIGN_PENDING 23 are theirs), PREPARED, and the exact put-back of the same classes, the quarantine's last. It has no
  * window, no timer and no write of
  * VBAR_EL2, HCR_EL2 or any EL1 register: the monitor entry (work item 4b) calls sw_gic_arm, then the monitor, then sw_gic_put_back,
  * and builds the file with SW_GIC_DRY_REGS=0, which removes the dry run's own registers from the table (tools/test-sp11-stick-gic-build.py
@@ -173,7 +174,9 @@ unsigned sw_gic_arm_stores(struct sw_gic *g, uint32_t extra);
 unsigned sw_gic_arm(struct sw_gic *g, struct sw_ctx *c, uint32_t extra);
 /* sw_gic_put_back: classes C, R and G exactly (each register written only if the stage wrote it, read back, one retry, then NOT_RESTORED in
  * restore_failed), then ICC_RPR_EL1 and the PPI's active state as checks, and last the enables the quarantine cleared (ISENABLER0 is verified whole
- * against what the reads found). Returns 0, or SG_OUT_NOT_RESTORED. */
+ * against what the reads found). That last write is NOT made when the put-backs of both group 1 gates, ICC_IGRPEN1_EL1 and GICD_CTLR, failed (both are
+ * named in restore_failed): ISENABLER0 is then only read and named in restore_failed, so that a pending foreign interrupt is not re-armed behind two open
+ * gates; the return value is the same, SG_OUT_NOT_RESTORED. Returns 0, or SG_OUT_NOT_RESTORED. */
 unsigned sw_gic_put_back(struct sw_gic *g);
 /* The helpers the dry run shares with it, so that the record, the page and the put-back have one implementation. */
 void sw_gic_flush(struct sw_gic *g);

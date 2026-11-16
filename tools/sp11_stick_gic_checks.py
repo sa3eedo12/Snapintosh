@@ -40,10 +40,12 @@ def runnable():
     return bool(FIX.get('tree') and T.find_tool('clang'))
 
 
-def exe_of(variant='base'):
-    if variant == 'base':
+def exe_of(variant='base', patches=()):
+    """The harness executable of a variant: the real stage, a seeded fault (`variant` names it in SEEDS), or a mutant made of text `patches` of the real
+    source under a name of its own (G.harness)."""
+    if variant == 'base' and not patches:
         return G.harness(FIX['tree'])
-    return G.harness(FIX['tree'], variant, defines=[f'-DSP11_STICK_GIC_SEED_{SEEDS[variant]}'])
+    return G.harness(FIX['tree'], variant, defines=[f'-DSP11_STICK_GIC_SEED_{SEEDS[variant]}'] if variant in SEEDS else [], patches=patches)
 
 
 @dataclasses.dataclass
@@ -72,13 +74,13 @@ def pin_patch(field, value, size=8):
     return f'TAMPER STAGE=COPIED {T.World.PIN + PIN[field]:#x} {value.to_bytes(size, "little").hex()}'
 
 
-def batch(cases, variant='base', runs=('snapmon', 'snaprep')):
+def batch(cases, variant='base', runs=('snapmon', 'snaprep'), patches=()):
     """{name: Run} for {name: dict(gic=[...], extra=[...], between=[...], bundle=..., runs=...)}: one harness process, the scenarios in turn."""
     texts, worlds = [], {}
     for name, c in cases.items():
         worlds[name] = T.World(FIX[c.get('bundle', 'gic')], FIX['scratch'])
         texts.append((name, G.scenario(name, worlds[name], c.get('gic', ()), c.get('runs', runs), c.get('extra', ()), c.get('between', ()))))
-    out = G.run(exe_of(variant), texts)
+    out = G.run(exe_of(variant, patches), texts)
     return {name: Run(name, worlds[name], out.results[name], out.gic[name]) for name in cases}
 
 

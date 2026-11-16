@@ -478,7 +478,8 @@ class Hygiene(unittest.TestCase):
         names = {p.name for p in own_files()}
         for wanted in ('sp11-stick-gic.c', 'sp11-stick-gic-dry.c', 'sp11-stick-gic.h', 'sp11-stick-gic-record.h', 'sp11-stick-gic-vec.c', 'sp11_stick_gic_testlib.py',
                        'sp11_stick_gic_checks.py', 'test-sp11-stick-gic.c', 'test-sp11-stick-gic.py', 'test-sp11-stick-gic-record.py', 'test-sp11-stick-gic-build.py',
-                       'test-sp11-stick-gic-qemu.py', 'test-sp11-stick-gic-quarantine.py', 'SP11-STICK-GIC.md'):
+                       'test-sp11-stick-gic-qemu.py', 'test-sp11-stick-gic-quarantine.py', 'test-sp11-stick-gic-putback.py', 'test-sp11-stick-gic-hppir.py',
+                       'test-sp11-stick-gic-doc.py', 'SP11-STICK-GIC.md'):
             self.assertIn(wanted, names)
 
     def test_every_source_file_starts_with_an_spdx_mit_line(self):
@@ -487,7 +488,7 @@ class Hygiene(unittest.TestCase):
                 with self.subTest(path.name):
                     self.assertIn('SPDX-License-Identifier: MIT', '\n'.join(path.read_text().splitlines()[:3]))
 
-    def test_every_c_and_python_file_stays_under_1500_lines_and_50_kib_and_the_note_under_48000_bytes(self):
+    def test_every_c_and_python_file_stays_under_1500_lines_and_50_kib_and_the_note_under_56000_bytes(self):
         for path in own_files():
             with self.subTest(path.name):
                 text = path.read_text()
@@ -495,7 +496,7 @@ class Hygiene(unittest.TestCase):
                     self.assertLess(len(text.splitlines()), 1500)
                     self.assertLess(len(text.encode()), 50 * 1024)
                 else:
-                    self.assertLessEqual(len(path.read_bytes()), 48000)     # raised from 33,000 in pass 5 (30,000 before pass 3): the committed text was at its cap
+                    self.assertLessEqual(len(path.read_bytes()), 56000)     # raised from 48,000 in pass 6 (33,000 in pass 5, 30,000 before pass 3): the committed text was at 46,966 B and pass 6 adds statements
                     self.assertTrue(text.isascii())
 
     def test_no_file_names_the_build_host_a_person_a_network_a_key_or_an_unfinished_marker(self):
@@ -547,7 +548,7 @@ class Document(unittest.TestCase):
         cls.flat = cls.text.replace('\n', ' ')
 
     def test_the_note_is_ascii_and_within_its_size_budget(self):
-        self.assertLessEqual(len(self.data), 48000)         # raised from 33,000 in pass 5 (the committed text was at its cap; 30,000 before pass 3)
+        self.assertLessEqual(len(self.data), 56000)         # raised from 48,000 in pass 6 (33,000 in pass 5; 30,000 before pass 3)
 
     def test_it_says_hardware_not_run_uses_the_labels_and_claims_no_hardware_result(self):
         for needle in ('Hardware NOT RUN', 'EXPERIMENTAL', 'VERIFIED', 'OBSERVED', 'INFERRED', 'UNIMPLEMENTED', 'UNKNOWN'):
@@ -624,7 +625,8 @@ class Document(unittest.TestCase):
             self.assertNotIn('the monitor sets its own', (ROOT / path).read_text(), path)
 
     def test_the_tests_it_names_are_the_ones_that_exist(self):
-        for name in ('test-sp11-stick-gic.py', 'test-sp11-stick-gic-quarantine.py', 'test-sp11-stick-gic-record.py', 'test-sp11-stick-gic-build.py', 'test-sp11-stick-gic-qemu.py'):
+        for name in ('test-sp11-stick-gic.py', 'test-sp11-stick-gic-quarantine.py', 'test-sp11-stick-gic-putback.py', 'test-sp11-stick-gic-hppir.py', 'test-sp11-stick-gic-doc.py',
+                     'test-sp11-stick-gic-record.py', 'test-sp11-stick-gic-build.py', 'test-sp11-stick-gic-qemu.py'):
             self.assertIn(f'`tools/{name}`', self.text)
             self.assertTrue((ROOT / 'tools' / name).is_file())
 

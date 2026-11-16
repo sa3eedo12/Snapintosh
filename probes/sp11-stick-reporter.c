@@ -16,7 +16,7 @@
  * UNIMPLEMENTED: the decode of the monitor's window and the comparison of the raw reads with PIN.DAT's pinned values (work item 4b); the
  * wrapper of this build never enters a monitor, so the window is all zero and nothing is said about it. (Under the opt-in
  * SNAP_SP11_STICK_GIC=1, SNAPREP-GIC.BIN, the first bytes of that window are the GIC and stop stage's record, which this prints after
- * the head's summary: at most 23 more lines, from the same bytes and the same function as the wrapper's page. Read only, as before. Under the
+ * the head's summary: at most 28 more lines, from the same bytes and the same function as the wrapper's page. Read only, as before. Under the
  * third opt-in, SNAP_SP11_STICK_MONITOR=1, SNAPREP-M1.BIN, the monitor's record and, when the call returned zero, its window are decoded as well and
  * the GIC lines are the arm half's five: docs/SP11-STICK-MONITOR.md section 4. Still read only.)
  *
@@ -179,7 +179,7 @@ SC_INLINE void rp_decode(const struct q1n1_payload_args *a, const uint8_t *repor
 /* The GIC and stop record, the first extension record after the monitor's window (sp11-stick-gic-record.h), in the order a reader wants it:
  * the verdict, then what was read, old and new, the timer, what the windows showed (each interrupt on a line of its own), what EL1 was
  * given, and the final values. A slot that is still zero says the stage did not run; a record that fails its check is named and not
- * printed. At most 23 lines. */
+ * printed. At most 28 lines. */
 #if SNAP_SP11_STICK_MONITOR
 SC_INLINE void rp_gic_line(const struct q1n1_payload_args *a, const uint8_t *rec, unsigned id, uint32_t *lines)
 {

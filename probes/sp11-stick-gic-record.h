@@ -327,7 +327,8 @@ enum sg_line_id {
     SG_L_COUNT
 };
 /* The reporter's order for the dry run's page: the head of the stage first, then what was read, what was surveyed, what was stored, and what the windows
- * showed. The monitor entry's page prints its own shorter list. At most 27 lines when every one applies, of the reporter's 40. */
+ * showed. The monitor entry's page prints its own shorter list. At most 28 lines when every one applies (the list has 29 ids, and IRQ and DIAG exclude each
+ * other), of the reporter's 40 with the nine lines of its head: 37. */
 #define SG_REPORTER_ORDER {SG_L_VERDICT, SG_L_FRAMES, SG_L_GICD, SG_L_GICR, SG_L_CPU, SG_L_OLD, SG_L_SPI, SG_L_PPIP, SG_L_TIMERS, SG_L_QUAR, SG_L_NEW, \
                            SG_L_TIMER, SG_L_IRQ, SG_L_CYC0, SG_L_CYC1, SG_L_CYC2, SG_L_CYC3, SG_L_DIAG, SG_L_EXC, SG_L_EL1, SG_L_CYC4, SG_L_DIAG1, \
                            SG_L_HVC, SG_L_EXC1, SG_L_HCR, SG_L_VBAR1, SG_L_SCTLR1, SG_L_FINAL, SG_L_RESTORE}

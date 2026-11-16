@@ -21,7 +21,11 @@
  * Another interrupt is asserting when its bit is set in ISPENDR0 (this CPU's PPIs: a level source that nothing the stage writes can clear) or in an SPI_PEND
  * register; it is signalled when it is also enabled, in group 1, below PMR and the running priority and the CPU interface is on, and the lowest priority value
  * wins (ties to the lowest INTID), exactly as for PPI 26. |
- *   IGNORE reg | NOHOLD reg [windows] | RWP gicd|gicr | MAXITER n | CNTHCTL v | HCR_INIT v | VBAR1 v | SCTLR1 v | HCR_IGNORE_IMO |
+ *   IGNORE reg | NOHOLD reg [windows] (windows 0: from the start of the put-back, whatever ran before it, so that the put-back of a refused arm can fail) |
+ *   RWP gicd|gicr (the bit stays set) | RWP_LAG gicr n (after a write of ISENABLER0 or ICENABLER0 the bit reads set for n reads of GICR_CTLR, and the write is not
+ *   visible until it clears) | ICE_HOLD v (only the bits of v clear in ICENABLER0: a partial hold) | HPPIR_IGNORES_PMR (ICC_HPPIR1_EL1 does not apply PMR) |
+ *   HPPIR_EXTRA intid prio (another pending interrupt of any INTID: a special one, an LPI's) | SPI_LATE n v ticks (GICD_ISPENDR[n] gains bits v that many ticks
+ *   into the run) | MAXITER n | CNTHCTL v | HCR_INIT v | VBAR1 v | SCTLR1 v | HCR_IGNORE_IMO |
  *   EL1_LOST | EL1_VECTOR n | EL1_SYNC esr | EL1_INTID v | SPSR_KEPT v | MUTATE offset hexbytes (between two RUNs: bytes of the record)
  * At END the harness prints GICREC (the record in REPORT.DAT), GICLOG (every write, every system register read and every window event, with
  * the number of page lines and the counter at that point), GICSTATE and GICVIOL. Hardware: NOT RUN; nothing here touches a device. */
@@ -88,7 +92,10 @@ static struct {
     uint64_t cnthctl0, vbar1_0, sctlr1_0, hcr0, spsr_kept;
     uint64_t cntv_ctl, cntv_cval, cntp_ctl, cntp_cval;
     uint32_t gicd_wmask, spi_en[32], spi_pend[32], spi_prio, fprio[32];
-    int fgroup_ok;
+    uint32_t ice_hold, spi_late_val;
+    uint64_t spi_late_at;
+    unsigned extra_intid, extra_prio, spi_late_n;
+    int fgroup_ok, rwp_lag, hppir_ignores_pmr, have_extra;
     int have_currentel_late, no_fire, no_deliver, storm, storm_once, ns_ppi, have_intid, have_sync, final_stuck, have_storm_after, hcr_ignore_imo;
     int el1_lost, have_el1_vector, have_el1_sync, have_el1_intid, have_drop, have_hppir, no_istatus, hide_pend;
     unsigned drop_after;
@@ -102,6 +109,8 @@ static struct {
     uint64_t pmr, bpr1, igrpen1, rpr, ctl, cval, vbar, daif, hcr, vbar1, sctlr1;
     int active, ack_other, eoi_seen, ctl_off_after_eoi, i_masked, phase, hang, deliveries, currentel_reads, hcr_init, in_el1, final_off, visible_ok;
     unsigned f_active;                  /* 0, or the INTID plus one of another interrupt that has been acknowledged and not yet deactivated */
+    int en_pending, en_pending_set;     /* a write of an enable register that RWP_LAG has not let through yet (one at a time: the hardware completes writes in order) */
+    uint32_t en_pending_value;
     unsigned acks, excursions;
     uint64_t t_arm, fake_vectors, fake_el1_vectors, first_eoi_tick, visible_start, visible_bytes, resume_spsr_seen, hcr_first;
     /* the logs */
@@ -131,6 +140,7 @@ static void gic_reset(void)
     G.ns_ppi = 1;
     G.gicd_wmask = SG_GICD_CTLR_G1 | SG_GICD_CTLR_G1A | SG_GICD_CTLR_ARE | SG_GICD_CTLR_E1NWF;
     G.fgroup_ok = 1;
+    G.ice_hold = 0xFFFFFFFFu;
     G.spi_prio = 0xA0;
     for (i = 0; i < 32; i++) G.fprio[i] = 0xA0;
     G.maxiter = 5000000;
@@ -163,6 +173,7 @@ static void gic_reset_live(void)
     G.sctlr1 = G.sctlr1_0;
     G.hcr_init = 0;
     G.i_masked = (G.daif0 & 0x80) != 0;
+    G.en_pending = 0;
 }
 
 static void log_ev(int kind, int reg, uint64_t value)
@@ -238,6 +249,10 @@ static int others_ready(void)
     return G.fgroup_ok && (G.gicd_ctlr & SG_GICD_CTLR_ARE) && (G.gicd_ctlr & SG_GICD_CTLR_G1A) && (G.igrpen1 & 1);
 }
 /* The interrupt the CPU interface would hand out next, mask aside: the lowest priority value, ties to the lowest INTID. 1023 and priority 0x100 when none. */
+static uint32_t spi_pending(unsigned n)
+{
+    return G.spi_pend[n] | (G.spi_late_val && n == G.spi_late_n && W.tick >= G.spi_late_at ? G.spi_late_val : 0);
+}
 static unsigned best_pending(unsigned *prio)
 {
     unsigned id = 1023, best = 0x100, i, n;
@@ -254,7 +269,7 @@ static unsigned best_pending(unsigned *prio)
             }
         }
         for (n = 1; n < 32; n++) {
-            uint32_t both = G.spi_pend[n] & G.spi_en[n];
+            uint32_t both = spi_pending(n) & G.spi_en[n];
             for (i = 0; i < 32 && both; i++) {
                 unsigned intid = 32 * n + i;
                 if (!(both >> i & 1) || G.f_active == intid + 1) continue;
@@ -263,6 +278,10 @@ static unsigned best_pending(unsigned *prio)
                     best = G.spi_prio;
                 }
             }
+        }
+        if (G.have_extra && G.f_active != G.extra_intid + 1 && (G.extra_prio < best || (G.extra_prio == best && G.extra_intid < id))) {
+            id = G.extra_intid;         /* a source the stage cannot quarantine: no enable bit of this CPU's, a special INTID, an LPI's */
+            best = G.extra_prio;
         }
     }
     *prio = best;
@@ -273,10 +292,11 @@ static int signalled(void)
     unsigned prio, id = best_pending(&prio);
     return id != 1023 && prio < (G.pmr & 0xFF) && prio < (G.rpr & 0xFF);
 }
+/* ICC_HPPIR1_EL1: the interrupt that would be handed out next, or 1023 when none; with PMR applied unless HPPIR_IGNORES_PMR (whether the unit's does is UNKNOWN). */
 static uint64_t hppir1_value(void)
 {
     unsigned prio, id = best_pending(&prio);
-    if (id == 1023 || prio >= (G.pmr & 0xFF)) return 1023;
+    if (id == 1023 || (!G.hppir_ignores_pmr && prio >= (G.pmr & 0xFF))) return 1023;
     return id == SNAP_TIMER_INTID && G.have_hppir ? G.hppir_override : id;
 }
 static void deactivate(uint64_t intid)
@@ -309,6 +329,35 @@ static uint32_t rwp_read(unsigned *left, uint32_t bit)
     return 0;
 }
 
+/* The enable registers of this CPU's redistributor. A write is visible at once, unless RWP_LAG says it takes effect only when RWP has cleared (the
+ * architecture's RWP: the write is still pending): the write is then held until a read of GICR_CTLR finds RWP clear, and an earlier one is let through first,
+ * as the hardware completes writes in order. A stage that reads ISENABLER0 back without waiting for RWP sees the old value. */
+static void enable_apply(int set, uint32_t value)
+{
+    if (set) {
+        if (G.ns_ppi || (G.gicd_ctlr & SG_GICD_CTLR_DS)) G.isenabler0 |= value;
+    } else {
+        G.isenabler0 &= ~value;
+    }
+}
+static void enable_flush(void)
+{
+    if (G.en_pending) enable_apply(G.en_pending_set, G.en_pending_value);
+    G.en_pending = 0;
+}
+static void enable_write(int set, uint32_t value)
+{
+    enable_flush();
+    if (G.rwp_lag) {
+        G.en_pending = 1;
+        G.en_pending_set = set;
+        G.en_pending_value = value;
+    } else {
+        enable_apply(set, value);
+    }
+    G.rwp_left_gicr = G.rwp_gicr;
+}
+
 static uint64_t mmio_read(uint64_t pa, unsigned size)
 {
     unsigned frame;
@@ -329,7 +378,7 @@ static uint64_t mmio_read(uint64_t pa, unsigned size)
                 return 0;
             }
             log_ev(EV_R, pend ? GR_GICD_ISPENDR : GR_GICD_ISENABLER, n);
-            return pend ? G.spi_pend[n] : G.spi_en[n];
+            return pend ? spi_pending(n) : G.spi_en[n];
         }
         violation("distributor read", pa);
         return 0;
@@ -343,7 +392,11 @@ static uint64_t mmio_read(uint64_t pa, unsigned size)
         violation("read of a redistributor that is not this CPU's", pa);
         return 0;
     }
-    if (off == SG_GICR_CTLR) return rwp_read(&G.rwp_left_gicr, SG_GICR_CTLR_RWP);
+    if (off == SG_GICR_CTLR) {
+        uint32_t v = rwp_read(&G.rwp_left_gicr, SG_GICR_CTLR_RWP);
+        if (!v) enable_flush();         /* RWP is clear: a write of an enable register has gone through */
+        return v;
+    }
     if (off == SG_GICR_WAKER) return G.waker;
     if (off >= SG_SGI_FRAME) {
         off -= SG_SGI_FRAME;
@@ -362,7 +415,23 @@ uint8_t sp11hw_mmio_read8(uint64_t pa) { return (uint8_t)mmio_read(pa, 1); }
 uint32_t sp11hw_mmio_read32(uint64_t pa) { return (uint32_t)mmio_read(pa, 4); }
 uint64_t sp11hw_mmio_read64(uint64_t pa) { return mmio_read(pa, 8); }
 
-static int write_ignored(int reg) { return G.ignore[reg] || (G.nohold[reg] && (unsigned)G.phase >= G.nohold_from[reg]); }
+/* The stage's put-back has begun: the record's sub-stage in REPORT.DAT, as the CPU stored it, says RESTORING (the dry run's own put-back sets it too). Read from
+ * the record so that it holds for a refused arm as well, in which no window ever closed. */
+static int putting_back(void)
+{
+    struct region *rep = region_named("report");
+    uint32_t sub;
+    if (!rep || rep->size < SG_REC_AT + SG_REC_BYTES) return 0;
+    memcpy(&sub, rep->cpu + SG_REC_AT + offsetof(struct sw_gic_rec, substage), sizeof sub);
+    return sub == SG_SUB_RESTORING;
+}
+/* NOHOLD from window 1 on (or 2 for the EL1 registers), or from the start of the put-back when the scenario says 0. */
+static int write_ignored(int reg)
+{
+    if (G.ignore[reg]) return 1;
+    if (!G.nohold[reg]) return 0;
+    return G.nohold_from[reg] ? (unsigned)G.phase >= G.nohold_from[reg] : putting_back();
+}
 
 static void mmio_write(uint64_t pa, uint64_t value, unsigned size)
 {
@@ -404,8 +473,8 @@ static void mmio_write(uint64_t pa, uint64_t value, unsigned size)
     if (write_ignored(reg)) return;
     switch (reg) {
     case GR_IGROUPR0: if (G.gicd_ctlr & SG_GICD_CTLR_DS) G.igroupr0 = (uint32_t)value; break;     /* RAZ/WI to the non-secure view when DS = 0 */
-    case GR_ISENABLER0: if (G.ns_ppi || (G.gicd_ctlr & SG_GICD_CTLR_DS)) G.isenabler0 |= (uint32_t)value; G.rwp_left_gicr = G.rwp_gicr; break;
-    case GR_ICENABLER0: G.isenabler0 &= ~(uint32_t)value; G.rwp_left_gicr = G.rwp_gicr; break;
+    case GR_ISENABLER0: enable_write(1, (uint32_t)value); break;
+    case GR_ICENABLER0: enable_write(0, (uint32_t)value & G.ice_hold); break;
     case GR_ICFGR1: G.icfgr1 = (uint32_t)value; break;
     case GR_IPRIORITYR: G.prio = (uint8_t)value; break;
     default: break;                                                                                 /* ICPENDR0: the line is the pending state */
@@ -646,9 +715,9 @@ static uint64_t maybe_number(const char *token)
 
 static void gic_command(char *line)
 {
-    char *tok[4], *save, *p = line;
+    char *tok[5], *save, *p = line;
     int n = 0, i;
-    while (n < 4 && (tok[n] = strtok_r(p, " \t\r\n", &save))) {
+    while (n < 5 && (tok[n] = strtok_r(p, " \t\r\n", &save))) {
         n++;
         p = NULL;
     }
@@ -713,6 +782,16 @@ static void gic_command(char *line)
         else if (!strcmp(k, "SPI_EN")) G.spi_en[num(tok[2]) % 32] = (uint32_t)num(tok[3]);
         else if (!strcmp(k, "SPI_PEND")) G.spi_pend[num(tok[2]) % 32] = (uint32_t)num(tok[3]);
         else if (!strcmp(k, "SPI_PRIO")) G.spi_prio = (uint32_t)v;
+        else if (!strcmp(k, "SPI_LATE")) {
+            if (n < 5) fail("GIC SPI_LATE needs a register, bits and a tick");
+            G.spi_late_n = (unsigned)num(tok[2]) % 32, G.spi_late_val = (uint32_t)num(tok[3]), G.spi_late_at = num(tok[4]);
+        }
+        else if (!strcmp(k, "ICE_HOLD")) G.ice_hold = (uint32_t)v;
+        else if (!strcmp(k, "HPPIR_IGNORES_PMR")) G.hppir_ignores_pmr = 1;
+        else if (!strcmp(k, "HPPIR_EXTRA")) {
+            if (n < 4) fail("GIC HPPIR_EXTRA needs an INTID and a priority");
+            G.extra_intid = (unsigned)num(tok[2]), G.extra_prio = (unsigned)num(tok[3]), G.have_extra = 1;
+        }
         else if (!strcmp(k, "CNTV_CTL")) G.cntv_ctl = v;
         else if (!strcmp(k, "CNTV_CVAL")) G.cntv_cval = v;
         else if (!strcmp(k, "CNTP_CTL")) G.cntp_ctl = v;
@@ -740,6 +819,10 @@ static void gic_command(char *line)
         } else if (!strcmp(k, "RWP")) {
             if (!strcmp(tok[2], "gicd")) G.rwp_gicd = 1000000;
             else G.rwp_gicr = 1000000;
+        } else if (!strcmp(k, "RWP_LAG")) {
+            if (n < 4 || strcmp(tok[2], "gicr")) fail("GIC RWP_LAG gicr n");
+            G.rwp_gicr = (unsigned)num(tok[3]);
+            G.rwp_lag = 1;
         } else {
             fail("unknown GIC key");
         }
@@ -751,6 +834,7 @@ static void gic_dump(void)
 {
     struct region *rep = region_named("report");
     unsigned i;
+    enable_flush();                     /* a write that RWP_LAG still held goes through: the state printed is the one the machine ends in */
     if (rep && rep->size >= SG_REC_AT + SG_REC_BYTES) {
         printf("GICREC ");
         for (i = 0; i < SG_REC_BYTES; i++) printf("%02x", rep->cpu[SG_REC_AT + i]);

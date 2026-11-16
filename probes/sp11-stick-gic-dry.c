@@ -63,7 +63,9 @@ static unsigned gic_dry_precheck(struct sw_gic *g)
 
 /* What the stores put in place, shown before the EL2 window opens: a freeze or a reset inside it leaves this line as the last. ISEN is what the
  * quarantine and the PPI's own enable left (read back after the stores), HPPIR what the CPU interface would hand out next with IRQ still masked. The
- * line is at most 100 characters (the interface's LINE_MAX) for any values the keys can print. */
+ * line is at most 99 characters with its prefix for the values that can reach it: this line is printed only when the arm passed, and then HPPIR is 1023
+ * or 26 (anything else was refused FOREIGN_PENDING first), so it has two or four digits. An INTID of eight digits would make the line 103 characters,
+ * over the interface's LINE_MAX of 100, where the line buffer would cut it (the last three digits lost); that is unreachable and is not guarded here. */
 static void gic_say_next_window(struct sw_gic *g)
 {
     struct pl_line l;

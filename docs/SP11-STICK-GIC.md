@@ -43,7 +43,8 @@ monitor's use of the interrupt:
   HCR_EL2.IMO set. Window 2 does the same from a stub at EL1 under HCR_EL2 0x80000010 (RW and IMO, TGE clear) with IRQ unmasked at EL1.
 - The quarantine (pass 5). The monitor stops on any interrupt that is not PPI 26 (probes/xnuboot/async.c:87-95: only HPPIR1 == 26 and then IAR1 == 26 is
   the tick), and boot 13 found a foreign interrupt enabled and pending. While the stop timer can fire, no interrupt but PPI 26 may be enabled in this
-  CPU's redistributor: the stage disables every other enabled bit of ISENABLER0 first, enables them again as its last write, and refuses
+  CPU's redistributor: the stage disables every other enabled bit of ISENABLER0 first, enables them again as its last write (pass 6: not when both group 1
+  gates failed to go back, section 4), and refuses
   `FOREIGN_PENDING` if ICC_HPPIR1_EL1, read with IRQ masked, still names another interrupt.
 
 Cannot decide: anything under a running guest, the other CPUs, the SMMU, the ITS, the M1 time box (D5: 5 s; here 2 s per window), EL3's
@@ -56,7 +57,7 @@ section 12). A QEMU run proves the sequence and the assembly, never the unit's E
     python3 tools/sp11_stick_wrapper_build.py --out build/sp11-gic --gic       SNAPMON-GIC.BIN, SNAPREP-GIC.BIN, build-report.json
     python3 tools/sp11_stick_bundle_build.py authorisation-template real ... --monitor SNAPMON-GIC.BIN --reporter SNAPREP-GIC.BIN \
         --stores ram,el2_sysreg,gic --gic-stop                                  the record the operator approves, on stdout
-    python3 tools/test-sp11-stick-gic.py | -gic-quarantine.py | -gic-record.py | -gic-build.py | -gic-qemu.py     the tests of section 9
+    python3 tools/test-sp11-stick-gic.py | -gic-quarantine.py | -gic-putback.py | -gic-hppir.py | -gic-doc.py | -gic-record.py | -gic-build.py | -gic-qemu.py     the tests of section 9
 
 The bundle builder writes the two payloads into the bundle as SNAPMON.BIN and SNAPREP.BIN (the frozen file roles); the record names their
 sizes and digests. `--gic-stop` needs `gic` in `--stores` and changes only the three class texts of section 3 of the record.
@@ -73,16 +74,16 @@ register offsets, `struct sw_gic`, the interface), the gated layer at the end of
 | CPU and pins | `gic_check_cpu` | CurrentEL 2, SPSel 1, DAIF masked, HCR_EL2.IMO, PIN.DAT's GIC fields, the counter, an AT write probe of the record | none |
 | EL1 checks | `gic_dry_precheck` | CNTHCTL_EL2.EL1PCTEN, an AT read probe that the stub image is identity-mapped (EL1 with the MMU off fetches by physical address), old HCR_EL2, VBAR_EL1, SCTLR_EL1 | none |
 | Reads | `gic_read_*` | GICD_CTLR, TYPER, IIDR; a bounded scan of the pinned frames for MPIDR's affinity, then this PPI's registers; ICC_SRE_EL2 and, only if SRE is set, the rest of the CPU interface, VBAR_EL2, CNTHP | none |
-| Survey | `gic_read_survey` | after every read that a refusal rests on, so that a refusal leaves it unread: GICD_ISENABLER[n] and GICD_ISPENDR[n] for n = 1 to ITLinesNumber (at most 31), the priority bytes of INTIDs 23, 25, 27 and 30, and, in the dry run's build only, CNTV_CTL_EL0, CNTV_CVAL_EL0, CNTP_CTL_EL0, CNTP_CVAL_EL0 | none; it decides nothing |
+| Survey | `gic_read_survey` | after every read that a refusal rests on, so that a refusal leaves it unread: GICD_ISENABLER[n] and GICD_ISPENDR[n] for n = 1 to ITLinesNumber (at most 31: INTIDs 32 to 991 on the unit, 1023 at most; the extended SPIs and the LPIs are not surveyed, section 12), the priority bytes of INTIDs 23, 25, 27 and 30, and, in the dry run's build only, CNTV_CTL_EL0, CNTV_CVAL_EL0, CNTP_CTL_EL0, CNTP_CVAL_EL0 | none; it decides nothing |
 | Announce | `sw_gic_arm_stores` | | `NEXT GIC STORES AFTER 8 S G= R= C= T= V= E=`, then 8 s on the counter, then the first store |
 | Q, G, R, C | `gic_store_q`, `_g`, `_r`, `_c` | back, each | section 7; Q first, so that nothing foreign can be signalled once group 1 is enabled |
-| Check | `gic_check_pending` | ICC_HPPIR1_EL1, with IRQ masked | none; FOREIGN_PENDING unless it reads 1023 or 26; then PREPARED, written after Q, G, R, C and this check held |
+| Check | `gic_check_pending` | ICC_HPPIR1_EL1, with IRQ masked | none; FOREIGN_PENDING unless it reads 1023 or 26; then PREPARED, written after Q, G, R, C and this check held; one read at one instant (section 12) |
 | T | `gic_arm_timer` | back | CNTHP_CVAL_EL2 now + time box, CNTHP_CTL_EL2 enable |
 | V, window 1 | `gic_el2_window` | the done flag, CNTPCT | VBAR_EL2 (own table), DAIF.I clear; at the end masked and VBAR_EL2 back |
 | Classify 1 | `gic_classify_el2` | the diagnosis registers | none; its IRQ or DIAG line is printed before E |
 | E, window 2 | `gic_el1_window` | back | the second NEXT line and 8 s, then VBAR_EL1, SCTLR_EL1, HCR_EL2, T again, ERET to the stub (section 7) |
 | Classify 2 | `gic_classify_el1` | as above, in the HVC path | none |
-| Put back | `gic_dry_restore`, `sw_gic_put_back` | each register again | CNTHP_CTL 0 (always), E (HCR_EL2 first), V, T (CVAL, then CTL), then C, R, G, and last the quarantined enables (one ISENABLER0 write) |
+| Put back | `gic_dry_restore`, `sw_gic_put_back` | each register again | CNTHP_CTL 0 (always), E (HCR_EL2 first), V, T (CVAL, then CTL), then C, R, G, and last the quarantined enables (one ISENABLER0 write, withheld when both group 1 gates are still open) |
 | Report | `gic_finish` | | the record to REPORT.DAT, the page lines |
 
 Each class is marked `begun` in the record, and the record stored and cleaned to RAM, before the class's first store, so that a freeze at a
@@ -102,11 +103,17 @@ whole put-back and no window (an SPI that is enabled and pending, which the quar
 is inside the arm, so that the monitor entry refuses too. The put-back is C, R (PPI 26's own enable first, ahead of the configuration registers), G, the
 check that the running priority is idle, and then, as the last write of the run, one ISENABLER0 write with exactly the bits the quarantine cleared, so that
 nothing foreign can be signalled while the CPU interface and the distributor are back; ISENABLER0 is then verified whole against the value found (else
-NOT_RESTORED, after the one retry).
+NOT_RESTORED, after the one retry). Pass 6 (a reviewer's finding; EXPERIMENTAL, host model only): that write is NOT made when the put-backs of BOTH
+ICC_IGRPEN1_EL1 and GICD_CTLR failed (both bits are in FAILED: group 1 is still enabled at the CPU interface and at the distributor), because enabling the
+foreign interrupts again would re-arm a pending one (INTID 27 in boot 13) behind two open gates. ISENABLER0 is then only read, its bit is set in FAILED, the
+foreign interrupts stay disabled and the run ends NOT_RESTORED (OUTCOME=0X30; the refusal or the window's outcome stays FIRST). One gate left open alone does
+not withhold it: the other is closed and the write is inert. The rule counts put-backs that failed, so a gate found open is not counted: with EnableGrp1A found
+set (class G never begun) and ICC_IGRPEN1_EL1 stuck open, the write IS made behind two open gates (a limit; the model pins it, `gates-found-open`). On this unit
+EnableGrp1A was found clear and IGRPEN1 0 (boot 13, OBSERVED, one unit), so both gates are the stage's own. The rule holds in a refused run too.
 
 The two halves, for the monitor entry (work item 4b). One source of truth. 4b calls `sw_gic_arm` (the reads and the survey, the NEXT line and wait, the
 quarantine, G, R and C with read-back, the check of ICC_HPPIR1_EL1, PREPARED written after the arm succeeded), then the monitor, then `sw_gic_put_back` (C, R
-and G exactly, the quarantined enables last, verified, one retry, NOT_RESTORED loud). It must not arm CNTHP or change VBAR_EL2 or HCR_EL2: the monitor does those
+and G exactly, the quarantined enables last unless both group 1 gates are still open, verified, one retry, NOT_RESTORED loud). It must not arm CNTHP or change VBAR_EL2 or HCR_EL2: the monitor does those
 itself (probes/xnuboot.S:172-178). The dry run's own registers (T, V, E) are in `probes/sp11-stick-gic-dry.c` only, and `probes/sp11-stick-gic.c` built with
 `-DSW_GIC_DRY_REGS=0` has no write or read of them (VERIFIED on its object: MSR to ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1 only; MRS of ICC_HPPIR1_EL1 once,
 the check, and of none of the survey's EL1 timers; no ERET, HVC, IC).
@@ -195,8 +202,10 @@ P27= P30=` (their IPRIORITYR bytes), `GIC TIMERS VCTL= VCVAL= PCTL= PCVAL=` (the
 ISTATUS; the dry run's build only) and `GIC QUAR MASK=<hex>|NONE DONE= HPPIR=<dec>|-` (the bits written to ICENABLER0, ISENABLER0 as read back right after it, and
 ICC_HPPIR1_EL1 as read after the last store with IRQ masked); each prints only when its flags say that its registers were read. Its `GIC OLD PRIO= ICFGR1= IGROUPR0= ISPEND= ISACT=` shows ISPENDR0 and ISACTIVER0 whole (32-bit
 masks), so that a foreign interrupt in flight is visible before the first store (PMR, BPR1 and IGRPEN1 are on `GIC CPU` only). A line of a phase
-not reached (CPU, NEW, FINAL after an early refusal) is unfilled zeros, not an observation. One renderer (`sg_line`) writes both pages; every line is at most 100 characters for any
-record that passes the check (VERIFIED).
+not reached (CPU, NEW, FINAL after an early refusal) is unfilled zeros, not an observation. One renderer (`sg_line`) writes the record's lines on both pages; each is at most 100 characters for any
+record that passes the check (VERIFIED). The NEXT lines are the wrapper's own: `NEXT GIC WINDOW` is at most 99 characters for the values that can reach it (HPPIR is
+1023 or 26 there, since anything else was refused FOREIGN_PENDING first); an eight-digit INTID would make it 103, which the line buffer would cut at the interface's 100,
+and cannot occur (pass 6 corrected the source comment that said 100 for every value).
 
 ## 7. Store classes for the authorisation record (D4)
 
@@ -208,7 +217,7 @@ host and under QEMU).
 | --- | --- | --- | --- |
 | ram | `ram` | the copy and the head as the dry run; the record, 1456 bytes at REPORT.DAT + 0x11000 | INFERRED nothing else |
 | G | `gic` | GICD_CTLR, only when EnableGrp1A reads clear: old value, `old \| 0x2 \| 0x1` with DS = 0 (q1n1's A16 recipe writes 0x13), `old \| 0x2` with DS = 1 (after the 8 s wait, put back after the windows) | INFERRED (section 12) |
-| R | `gic` | this CPU's redistributor only (found by affinity; other frames: GICR_TYPER read), SGI frame. First the quarantine: ICENABLER0 with every bit of the found ISENABLER0 but bit 26, then GICR_CTLR.RWP. Then INTID 26: IPRIORITYR byte, ISENABLER0 bit 26 only when found clear, ICFGR1 if edge, IGROUPR0 if DS = 1. Put back: ICENABLER0 (bit 26 only, and only if the stage set it), ICPENDR0, and last ISENABLER0 with exactly the quarantined bits | EXPERIMENTAL (the quarantine); INFERRED (the rest) |
+| R | `gic` | this CPU's redistributor only (found by affinity; other frames: GICR_TYPER read), SGI frame. First the quarantine: ICENABLER0 with every bit of the found ISENABLER0 but bit 26, then GICR_CTLR.RWP. Then INTID 26: IPRIORITYR byte, ISENABLER0 bit 26 only when found clear, ICFGR1 if edge, IGROUPR0 if DS = 1. Put back: ICENABLER0 (bit 26 only, and only if the stage set it), ICPENDR0, and last ISENABLER0 with exactly the quarantined bits (not written when both group 1 gates are still open: NOT_RESTORED) | EXPERIMENTAL (the quarantine); INFERRED (the rest) |
 | C | `el2_sysreg` | ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1 | INFERRED |
 | T | `el2_sysreg` | CNTHP_CVAL_EL2, CNTHP_CTL_EL2 (armed in each window for the time box, disabled again) | INFERRED |
 | V | `el2_sysreg` | VBAR_EL2 and DAIF.I inside window 1 and the excursion; in the handlers ICC_EOIR1_EL1, ICC_DIR_EL1 (EOImode), SPSR_EL2, ELR_EL2 | EXPERIMENTAL; the pattern OBSERVED: el1trap, T02 |
@@ -232,7 +241,7 @@ vector body, the excursion), HVC x17 (one `hvc #0` in the stub, sixteen `hvc #1`
 instruction class: new are MRS of CNTV_CTL_EL0, CNTV_CVAL_EL0, CNTP_CTL_EL0 and CNTP_CVAL_EL0 (once each, in four functions of `probes/sp11-stick-gic-dry.c`:
 the dry run's build only) and one MRS of ICC_HPPIR1_EL1 in the arm half (the check). As the dry run: DC CVAC,
 AT S1E2W and S1E2R, DSB SY, ISB; no SMC, SVC, TLBI, WFI, WFE, BR; every BLR through the runner's ops table. MMIO stores: two one-instruction
-functions (`strb`, `str`), 13 call sites (pass 5 added two: the quarantine's ICENABLER0 and the put-back's last ISENABLER0), all in the stage; every other
+functions (`strb`, `str`), 13 call sites (pass 5 added two: the quarantine's ICENABLER0 and the put-back's last ISENABLER0, which pass 6 made conditional: one test and a branch, no new call site, register or instruction class), all in the stage; every other
 store is to the stack or through an argument. The default SNAPMON.BIN
 census is unchanged (no MSR, ERET, TLBI, IC, SMC, HVC, SVC). The reporter variant has no system instruction and stores only to its stack.
 
@@ -243,6 +252,9 @@ census is unchanged (no MSR, ERET, TLBI, IC, SMC, HVC, SVC). The reporter varian
 | `tools/test-sp11-stick-gic.py` + `tools/test-sp11-stick-gic.c` | the real wrapper, stage and reporter under ASan and UBSan against a model of the machine (`tools/sp11_stick_gic_testlib.py`, `tools/sp11_stick_gic_checks.py`): the happy path and its variants, C4 and C6, every refusal before a store (the write log proves none), windows that end badly (a lost interrupt in the EL1 window, a wrong vector class, IMO clear, a stuck line after the final deadline, a second storm, and more), registers that do not restore, stores that do not hold, a timer found enabled, and seventeen seeded-bad stages (one fault each in the order, the NEXT lines,
 the end of interrupt, the re-arm, the final acknowledge, IMO, the EL1 restore, the stub's bound, the settle, keeping a foreign deadline or restoring the enable first; the six of pass 5 are in the next file, twenty-three in all), each failing its matching check while the real stage passes it |
 | `tools/test-sp11-stick-gic-quarantine.py` | pass 5, over the same model: the page boot 13 printed, reproduced line for line by the stage as it ran (the seeded stage `no-quarantine`; only the digits of LAT_US, TICKS and US differ, because the model steps its counter 1000 ticks per read); the state boot 12 found (other PPIs and PPI 26 already enabled: IRQ_OK, PPI 26's own enable never written); the quarantine (one ICENABLER0 write first and one ISENABLER0 write last, ISENABLER0 whole at the end, no pending state written, nothing foreign enabled in any window, HPPIR1 1023 before the window); a foreign SPI (FOREIGN_PENDING with its INTID, clean put-back, no IRQ unmasked); a quarantine that does not hold (Q_NOT_HELD) and one whose put-back does not (NOT_RESTORED); the survey (registers read, counts, a hostile ITLines, PPI priorities, EL1 timers; a refusal leaves it unread); six seeded-bad stages (no quarantine, no put-back of it, PPI 26 quarantined too, a stray write, no check of HPPIR1, the quarantine after group 1) |
+| `tools/test-sp11-stick-gic-putback.py` | pass 6, over the same model, each check shown to fail on a MUTANT of the real stage (a text patch made in memory in a scratch copy of one source; `SP11_GIC_MUTANT=<name>` runs every scenario on one mutant, and the tests that fail are the ones that kill it): the last write of the put-back is NOT made when both group 1 gates stay open (ISENABLER0 only read and named in FAILED, the run NOT_RESTORED) and is made when one gate stays open alone, when a gate was found open (the limit of section 4), and in a refused run; the RWP waits after the quarantine's write and after the last write (`RWP gicr` stuck, `RWP_LAG`); a quarantine that holds in part (`ICE_HOLD`); a put-back that fails after a refusal (`NOHOLD reg 0`: outcomes 22 and 23, and a store that did not hold). Eight mutants: no RWP condition at Q, no RWP wait at Q, a weak read-back of Q, no RWP wait after the last write, the gate rule removed, widened to either gate, not named in FAILED, and a refusal that hides a failed put-back |
+| `tools/test-sp11-stick-gic-hppir.py` | pass 6, over the same model in BOTH variants of what ICC_HPPIR1_EL1 does with PMR (it honours it; or `HPPIR_IGNORES_PMR`): an enabled, pending SPI at, below and above PMR (the stage's decision in each, so that the over-acceptance and the over-refusal are on record; the rule is not changed), the special INTIDs 1020 to 1022 and the LPI range (8192, INTIDs whose low ten bits are 26 and 1023, the largest) refused FOREIGN_PENDING with their INTID and nothing unmasked, and an interrupt that asserts after the one read (`SPI_LATE`: window 1 takes it, so the check is one read at one instant). Three mutants: the specials accepted, the LPIs accepted, the INTID cut to ten bits |
+| `tools/test-sp11-stick-gic-doc.py` | pass 6, text only (no model): what this note and the comments of the sources say about the put-back rule and its limit, the limits of the check of ICC_HPPIR1_EL1, the extended SPIs and the LPIs, and the numbers pass 6 corrected; each needed statement is shown to be needed by a copy without it, each corrected statement is refused when put back, and the longest NEXT WINDOW line (99 characters, 103 for an eight-digit INTID) and the 29 line ids of the reporter's page are computed from the sources |
 | `tools/test-sp11-stick-gic-record.py` | the record round trip, the check (version 3: each rule of the survey isolated), damaged and extreme records through the reporter, line widths, the authorisation record (`--gic-stop`) |
 | `tools/test-sp11-stick-gic-build.py` | section 8, the core object alone, the gate, hygiene, this note |
 | `tools/test-sp11-stick-gic-qemu.py` | the real runner and the real binaries at EL2 under QEMU/EDK2, both windows, the survey lines and the check of ICC_HPPIR1_EL1 |
@@ -280,7 +292,7 @@ Q_NOT_HELD 22 and FOREIGN_PENDING 23 are pass 5's), what the windows showed 32 t
 | PRIO_NOT_BELOW_PMR | the priority reads back at or above PMR: the non-secure view differs | the OLD and NEW lines have both |
 | EL1_NOT_HELD | HCR_EL2, VBAR_EL1 or SCTLR_EL1 did not read back as written, or IMO did not hold: EL1 was not entered, E is put back | the HCR, VBAR1 and SCTLR1 lines have OLD, RB, FIN: the finding |
 | Q_NOT_HELD (22) | the quarantine's ICENABLER0 write (or its RWP) did not leave ISENABLER0 as bit 26 was found: the other enables are still on, or PPI 26's own went too; everything written is put back | the answer is the finding (a non-secure write of ICENABLER0 ignored, or those enables not this CPU's to clear); no group 1 enable, no window; the QUAR line has MASK= and DONE= (what was read back) |
-| FOREIGN_PENDING (23) | after Q, G, R and C, with IRQ masked, ICC_HPPIR1_EL1 is neither 1023 nor 26: an enabled SPI, a PPI that did not disable, or a special INTID | the QUAR line has the INTID as HPPIR=, the SPI line the SPIs (FIRST=); no window, everything put back; the monitor entry, which calls the same arm, refuses the same way |
+| FOREIGN_PENDING (23) | after Q, G, R and C, with IRQ masked, ICC_HPPIR1_EL1 is neither 1023 nor 26: an enabled SPI, a PPI that did not disable, a special INTID (1020 to 1022) or an LPI's (8192 and up). One read at one instant, and whether it honours PMR is UNKNOWN (section 12) | the QUAR line has the INTID as HPPIR=, the SPI line the SPIs (FIRST=); no window, everything put back; the monitor entry, which calls the same arm, refuses the same way |
 | IRQ_OK | both windows: four interrupts at EL2 each as C4 says, and the interrupt from EL1 at +0x480, ended, restored | read LAT_US: the interrupt stop is viable (U3 answered yes); the I-set entry is still UNKNOWN |
 | NO_IRQ | window 1: nothing arrived by its deadline; DIAG: CTL bit 2 (ISTATUS) clear: the timer did not fire; ISTATUS set, PEND 0: the line did not reach the GIC; PEND 1 and HPPIR 0X3FF: not delivered (group, enable, priority); HPPIR 0X1A: signalled and not taken (masked, RPR) | the polling fallback (D2), with the DIAG line as the reason |
 | WRONG_INTID | another INTID, or 1023 (spurious: no end of interrupt) | the IRQ line has it |
@@ -294,11 +306,11 @@ Q_NOT_HELD 22 and FOREIGN_PENDING 23 are pass 5's), what the windows showed 32 t
 | NO_IRQ_FROM_EL1 | nothing arrived at +0x480 by the stub's bound; HVC #0 ended it; DIAG1 and the HVC line have ISTATUS, HPPIR, PEND, ISEN, GICD, RPR, PMR, HCR, SPSR | as NO_IRQ, for the guest's case |
 | EL1_WRONG_INTID | another INTID or 1023 from EL1 | the EL1 line has it |
 | EL1_EXCEPTION | any other class or vector in window 2: EXC1 has vector (0x100 + n: an EL1 vector), ESR, ELR, SPSR | decode ESR; the stub or its table faulted |
-| NOT_RESTORED | a put-back did not hold after one retry; FAILED names the registers, FIRST what the windows had shown | stop the series: the machine is not as found |
+| NOT_RESTORED | a put-back did not hold after one retry; FAILED names the registers (ISENABLER0 among them, bit 2, when the quarantine's last write was withheld because both group 1 gates, ICC_IGRPEN1_EL1 and GICD_CTLR, are still open), FIRST what the windows or a refusal had shown | stop the series: the machine is not as found; with both gates open the foreign interrupts are also still disabled |
 
 Last line on a freeze or reset: `NEXT GIC STORES AFTER 8 S` (in the wait or at the first store, which is the quarantine's ICENABLER0 write when
 something is enabled; the record in RAM names the class begun, if RAM
-survived), `NEXT GIC WINDOW 2 S` (the timer is armed, IRQ unmasked at some point) or `NEXT GIC EL1 EXCURSION AFTER 8 S` (E writes, ERET, the stub;
+survived; at that write it does not hold the quarantine's mask yet and the reporter prints no QUAR line, section 12), `NEXT GIC WINDOW 2 S` (the timer is armed, IRQ unmasked at some point) or `NEXT GIC EL1 EXCURSION AFTER 8 S` (E writes, ERET, the stub;
 window 1's page is already filmed).
 
 ## 11. Proposed supervised plan (for the coordinator; nothing here authorises it)
@@ -367,16 +379,38 @@ one unit). Risks: the stub's fetch depends on the identity map and on
 cache maintenance that QEMU cannot show; a stuck-high line, or a foreign timer whose deadline passed during the run and is put back, can never clear
 its pending bit, so it ends NOT_RESTORED (loud; the series stops; model only); the quarantine switches SGI 0 and four PPIs of this CPU off for about 20 s
 (nothing else runs on this CPU then: INFERRED, the wrapper runs after the runner has left the firmware; no other CPU's redistributor is written), and the
-pending state of those interrupts is never written, so a source that asserts through the run is pending, and enabled again, when the run ends.
+pending state of those interrupts is never written, so a source that asserts through the run is pending, and enabled again, when the run ends (not when both
+group 1 gates stay open: the quarantined interrupts then stay disabled and the run is NOT_RESTORED, section 4).
 Before window 1 can answer U3 only these can still stop a run (boot 13 passed every read and every store check up to window 1, and CNTHP_CTL read 0x2
 there, so TIMER_OWNED, which is only for a timer asserting now, did not apply): Q_NOT_HELD (the quarantine's non-secure ICENABLER0 write is the first of its
 kind: the experiment itself), FOREIGN_PENDING (an enabled SPI, or a source the quarantine did not silence: the OLD line shows ISPEND whole, and the SPI, PPIP
 and TIMERS lines name the rest), PPI_OWNED if PPI 26 is then pending or active, and TIMER_OWNED if CNTHP is then asserting; G_NOT_HELD, R_NOT_HELD,
 C_NOT_HELD, T_NOT_HELD and PRIO_NOT_BELOW_PMR held in boot 13 in the same state (OBSERVED, one unit, one boot).
 
+Pass 6 (a third independent review of pass 5; EXPERIMENTAL, host only, nothing ran on the unit). The put-back's last write is withheld when both group 1 gates stay
+open (section 4): `if (r->begun & SG_CLASS_R) gic_put_back_bits(g, SG_R_ISENABLER0, gic_mask(g, SG_R_ISENABLER0), 1, !gic_both_gates_open(r));`, and a gate found open is not
+counted. The tests that did not bite now do (section 9: `RWP gicr`, `RWP_LAG`, `ICE_HOLD`, `NOHOLD reg 0`, each shown to fail on a mutant of the real stage). The check of
+ICC_HPPIR1_EL1 has two limits, stated and not changed: it is ONE read at ONE instant (no settle, no second read: a source that asserts after it is for the window or the
+monitor to meet, and the model shows window 1 taking one), and whether the register honours PMR is UNKNOWN (the tests run both variants): if it does, an enabled and pending
+SPI at or below PMR passes (over-acceptance: it is not signalled unless something raises PMR), if it does not, such an SPI is refused (over-refusal). The special INTIDs 1020
+to 1022 and an LPI's (8192 and up) are refused as foreign. The extended SPIs and the LPIs are neither surveyed nor quarantined, and whether any is enabled or pending is
+UNKNOWN: the survey reads the SPIs the distributor implements, INTIDs 32 to 991 on the unit (ITLinesNumber 30), and no read was added. The register bits are the evidence that they may exist (GICD_TYPER 0xF87F051E: ESPI 1 with range 31,
+1,024 extended SPIs from INTID 4096; GICR_TYPER low word 0xD0000E7: PLPIS 1; the bit positions are INFERRED, the specification was not re-read), and only the one
+ICC_HPPIR1_EL1 read before the window, at one instant, can see one. Statements corrected, none changing a byte of a binary: the NEXT WINDOW line's "at most 100 characters for
+any value" (103 for an eight-digit INTID, which cannot reach it), "at most 23 lines" of the reporter (twice) and "at most 27" of the record header (28, 37 with the head),
+"classes G, R and C" in `probes/sp11-stick-gic.h` (the quarantine, the check and outcomes 22 and 23 were missing), "no other bit of ISENABLER0 is ever set by the stage"
+(false since pass 5), "the other PPIs" (SGI 0 omitted), and this note's "every line is at most 100 characters" (section 6). Left, as the reviewer allowed (not a two-line
+change): after a freeze at the ICENABLER0 write the record in RAM holds BEGUN=R and no quarantine mask, because the record rule ties the mask to SG_SV_QUAR, "the write was made"
+(`sg_survey_check`), and moving it earlier needs a new flag, a new rule, the reporter and the pinned record text; the mask is derivable (the found ISENABLER0 of the GICR line less
+bit 26: 0x4A800001 on the unit). And RETRIED is set for PPI 26's own-bit step in the rare case that its enable was found set and went clear with nothing to write: the verdict is
+NOT_RESTORED either way.
+
 Change requests (the frozen files are untouched): (1) GIC_NOT_READY (82) says "did not read back as written" in `probes/sp11-stick-bundle.h` and
 `tools/sp11_stick_bundle.py`; docs/SP11-STICK-BUNDLE.md now widens it (documentation only) to every refusal and failure of this stage,
 `refusal_detail` naming the outcome of section 10. (2) The interface should name the extension-record rule of
-section 5.
+section 5. (3) The text of the authorisation record that `--gic-stop` prints (`tools/sp11_stick_bundle_record_gic.py`, another owner's) says that the ISENABLER0 write is the
+last register write of the stage and that the quarantined interrupts are enabled again when the run ends: both are incomplete since pass 6, because the write is withheld
+when the put-backs of both ICC_IGRPEN1_EL1 and GICD_CTLR failed (ISENABLER0 is then only read and named in FAILED, and the run ends NOT_RESTORED). The pass 6 reply has the
+replacement sentence.
 
 Hardware status: NOT RUN.
