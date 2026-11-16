@@ -7,10 +7,10 @@
  * (ID_AA64MMFR0_EL1.ECV non-zero) passes whether or not those two bits do anything.
  *
  * What the Surface Pro 11 shows (OBSERVED, one unit): ECV field 2 (the X1 probe page), CNTHCTL_EL2 0x3 at the hand-off
- * (boots 4, 5 and 7), and CNTVOFF_EL2 0 on the boot CPU (boot 3) and on all eleven secondaries (boot 7). Whether bits 13
- * and 14 can be set at EL2, whether they trap EL1 and EL0 reads, and whether SCR_EL3.ECVEn gates them: UNKNOWN until
- * hardware tests T-HW1 and T-HW2 (docs/SP11-MONITOR-PORT.md section 6.4) run. Linux's "Broken CNTVOFF_EL2" erratum names
- * this MIDR (INFERRED prior; how the register is broken is UNKNOWN).
+ * (boots 4, 5 and 7), and CNTVOFF_EL2 0 on the boot CPU (boot 3) and on all eleven secondaries (boot 7). T-HW1 and T-HW2
+ * ran once (boot 11, 2026-11-16): bits 13 and 14 stuck and an EL1 stub's counter and virtual timer reads trapped to EL2
+ * (docs/SP11-MONITOR-PORT.md section 6.2); the guest's regime, a secondary CPU and whether SCR_EL3.ECVEn gates the bits
+ * are UNKNOWN. Linux's "Broken CNTVOFF_EL2" erratum names this MIDR (INFERRED prior; how it is broken: UNKNOWN).
  *
  * Guard 1, CNTHCTL read-back: the register is read after every other register has been armed. Either bit clear means
  * the write did not stick; the monitor would then hand the guest an unscaled count, and the launch is refused with

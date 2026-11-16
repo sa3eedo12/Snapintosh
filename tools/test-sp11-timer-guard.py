@@ -4,9 +4,9 @@
 
     python3 tools/test-sp11-timer-guard.py [-v] [-k NAME]
 
-Host only: nothing here touches hardware, and every register value is made up. Whether CNTHCTL_EL2 bits 13 and 14
-can be set on a Surface Pro 11 and whether they trap EL1 reads is UNKNOWN until the hardware tests T-HW1 and T-HW2
-(docs/SP11-MONITOR-PORT.md section 6.4) have run; a read-back guard can only ever catch "does not stick", and this
+Host only: nothing here touches hardware, and every register value is made up. On the unit (OBSERVED once, boot 11, 2026-11-16)
+CNTHCTL_EL2 bits 13 and 14 stuck and trapped an EL1 stub's counter reads; the guest's regime is untested
+(docs/SP11-MONITOR-PORT.md section 6.2). A read-back guard can only ever catch "does not stick", and this
 suite includes the one world it cannot catch (bits that read set and do nothing) so that nobody mistakes it for proof.
 
   GuardModel   tools/test-sp11-timer-guard.c (address and undefined-behaviour sanitizers) runs the header's own code
