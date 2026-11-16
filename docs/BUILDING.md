@@ -12,6 +12,7 @@ stated otherwise.
 | Kernel Debug Kit for 26A428 | Installed at `/Library/Developer/KDKs/KDK_27.0_26A428.kdk`. `kmutil` links AuxKCs against it, and `tools/kc-symbolicate.py` uses its symbols |
 | Python 3 | For every host tool. The Surface Pro 11 board-descriptor, boot-contract and ACPI-check suites need 3.10 or newer |
 | Homebrew `llvm`, `meson`, `ninja` | For the air2ir3 shader compiler and its Mesa build. The scripts expect LLVM at `/opt/homebrew/opt/llvm` |
+| Homebrew `lzfse` | `tools/extract-firmware.py` unwraps the restore image's compressed IM4P payloads with `lzfse -decode` |
 | Optional: Homebrew `lld` (`lld-link`) and QEMU with the EDK2 AArch64 images | The Surface Pro 11 EFI probe and X2 test image build with `clang` and `lld-link` and nothing else; QEMU is needed only for the emulator half of their tests, which print SKIP without it. See [the EFI probe subsection](#efi-state-probe-for-the-surface-pro-11-x1) of section 7 |
 | Submodules | Clone with `git clone --recurse-submodules`, or run `git submodule update --init` in an existing checkout. The kext, plug-in, shader compiler and two drivers live in their own repositories (see the README's Repositories section) |
 | q1n1 | A checkout of [q1n1](https://github.com/Snapintosh/q1n1) next to this repository, at `../q1n1`. Several tools import its proxy client and helpers from there |
@@ -46,9 +47,11 @@ python3 tools/test-ipsw-remote.py                                # host tests, n
 ```
 
 Any doubt is a refusal: a server that ignores Range, an object that changes
-between requests, a redirect that is not https, a plan over the cap. Whether
-Apple's CDN honours Range is INFERRED from `fetch-ipsw.py`'s resumes; the real
-CDN has not been contacted by these tools. The local-path form behaves as before.
+between requests, a redirect that is not https, a plan over the cap. Apple's
+CDN honoured Range for the macOS 27.0 (26A428) image on 2026-11-16 (OBSERVED,
+one run: 24 requests and 67,054,724 bytes, 0.25% of the archive, for the J700
+boot set); the unwrapped kernelcache, device tree, TXM and SPTM digests equal
+the ones this repository pins. The local-path form behaves as before.
 
 Install the 26A428 KDK from Apple's developer downloads.
 
