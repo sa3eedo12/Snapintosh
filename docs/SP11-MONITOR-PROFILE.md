@@ -25,7 +25,7 @@ establish it. Test outcomes are not recorded in this note: they belong to the ru
 | The names of the statuses and the band table | `PREPARE_FAILURES` in `probes/run.py` | EXPERIMENTAL |
 | Where q1n1's `sha256.c` and `sha256.h` come from, when `../q1n1` is absent | `$Q1N1_SP11_TREE`, `tools/monitor_build_offline.py` | EXPERIMENTAL |
 | Host tests | `tools/test-sp11-m1-profile.py`, `tools/test-sp11-timer-guard.py` and `.c`, `StatusBands` in `tools/test-sp11-integration.py` | EXPERIMENTAL |
-| The wrapper, the loader, the bundle builder and the reporter (WI 3 and 4) | not here | UNIMPLEMENTED |
+| The wrapper, the loader, the bundle builder and the reporter (WI 3 and 4) | [SP11-STICK-WRAPPER.md](SP11-STICK-WRAPPER.md), [SP11-STICK-BUILD.md](SP11-STICK-BUILD.md) | EXPERIMENTAL (the dry run ran once on the unit) |
 
 ## 3. The flag set
 

@@ -1,16 +1,15 @@
 <!-- SPDX-License-Identifier: MIT -->
 # SP11 stick bundle: the interface between the bundle builder, the wrapper and the reporter
 
-**Status: EXPERIMENTAL, hardware NOT RUN.** This note freezes work item 1 of the monitor port plan
+**Status: EXPERIMENTAL; the dry run ran once on the unit and passed (OBSERVED, [SP11-STICK-WRAPPER.md](SP11-STICK-WRAPPER.md) section 12); the monitor entry, the GIC, the timers and the guest are hardware NOT RUN.** This note freezes work item 1 of the monitor port plan
 ([SP11-MONITOR-PORT.md](SP11-MONITOR-PORT.md), section 13): the placement rule, the chunk container, the pinned-facts record, the
-report buffer and the gate name. What exists is a C header, a Python module and a host test. No wrapper, builder, reporter or
-`REPORT.DAT` exists, nothing here has run on a Surface Pro 11, and none of the operator decisions D1 to D10 of the audit (its section 15)
-is taken: section 11 lists what the format carries for each.
+report buffer and the gate name. A C header, a Python module, host tests, the builder and the dry-run wrapper and reporter now exist, and
+none of the operator decisions D1 to D10 of the audit (its section 15) is taken for the port (the bank was approved for the dry run only): section 11 lists what the format carries for each.
 
 ## 1. Reading this document
 
 Labels (AGENTS.md): **VERIFIED** read in this repository or a reproducible host fact (a build, a test), never "ran on the Surface";
-**OBSERVED** measured on the unit (boots 3 to 7, the restart probe, the X1 and X2 runs) or reported by the operator, one unit, one boot
+**OBSERVED** measured on the unit (boots 3 to 9, the restart probe and control, the dry run, the X1 and X2 runs) or reported by the operator, one unit, one boot
 each; **INFERRED** reasoned, not checked; **EXPERIMENTAL** code exists, unqualified; **UNIMPLEMENTED** no code; **UNKNOWN** not established.
 Citations: `path:line` is this repository, `q1n1:path:line` the sibling q1n1 checkout; a quoted fragment is written
 `fragment`[path:line]. Facts about the unit come from the committed documents, not from a dump quoted here. Test outcomes are not recorded in
@@ -22,7 +21,7 @@ this note: they belong to the run that made them.
 | Layouts, constants, refusal table and the pure checks, freestanding C | `probes/sp11-stick-bundle.h` | EXPERIMENTAL |
 | Pack, unpack and the same checks in Python, an independent implementation | `tools/sp11_stick_bundle.py` | EXPERIMENTAL |
 | Host tests, native harness under AddressSanitizer and UndefinedBehaviorSanitizer | `tools/test-sp11-stick-bundle.py`, `tools/test-sp11-stick-bundle-edges.py`, `tools/test-sp11-stick-bundle.c` | EXPERIMENTAL |
-| Wrapper (`SNAPMON.BIN`), reporter (`SNAPREP.BIN`), bundle builder tool, the `SNAP_SP11_STICK` sources | none | UNIMPLEMENTED |
+| Dry-run wrapper (`SNAPMON.BIN`), reporter (`SNAPREP.BIN`), bundle builder tool, the `SNAP_SP11_STICK` sources | `tools/sp11_stick_bundle_build.py`, [SP11-STICK-WRAPPER.md](SP11-STICK-WRAPPER.md) | EXPERIMENTAL (the dry run ran once on the unit) |
 
 ## 2. The five files
 
@@ -74,7 +73,7 @@ EL2 in ABI v1, which passes no RSDP.
 | 0x090 | 32 | `guest_file_sha256` | SHA-256 | whole GUEST.DAT, equal to the runner manifest's digest | EXPERIMENTAL | builder |
 | 0x0B0 | 32 | `guest_index_sha256` | SHA-256 | its chunk table (section 4) | EXPERIMENTAL | builder |
 | 0x0D0 | 8 | `boot_mpidr` | MPIDR_EL1 | 0x80000000, the boot CPU (`docs/SP11-STICK-LOG.md:885`) | OBSERVED (boots 4, 5, 7) | unit |
-| 0x0D8 | 4 | `cntfrq_hz` | Hz | 19,200,000 (`CNTFRQ_EL0` 0x124F800, `docs/SURFACE-PRO-11.md:998`) | OBSERVED (boots 4, 5, 7, X2 T03) | unit |
+| 0x0D8 | 4 | `cntfrq_hz` | Hz | 19,200,000 (`CNTFRQ_EL0` 0x124F800, `docs/SURFACE-PRO-11.md:1004`) | OBSERVED (boots 4, 5, 7, X2 T03) | unit |
 | 0x0DC | 4 | `midr_count` | - | number of values in `midr` | EXPERIMENTAL | builder |
 | 0x0E0 | 16 | `midr` | MIDR_EL1 | 0x511F0011 (clusters 1 and 2) and 0x512F0011 (cluster 0), ascending (`docs/SP11-STICK-LOG.md:911`) | OBSERVED (boot 7, restart probe step 3) | unit |
 | 0x0F0 | 8 | `gicd_base` | PA | 0x17000000, MADT of the boot 6 dump (audit section 7, `docs/SP11-MONITOR-PORT.md:211`) | OBSERVED (boot 6 dump) | unit |
@@ -84,7 +83,7 @@ EL2 in ABI v1, which passes no RSDP.
 | 0x110 | 8 | `its_base` | PA | 0x17040000, zero when absent | OBSERVED (boot 6 dump) | unit |
 | 0x118 | 4 | `gicr_count` | - | 12 redistributor frames, all read in T05 | OBSERVED (boot 3, T05) | unit |
 | 0x11C | 4 | `timer_intid` | INTID | 26, the non-secure EL2 timer PPI of the GTDT; the monitor's `SNAP_TIMER_INTID` | OBSERVED (boot 6 dump) | unit |
-| 0x120 | 8 | `fb_base` | PA | 0xE4800000, the GOP framebuffer, inside a RESERVED descriptor (`docs/SURFACE-PRO-11.md:945`) | OBSERVED (B1 attempts 1 to 5, operator report) | unit |
+| 0x120 | 8 | `fb_base` | PA | 0xE4800000, the GOP framebuffer, inside a RESERVED descriptor (`docs/SURFACE-PRO-11.md:951`) | OBSERVED (B1 attempts 1 to 5, operator report) | unit |
 | 0x128 | 8 | `fb_bytes` | bytes | 0x1518000 = 2880 x 1920 x 4 | OBSERVED (B1 attempts 1 to 5, operator report) | unit |
 | 0x130 | 4 | `fb_width` | pixels | 2880 | OBSERVED (B1 attempts 1 to 5, operator report) | unit |
 | 0x134 | 4 | `fb_height` | pixels | 1920 | OBSERVED (B1 attempts 1 to 5, operator report) | unit |
@@ -163,7 +162,7 @@ after the previous data (the first starts at `data_offset`); bytes after the las
 **Digests, in the order the wrapper may choose to pay for them.** (1) The table digest `index_sha256`, always checked: it commits to every entry's destination, size, offset and digest, and PIN.DAT pins it
 (`guest_index_sha256`), so a GUEST.DAT built for another PIN.DAT is refused for the price of hashing at most 64 KiB. (2) Each data chunk against its entry's `sha256`. (3) The whole file against
 `guest_file_sha256`, which equals the manifest's digest. The wrapper's policy (CHUNKS, FILE, both or neither) is not in the bundle, so a cheaper check can be chosen after measurement without a format change; the
-report records the policy used. Throughput of hashing 115 MiB on the unit is UNKNOWN (U6). Without CHUNKS or FILE a corrupted data byte is not seen at EL2; the runner's check before the bounce still saw it. The hash is q1n1's freestanding `q1n1_sha256`: the monitor build already links `'../q1n1/platform/uefi/sha256.c'`[probes/run.py:127] and searches `ROOT.parent / "q1n1/platform/uefi"`[probes/run.py:168] for its header (VERIFIED), so the wrapper adds no hash code and the header takes the function as a callback.
+report records the policy used. A read-only payload hashed 144 MiB at EL2 in 0.74 s, 194 MiB/s (boots 8 and 9), and the wrapper's policy 3 took 1.90 s for its two passes, about 145 MiB/s (U6; OBSERVED, dry run), so CHUNKS|FILE costs about 0.7 s a pass and policy 0 stays a wrapper choice. Without CHUNKS or FILE a corrupted data byte is not seen at EL2; the runner's check before the bounce still saw it. The hash is q1n1's freestanding `q1n1_sha256`: the monitor build already links `'../q1n1/platform/uefi/sha256.c'`[probes/run.py:127] and searches `ROOT.parent / "q1n1/platform/uefi"`[probes/run.py:168] for its header (VERIFIED), so the wrapper adds no hash code and the header takes the function as a callback.
 
 ## 5. The placement rule
 
@@ -187,8 +186,7 @@ them against the recorded map. The map's descriptors are read as the EFI layout:
 
 **Low and bank both fit; D1 is open.** A low placement under 4 GiB: the largest low extent is 590 MiB (576 MiB on the grid), which holds a 256 MiB guest (256 + 48 + 240 = 544 MiB) and not the A16's 384 MiB
 smoke (672 MiB) (OBSERVED, boot 6 map, audit section 5). A bank placement at 0x880000000: the bank is 30720 MiB and RAM ends at 2^36, so 384 MiB + 48 + 240 = 672 MiB fits with room (OBSERVED, boot 3 T09). No rule
-above depends on the address except the 2^36 limit, and the test builds a bundle for each. What stays UNKNOWN: whether EL2's own map reaches the bank (U1, which work item 2 answers; `PLACE_UNREADABLE` is its refusal),
-and where `AllocateAnyPages` puts the 115 MiB file, which may land on a pinned placement (U6): then `PLACE_NOT_CONV` refuses, and a fixed-address allocation in the runner would end the question.
+above depends on the address except the 2^36 limit, and the test builds a bundle for each. EL2's own map reaches the bank and the bank is writable at EL2 stage 1 (U1; OBSERVED): `AT S1E2R` found all 15,361 probes of its 30720 MiB mapped, Normal write-back, outer shareable (boots 8 and 9); in the dry run `AT S1E2W` accepted 337 probes of the 672 MiB placement and 148,284,944 copied bytes were read back from DRAM, 13 of 13 data digests equal (plan DRYRUN-A step 1). The runner put a 144 MiB file at 0xC3E65000 and the 138 MiB GUEST.DAT at 0xC446E000, both at the top of the low extent (U6; OBSERVED, INFERRED for the dry run's file), so a low placement must be declared (`PLACE_DECLARED` in the builder, `PLACE_NOT_CONV` against the final map). What stays UNKNOWN: whether DC CVAC alone reaches DRAM (CIVAC cleans first, so the read-back cannot tell).
 
 ## 6. The report buffer
 
@@ -428,7 +426,7 @@ only the runner's current behaviour (VERIFIED, not promised) keeps for SNAPREP. 
 | 3 builder | BUILT for the synthetic path: `tools/sp11_stick_bundle_build.py` builds PIN.DAT, GUEST.DAT, REPORT.DAT and the manifest with this interface, takes the facts from the dumps and refuses a disagreement ([SP11-STICK-BUILD.md](SP11-STICK-BUILD.md)). Left: the `real` path (`xnuboot.build()`'s chunks from the Mac's kernelcache, U9) and a boot-ready descriptor |
 | 4 wrapper, reporter | BUILT for the dry run (`probes/sp11-stick-*`, [SP11-STICK-WRAPPER.md](SP11-STICK-WRAPPER.md)): the checks in the order of section 8 with the stage written between them, the copy with cache maintenance, the guarded probe of the placement, the reporter's lines. Left (4b): the GIC, the monitor call, the head's remaining stages, and the `SNAP_SP11_STICK` sources through the `OPTIONAL` table; no `memcpy` or `memset` call: the header compiles without any, but `= {0}` or a by-value copy of one of its structures can compile to one even under `-ffreestanding` (with the monitor's flags clang calls `memcpy` for a copy of the 296-byte report head and `memset` for its `= {0}`; GCC does so for the environment structure too), so freestanding code initialises and stores such structures word by word, as the wrapper does |
 | 6 authorisation | the record whose digest PIN.DAT pins; the store classes; the digests of the two payloads (`authorisation-template` prints it, with an optional note that is part of the digest: SP11-STICK-BUILD.md section 6) |
-| 7 dry run | the hash policy from the measured throughput (U6); where `AllocateAnyPages` puts GUEST.DAT; that REPORT.DAT is readable by SNAPREP after the wrapper returns |
+| 7 dry run | RAN once on the unit and passed (OBSERVED, [SP11-STICK-WRAPPER.md](SP11-STICK-WRAPPER.md) section 12): the hashes agreed, the copy was read back from DRAM, SNAPREP read REPORT.DAT after the wrapper returned. Left: the wrapper's refusal paths on the unit, and whether DC CVAC alone reaches DRAM |
 
 ## 13. Checking this note
 

@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: MIT -->
 # SP11 stick wrapper and reporter: SNAPMON.BIN and SNAPREP.BIN (work item 4a)
 
-**Status: EXPERIMENTAL, hardware NOT RUN.** Nothing here has executed on a Surface Pro 11. Every test result below is a host result (a
-fake machine, section 9) or, where section 10 says so, a QEMU result. Labels as in [SP11-STICK-BUNDLE.md](SP11-STICK-BUNDLE.md) section 1:
-VERIFIED (a test in this tree shows it), OBSERVED (seen once, on the host that built it), INFERRED, EXPERIMENTAL, UNIMPLEMENTED (not in this
+**Status: EXPERIMENTAL. The dry run ran once on a Surface Pro 11 and passed on the first attempt (OBSERVED, 2026-11-16, one unit, one boot; section 12); the monitor entry, the GIC, the timers and the guest are hardware NOT RUN, and so are the wrapper's refusal paths on the unit.** The other test results below are host results (a
+fake machine, section 9) or, where section 10 says so, QEMU results. Labels as in [SP11-STICK-BUNDLE.md](SP11-STICK-BUNDLE.md) section 1:
+VERIFIED (a test in this tree shows it), OBSERVED (seen once, on the host that built it, or on the unit where a sentence says so), INFERRED, EXPERIMENTAL, UNIMPLEMENTED (not in this
 build), UNKNOWN. Test outcomes are not recorded here; they belong to the run that made them.
 
 ## 1. What this is
@@ -88,8 +88,9 @@ Until COPYING nothing but REPORT.DAT is stored to (VERIFIED: the harness logs ev
 are exactly the chunk ranges of the table: the harness shows the merged ranges equal the union of the chunks and no byte more.
 
 **The policy.** The table digest is always checked; `SP11_STICK_HASH_POLICY` (default `CHUNKS|FILE` = 3, a compile-time value 0 to 3) adds the
-chunk digests and the whole-file digest. The report records the policy used. Hash speed on the unit is UNKNOWN (U6); a cheaper policy is a rebuild,
-no change of format.
+chunk digests and the whole-file digest. The report records the policy used. On the unit the default took 1.90 s for the two digest passes over 275.9 MiB, about 145 MiB/s,
+0.96 s for the verification and 2.92 s for the whole wrapper (OBSERVED, section 12); the q1n1 payload `hashbig` had hashed 144 MiB at 194 MiB/s (OBSERVED, section 8). A cheaper
+policy such as 0 stays a wrapper choice, a rebuild and no change of format.
 
 **Refusals.** `REFUSED=<NAME> STAGE=<S> DETAIL=0X..` is printed (and stored, when REPORT.DAT is usable), then one of: `NOTHING STORED:
 REPORT.DAT NOT USED YET`, `RAM UNTOUCHED BEYOND REPORT.DAT` (stage below COPYING), `PLACEMENT WRITTEN CHUNKS_COPIED=k OF=n`. The return
@@ -123,7 +124,8 @@ SNAPMON TICKS HZ=.. PLACED=.. COPIED=.. HASHED=..    SNAPMON STAGE=DONE RETURN=0
 SNAPMON MONITOR NOT CALLED: UNIMPLEMENTED IN THIS BUILD
 ```
 
-The `AT ... ATTR= SH=` lines answer U6 for the big file: is GUEST.DAT cacheable at EL2. `TICKS=` on the GUEST_OK line is the time of the stage-7
+The `AT ... ATTR= SH=` lines answer U6 for the big file: is GUEST.DAT cacheable at EL2. The unit's lines are in section 12 (`WB`, outer shareable: `SH=OS` where the fake machine
+says `SH=IS`). `TICKS=` on the GUEST_OK line is the time of the stage-7
 hashing; the head has no field for it (section 11).
 
 ## 4. What the unit does to the machine
@@ -134,7 +136,7 @@ reads the encodings of every code word and, separately, the disassembly):
 - **System register reads (MRS):** CurrentEL, MIDR_EL1, MPIDR_EL1, CNTFRQ_EL0, CNTPCT_EL0, CTR_EL0, HCR_EL2, SCTLR_EL2, TCR_EL2, PAR_EL1. **No MSR**
   of any kind, no TLBI, no IC, no SMC, HVC, SVC or ERET, no BR, no wait or event hint. The reporter has no MRS at all.
 - **Cache maintenance by VA:** DC CVAC and DC CIVAC, DSB SY and ISB; the stride is CTR_EL0.DminLine clamped to 16..64 bytes (this core's value is
-  UNKNOWN; a stride above the real line would skip lines, so an implausible one is clamped down). No DC IVAC: a pure invalidate could drop dirty
+  64 bytes, OBSERVED, section 12; a stride above the real line would skip lines, so an implausible one is clamped down). No DC IVAC: a pure invalidate could drop dirty
   bytes of an edge line the wrapper does not own. No IC: nothing in the placement is executed in this build.
 - **Translation probes:** AT S1E2W and AT S1E2R, each followed by ISB and a read of PAR_EL1. PAR_EL1 is the one register this build changes, as a
   side effect of the instruction (INFERRED harmless: nothing of the runner reads it).
@@ -157,8 +159,7 @@ follows the firmware's block size, INFERRED). `load32` reads the first and last 
 (16-byte granular), its place inside the placement and the pinned guest window, and its source inside the file are checked again from the file.
 
 The verification reads the copy back after DC CIVAC, which writes back before it invalidates, so it proves the bytes are in DRAM and cannot tell a
-missing DC CVAC from a working one: the clean after each chunk is verified on the host by the cache model of the harness, not on the unit (UNKNOWN
-on the unit: whether the placement is cacheable as the probes report it, and whether a CVAC reaches DRAM).
+missing DC CVAC from a working one: the clean after each chunk is verified on the host by the cache model of the harness, not on the unit (on the unit the placement was writable and the copy read back from DRAM matched, OBSERVED, section 12; UNKNOWN there: whether a CVAC alone reaches DRAM).
 
 ## 6. The reporter
 
@@ -185,14 +186,22 @@ The manifest order is the bundle note's: SNAPMON.BIN, SNAPREP.BIN, GUEST.DAT, PI
 `--monitor build/sp11-wrapper/SNAPMON.BIN --reporter build/sp11-wrapper/SNAPREP.BIN`, and the facts and authorisation record as its note says
 (`docs/SP11-STICK-BUILD.md`), with `--stores ram,el2_sysreg` (the format's minimum) and a `--note FILE` that says in the record's section 6 what this
 wrapper does and does not do (the record is the operator's approval, so the note is part of what is approved). **This note authorises no run.** A run on the unit
-needs the operator's authorisation record, the single hardware client and the safety rules of AGENTS.md; none of that was done.
+needs the operator's authorisation record, the single hardware client and the safety rules of AGENTS.md; the one run of section 12 had its own record, approved by the operator for that dry run only.
 
 ## 8. UNIMPLEMENTED and UNKNOWN
 
 - UNIMPLEMENTED: the monitor entry, the stop timer, the GIC bring-up (and so GIC_NOT_READY), the decode of the monitor's window, and the reporter's
   comparison of the raw reads with PIN.DAT's pinned values and its "PIN.DAT damaged" row (the reporter does not read PIN.DAT).
-- UNKNOWN until a run: hash throughput (U6); where the runner's allocator puts the 138 MiB GUEST.DAT of the default bundle (144,665,408 bytes); whether EL2's own map reaches the bank at
-  0x880000000 (U1) and the placement as probed; whether the report survives a restart; this core's DminLine; whether 2 MiB sampling finds every hole.
+- Answered on the unit (OBSERVED, one unit: the `memhash` plan of 2026-11-16, boots 8 and 9, with the read-only q1n1 payloads `hashbig` and `el2mem` and a 144 MiB data file, and the dry
+  run of section 12; read from videos of the panel, not CRC-verified; the ID registers read are in [SURFACE-PRO-11.md](SURFACE-PRO-11.md), E65):
+  - **U1, does EL2's own stage 1 reach the bank: yes, and the bank is writable.** `AT S1E2R` found all 15,361 probes of the 30,720 MiB bank at 0x880000000 mapped, and all 16,014 probes of the
+    17 conventional extents (31,961 MiB) mapped Normal write-back, outer shareable, non-secure and identity; the dry run's `AT S1E2W` accepted all 337 probes of its 672 MiB placement. This
+    wrapper's probe passes a page that AT reports mapped, an identity mapping and, for a write probe, Normal write-back (section 5), whatever its shareability.
+  - **U6, hash throughput.** `hashbig`: 144 MiB in 0.74 s, 194 MiB/s, the digest equal to the runner's. The wrapper's own policy 3: about 145 MiB/s (section 3).
+  - **U6, where the runner puts the big file.** A 144 MiB data file at 0xC3E65000 in both memhash boots and the 144,665,408-byte GUEST.DAT at 0xC446E000 in the dry run, each at the top of the
+    590 MiB low extent (INFERRED for the dry run; 0xA8000000 to 0xCCE65000 before the allocation); the other files at 0xCEA7E000 to 0xCEA8D000 and REPORT.DAT at 0xCE9FD000 (one boot's allocations).
+- UNKNOWN: whether DC CVAC alone reaches DRAM (the verification's CIVAC cleans first); every refusal path of the wrapper and the reporter on the unit (only the happy path ran); whether
+  the report survives a restart; whether 2 MiB sampling finds every hole; whether the runner's placement repeats on another boot.
 - Host evidence cannot show: real cache or MMU behaviour, memory attributes, timing, the runner's fault page, EL3.
 
 ## 9. Tests and what they show
@@ -243,7 +252,8 @@ the harness captures. It SKIPs, never passes, without QEMU, an EDK2 image, the s
 What it showed that the host could not: the real runner's arguments, `puts`, `hex` and `load32` and a real EL2 accept the wrapper; AT S1E2W/R, DC CVAC
 and DC CIVAC, the register reads and the 8-byte stores work there; the placement and GUEST.DAT probe as Normal write-back, inner shareable; the runner's
 allocator (`AllocateAnyPages`) put the 15 MB file at the top of conventional memory, just under the map buffer, so a placement at the foot of the
-extent was never in its way (OBSERVED on QEMU; U6 stays UNKNOWN for the unit's 144,665,408-byte file).
+extent was never in its way (OBSERVED on QEMU; on the unit the same runner put a 144 MiB data file at the top of the low extent, 0xC3E65000, in both boots: OBSERVED,
+section 8; the unit's 144,665,408-byte GUEST.DAT went to 0xC446E000, section 12).
 
 Two findings. (1) `-cpu max`, the harness's default, has EDK2 set TCR_EL2.T0SZ to 16 (OBSERVED in q1n1's logs), which the interface's rule (T0SZ 17 to 24,
 `EL2_REGIME`) refuses: the wrapper is right to refuse, and the test runs `-cpu cortex-a76` (T0SZ 24) and `-m 2G` (the smallest placement is 480 MiB)
@@ -268,3 +278,22 @@ a clean reaches DRAM (QEMU has no cache); and the RAM after the run (nothing ins
 - The sources are not in `probes/run.py`'s `OPTIONAL` table, as the bundle note's section 7 expects: this wrapper is a separate payload with its own
   build tool, and a gate-on monitor link would not put the head at offset 0 of the file. 4b needs that hunk and, then, a decision on the file layout.
 - The dry run takes the GIC macros from a monitor profile instead of from a monitor build, because it has none.
+
+## 12. The dry run on the unit (OBSERVED, one unit, one boot, 2026-11-16)
+
+Plan DRYRUN-A, one autorun step: slbounce's de-VHE build, then the runner with SNAPMON.BIN (35,164 bytes), SNAPREP.BIN (21,076 bytes), the 144,665,408-byte GUEST.DAT, PIN.DAT and
+REPORT.DAT, for the bank placement 0x880000000 with a 384 MiB guest, under an authorisation record (SHA-256 prefix 45c36225) that the operator approved for this dry run only. The
+numbers were read from the video of the panel and are not CRC-verified; each SNAPREP line that repeats a SNAPMON line agrees with it. **It passed on the first attempt**: no refusal,
+fault page or restart.
+
+- Runner: `READY FILES=5 RANGES=8`, `VERIFY=OK` before each call. Wrapper: ENTERED to DONE, return 0, `LOADS=2 FAULTS=0 REFUSED=0`, then `MONITOR NOT CALLED: UNIMPLEMENTED IN THIS
+  BUILD`. Reporter: `DRY RUN COMPLETE STAGE=DONE`, `PIN=OK GUEST=OK POLICY=0X3`, read from REPORT.DAT in RAM after the wrapper returned.
+- The pins held: MIDR 0x512F0011, MPIDR 0x80000000, CNTFRQ 19200000, HCR_EL2 0x88000010, TCR_EL2 0x80843514, the framebuffer and the EL2 regime.
+- Placement: one 30 GiB conventional descriptor (`DESC=215`), writable (337 `AT S1E2W` probes, Normal write-back, outer shareable). 16 chunks, 148,284,944 bytes, were copied into
+  0x880000000 and 13 of 13 data digests matched when re-read from DRAM after DC CIVAC. GUEST.DAT sat at 0xC446E000, ending at the low extent's end (INFERRED).
+- This core: `CTR_EL0` 0xB444C004, DminLine 64 bytes, which is the stride of the cleans (X2 T01 read the same value). INFERRED decode, Arm ARM not re-read: IDC 1, DIC 1.
+- Ticks at 19.2 MHz from the wrapper's entry: placement checks 37,503; digests 36,519,004 (1.90 s); copy 1,120,002 (58 ms); verification 18,437,817 (0.96 s); total 56,114,326 (2.92 s).
+- The stick afterwards: every staged file unchanged, REPORT.DAT all zero, one new file, the Shell's marker. The unit wrote nothing to it (A2, the first stick sector write, not exercised).
+
+**NOT RUN on the unit:** every refusal path of the wrapper and the reporter (only the happy path ran); the report's survival across a restart (none happened); whether DC CVAC alone reaches
+DRAM; the monitor entry, the GIC (U3), the timer traps (U2), SMP and the restart cause (U4), PAuth (U8) and the real kernelcache bundle (U9).

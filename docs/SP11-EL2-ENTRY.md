@@ -327,8 +327,8 @@ group or the `SCTLR_EL2` write, none of which the dry run ran (the next paragrap
 `HCR_EL2` 0x88000010 (E2H 0), `TCR_EL2` 0x80843514, `TTBR0_EL2` and `MAIR_EL2` unchanged, `CPTR_EL2` 0x22FF, `CNTHCTL_EL2` 0x3
 and `SCTLR_EL2` with M, C and I set: the values the trampoline writes, MMU on, q1n1 executing (M1, and M2 after the flip). The
 firmware-descriptor question that `test_observed_sp11` could not model did not show either: q1n1's pages kept executing under
-the non-VHE regime (OBSERVED for those pages; the XN-bit-54 reading is INFERRED). M8: T02 gave K1 GO (OBSERVED, 2026-11-14); a later run's REGIME row read E2H 0, TGE 1 beside a GO (OBSERVED once). Not measured: M5, other EL2
-registers, repeatability; M4 in part (2026-11-15). Uptime: 4 s here, 123 s on 2026-11-15.
+the non-VHE regime (OBSERVED for those pages; the XN-bit-54 reading is INFERRED). M8: T02 gave K1 GO (OBSERVED, 2026-11-14); a later run's REGIME row read E2H 0, TGE 1 beside a GO (OBSERVED once). Not measured: M5, most other EL2
+registers, repeatability; M4 in part (2026-11-15). Boot CPU, 2026-11-16: MDCR_EL2 0x6, ICC_SRE_EL2 0xF. Uptime: 4 s here, 123 s on 2026-11-15.
 
 ### 2.11 What the model does not prove
 
