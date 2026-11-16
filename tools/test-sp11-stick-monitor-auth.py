@@ -50,7 +50,7 @@ sha = lambda data: hashlib.sha256(data).hexdigest()     # noqa: E731
 LLVM = ('clang', 'ld.lld', 'llvm-objcopy', 'llvm-readelf', 'llvm-nm', 'llvm-objdump')
 OWN = ('tools/sp11_stick_bundle_m1.py', 'tools/sp11_monitor_census.py', 'tools/test-sp11-stick-monitor-auth.py', 'tools/test-sp11-stick-monitor-interlock.py',
        'docs/SP11-STICK-MONITOR.md')
-DOC_CAP = 46000         # raised from 36,000 on purpose (Phase C: section 13, the failure table, the stack and `_start` text); nothing was cut to make room
+DOC_CAP = 60000         # raised from 46,000 on purpose (Phase D: section 14 and the corrections; 36,000 before Phase C); nothing was cut to make room
 # The records the operator was shown or approved, regenerated here from the files they were made from (docs/SP11-MONITOR-PORT.md section 15 D4/D7).
 RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e035977bf700e',
            'gic and stop dry run': 'c74f7af0217c507e7738673b9d437d6c76589ef3c243c23eef4837b0ca435b3b',
@@ -58,7 +58,7 @@ RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e03597
 FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=7, time_box_s=5, label='M1-FIXED', monitor=(445935, '1' * 64), reporter=(58463, '2' * 64),
              note=None, gic_stop=False, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
 # The SHA-256 of record_text for FIXED and FABRICATED[...]: the text of an M1 record is what the operator approves, so a changed byte is another record.
-GOLDEN = {'a test record': 'ad9efc9336b556ca98292120997b24b61f49599966302a37a094ae334cd9873c', 'another record': '9ef9e729a0ca3e8590f8e831588dd21f9013e7c35fd2dce88f3c126dba5ba7f6'}
+GOLDEN = {'a test record': '7db08474819ac1e73a77059c9bc568912d8bb68967376bd08ec29eaf35377566', 'another record': '1f8cb965877cbef212bd3f8a3cbe8d595d318a525f969b9443e3ebe038307f7f'}
 
 
 def quietly(function, *args):
@@ -106,18 +106,22 @@ def fabricate(tool='nv2-ingest', offset=0x20000, wrapper=None, monitor=None, rec
     return dict(image=image, reporter=reporter, report=report, monitor=monitor, wrapper=wrapper, record=record, offset=offset)
 
 
+EFI = {'SLBOUNCE-DEVHE-MARK.EFI': '7' * 64, 'Q1N1-PAYLOAD.EFI': '8' * 64}        # what --m1-efi names in every record these tests build: nothing here stages them
+EFI_ARGS = [f'{n}={d}' for n, d in EFI.items()]
+
+
 def stage(name, fx=None, report=None, image=None, reporter=None, raw=None):
-    """Write a fabricated build below the scratch directory, with any part replaced; returns the paths."""
+    """Write a fabricated build below the scratch directory, with any part replaced; returns the paths, and --m1-efi that goes with --m1-run."""
     fx = fx or STATE['fake']
     d = SCRATCH / 'fake' / name
     paths = dict(monitor=BT.write(d / 'SNAPMON-M1.BIN', fx['image'] if image is None else image),
                  reporter=BT.write(d / 'SNAPREP-M1.BIN', fx['reporter'] if reporter is None else reporter),
-                 m1_run=BT.write(d / 'build-report.json', raw if raw is not None else json.dumps(fx['report'] if report is None else report).encode()))
+                 m1_run=BT.write(d / 'build-report.json', raw if raw is not None else json.dumps(fx['report'] if report is None else report).encode()), m1_efi=EFI_ARGS)
     return paths
 
 
 def template(paths, **over):
-    return BT.template(stores='ram,el2_sysreg,gic', **paths, **over)
+    return BT.template(**{'stores': 'ram,el2_sysreg,gic', **paths, **over})
 
 
 def mutated(report, fn):
@@ -148,7 +152,8 @@ def setUpModule():
     STATE['record'] = json.loads((STATE['profile'] / 'profile-build.json').read_text())
     default = str(ROOT / 'config/monitor-profile-sp11-m1.json')
     STATE['m1'] = wb.build_monitor(str(SCRATCH / 'm1'), default, str(STATE['profile'] / 'xnuboot.bin'), str(STATE['profile'] / 'profile-build.json'))
-    STATE['real'] = dict(monitor=str(SCRATCH / 'm1' / 'SNAPMON-M1.BIN'), reporter=str(SCRATCH / 'm1' / 'SNAPREP-M1.BIN'), m1_run=str(SCRATCH / 'm1' / 'build-report.json'))
+    STATE['real'] = dict(monitor=str(SCRATCH / 'm1' / 'SNAPMON-M1.BIN'), reporter=str(SCRATCH / 'm1' / 'SNAPREP-M1.BIN'), m1_run=str(SCRATCH / 'm1' / 'build-report.json'),
+                         m1_efi=EFI_ARGS)
     STATE['real_text'] = template(STATE['real'])[1]
 
 
@@ -469,8 +474,9 @@ class Text(BT.Case):
 
     def test_the_thermal_exception_is_asked_for_and_no_guard_is_claimed(self):
         flat = ' '.join(STATE['text'].split())
-        for needle in ('Thermal (D8): no thermal guard exists on this path', 'reachable only through PARAMS early_stop.flags, which the builder required zero (PARAMS_LAUNCH)',
-                       'compat/hamoa-thermal.c is linked and no caller was found (INFERRED)', 'Nothing reads a temperature during the run',
+        for needle in ('Thermal (D8): no thermal guard exists on this path', 'only loads, from the A16\'s sensor addresses', 'where this machine\'s is UNKNOWN',
+                       'It is closed by c->thermal', 'the builder required it zero (PARAMS_LAUNCH)', 'a PRIVATE gate, section 3b',
+                       'compat/hamoa-thermal.c is not in the monitor', 'Nothing reads a temperature during the run',
                        'Approving this record accepts the exception D8 describes', 'the census sees system registers only, not MMIO'):
             self.assertIn(needle, flat)
         for claim in ('thermal guard is on', 'thermal guard on.', 'guarded by', 'TSENS is read', 'temperature is read'):
@@ -525,7 +531,7 @@ class Text(BT.Case):
 def m1_facts(test=False):
     """The facts read_report returns for a fixed fabricated build."""
     fx = fabricate(tool=m1.TEST_TOOL if test else 'nv2-ingest')
-    return m1.read_report(json.dumps(fx['report']).encode(), fx['image'], fx['reporter'])
+    return m1.read_report(json.dumps(fx['report']).encode(), fx['image'], fx['reporter'], dict(EFI))
 
 
 # ---- (f) the record against the binaries --------------------------------------------------------------------------------------------

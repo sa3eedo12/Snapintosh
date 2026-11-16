@@ -80,6 +80,10 @@ CASES = {
     'refuse-params-box9': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, 9)]),
     'refuse-image-digest': dict(world=lambda b: dict(images={0: M.FAKE_FILE[:-1] + b'\x5a'})),
     'refuse-image-size': dict(world=lambda b: dict(sizes={0: len(M.FAKE_FILE) + 4096, 1: 0x6000})),
+    'refuse-pin-not-m1': dict(world=lambda b: dict(pin=b.pin)),       # the reviewer's mix: the PIN.DAT of a --gic-stop bundle with the monitor's file
+    'refuse-pin-label-late': dict(world=lambda b: dict(pin=M.marked_pin(b, b'x' + M.LABEL_PREFIX.encode()))),
+    'refuse-pin-label-nodash': dict(world=lambda b: dict(pin=M.marked_pin(b, b'M1RUNxexample'))),
+    'happy-label-short': dict(world=lambda b: dict(pin=M.marked_pin(b, b'M1RUN-a'))),      # only the marker is tested, not the rest of the label
     'refuse-window-dirty': dict(world=lambda b: dict(report=b.report[:0x3000] + b'\x01' + b.report[0x3001:])),
     'refuse-filler-dirty': dict(world=lambda b: dict(report=b.report[:M.FILLER_AT + 0x8000] + b'\x01' + b.report[M.FILLER_AT + 0x8001:])),
     'refuse-report-ro': dict(extra=lambda w: [f'AT {w.REPORT + M.STACK_AT:#x} 0x1000 ro']),
@@ -100,7 +104,8 @@ SEED_CASES = {'no-params-check': ('refuse-params-early',), 'no-digest': ('refuse
               'stray-gic': ('happy',), 'wrong-args': ('happy',), 'no-s2': ('happy',), 'no-overrun-check': ('overrun-gap',), 'store-after': ('happy',),
               'refuse-after': ('leave-hcr',), 'no-gic-finish': ('not-restored', 'refuse-not-restored'),
               'no-filler-scan': ('overflow-4', 'overflow-skip-lowest'), 'no-filler-precheck': ('refuse-filler-dirty',), 'no-filler-clean': ('overflow-4',),
-              'flush-unwritable': ('refuse-record-ro',), 'ticks-early': ('happy',), 'no-window-clean': ('happy',), 'no-record-clean': ('happy',)}
+              'flush-unwritable': ('refuse-record-ro',), 'ticks-early': ('happy',), 'no-window-clean': ('happy',), 'no-record-clean': ('happy',),
+              'no-label-check': ('refuse-pin-not-m1', 'refuse-pin-label-late', 'refuse-pin-label-nodash')}
 
 
 class Run:
@@ -320,6 +325,21 @@ class Returns(Base):
         rec_nonzero = sum(1 for b in r.recs['FINAL'] if b) + sum(1 for b in r.g.rec if b) + 1       # the record, the GIC record and the window's entered word
         self.assertEqual(r.mon.report_tail, rec_nonzero, 'every non-zero byte beyond the head is the records or the monitor window')
 
+    def test_only_the_marker_is_tested(self):
+        """A one-character facts label passes: the check is on the first six bytes of the label, and the same stage calls the monitor."""
+        r = RUNS['happy-label-short']
+        self.holds(Held.common(r) + Held.order(r) + Held.args(r))
+        self.assertEqual((r.mon.ret, head_of(r)['refusal'], head_of(r)['monitor_entered']), (0, 0, 1))
+
+    def test_a_mix_with_another_bundle_is_refused_before_the_call(self):
+        """The reviewer's mix, run through the C stage: SNAPMON-M1.BIN's stage with the PIN.DAT of a --gic-stop bundle, whose record says that no monitor
+        is called. The page names the refusal, and a label that has the marker anywhere but first, or all of it but one byte, is the same refusal."""
+        for name in ('refuse-pin-not-m1', 'refuse-pin-label-late', 'refuse-pin-label-nodash'):
+            with self.subTest(name):
+                r = RUNS[name]
+                self.holds(Held.refused_before_call(r, M.OUT.PIN_LABEL))
+                self.assertTrue(any(t.startswith('SNAPMON MON VERDICT=PIN_LABEL') for t in r.mon.texts()), r.mon.texts())
+
     def test_every_run_holds_the_common_properties(self):
         for name, r in RUNS.items():
             if name.startswith('refuse'):
@@ -442,6 +462,7 @@ class Checks(Base):
         for name, code in (('refuse-params-early', M.OUT.PARAMS_EARLY_STOP), ('refuse-params-gpu', M.OUT.PARAMS_GPU), ('refuse-params-box0', M.OUT.PARAMS_BOX),
                            ('refuse-params-box9', M.OUT.PARAMS_BOX), ('refuse-image-digest', M.OUT.IMAGE_DIGEST), ('refuse-image-size', M.OUT.IMAGE_SIZE),
                            ('refuse-window-dirty', M.OUT.WINDOW_DIRTY), ('refuse-filler-dirty', M.OUT.WINDOW_DIRTY),
+                           ('refuse-pin-not-m1', M.OUT.PIN_LABEL), ('refuse-pin-label-late', M.OUT.PIN_LABEL), ('refuse-pin-label-nodash', M.OUT.PIN_LABEL),
                            ('refuse-report-ro', M.OUT.REPORT_UNWRITABLE), ('refuse-record-ro', M.OUT.REPORT_UNWRITABLE)):
             with self.subTest(name):
                 r = RUNS[name]
@@ -457,7 +478,7 @@ class Checks(Base):
 
     def test_the_other_refusals_do_store_the_record(self):
         """The control of the one above: the record slot is stored for every other refusal, so that the reporter names it after a restart."""
-        for name in ('refuse-params-gpu', 'refuse-window-dirty', 'refuse-filler-dirty', 'refuse-image-digest'):
+        for name in ('refuse-params-gpu', 'refuse-window-dirty', 'refuse-filler-dirty', 'refuse-image-digest', 'refuse-pin-not-m1'):
             with self.subTest(name):
                 self.assertTrue(M.decode(RUNS[name].recs['REFUSED']), name)
 
@@ -581,7 +602,8 @@ class Seeded(Base):
                   'store-after': Held.stores, 'refuse-after': Held.head, 'no-gic-finish': GicRecord.agree,
                   'no-filler-scan': Held.overflow_seen, 'no-filler-precheck': lambda r: Held.refused_before_call(r, M.OUT.WINDOW_DIRTY),
                   'no-filler-clean': Held.clean, 'flush-unwritable': Held.record_untouched, 'ticks-early': Held.ticks_at_call,
-                  'no-window-clean': Held.clean, 'no-record-clean': Held.clean}
+                  'no-window-clean': Held.clean, 'no-record-clean': Held.clean,
+                  'no-label-check': lambda r: Held.refused_before_call(r, M.OUT.PIN_LABEL)}
         for seed, check in checks.items():
             with self.subTest(seed):
                 for name in SEED_CASES[seed]:

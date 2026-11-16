@@ -5,7 +5,8 @@
  *
  * Order, one sub-stage between steps and the record (REPORT.DAT + 0x12000) stored whole after each, so that a hang is named by the last one:
  *   checks    reads only: REPORT.DAT's record slot and stack area probed writable, the monitor's window and the filler below the stack's area zero,
- *             PARAMS (time box, early_stop.flags and gpu.flags), the ID registers, the monitor image in the file hashed in place against the build's
+ *             the PIN.DAT's label marked as this kind's (SP11_STICK_MONITOR_LABEL_PREFIX), PARAMS (time box, early_stop.flags and gpu.flags), the ID
+ *             registers, the monitor image in the file hashed in place against the build's
  *             pin. A check that fails refuses with GIC_NOT_READY and an SM_OUT_* detail before anything is stored but REPORT.DAT; the record slot
  *             is stored with it, except for REPORT_UNWRITABLE, whose slot is what was found unwritable.
  *   sync      IC IALLUIS, DSB ISH, ISB: the guest will execute what the copy wrote with data stores.
@@ -109,7 +110,8 @@ static int mon_params_chunk(const struct sw_ctx *c, uint64_t *dest, uint64_t *si
 }
 
 /* PARAMS as the copy left it in the placement (the digests of the chunks were checked): the time box must be one the plan allows, and the
- * two blocks of the A16's that would reach for hardware this machine does not have must be off. */
+ * two blocks that open device code and firmware calls (gpu.flags, early_stop.flags: record section 3b) must be off. The monitor reads both
+ * again while the guest runs, so this is a snapshot and not a gate. */
 static unsigned mon_params(struct sw_mon *m)
 {
     struct sw_mon_rec *r = &m->rec.r;
@@ -149,6 +151,21 @@ static unsigned mon_image(struct sw_mon *m)
     return 0;
 }
 
+/* The PIN.DAT is the build's own for this kind of run: its build_label starts with the marker that only --m1-run's builder writes. A label is not
+ * a digest of the record: it shows which builder path made the PIN.DAT and nothing about what the record says, and a hand-edited PIN.DAT carries
+ * whatever label its editor gives it (the interface's own checks and the operator's stager verify are what stand against that). */
+static unsigned mon_pin_label(const struct sw_mon *m)
+{
+    const uint8_t *label = SP11SB_PIN_AT(m->c->pin, build_label);
+    unsigned i;
+#ifdef SP11_STICK_MONITOR_SEED_NO_LABEL_CHECK
+    return 0;
+#endif
+    for (i = 0; i + 1 < sizeof(SP11_STICK_MONITOR_LABEL_PREFIX); i++)
+        if (label[i] != (uint8_t)SP11_STICK_MONITOR_LABEL_PREFIX[i]) return SM_OUT_PIN_LABEL;
+    return 0;
+}
+
 static unsigned mon_checks(struct sw_mon *m)
 {
     struct sw_mon_rec *r = &m->rec.r;
@@ -158,7 +175,7 @@ static unsigned mon_checks(struct sw_mon *m)
     r->id[2] = sp11hw_read_revidr_el1();
     r->id[3] = sp11hw_read_id_aa64isar1_el1();
     r->id[4] = sp11hw_read_id_aa64isar2_el1();
-    if ((out = mon_report_ready(m)) != 0 || (out = mon_params(m)) != 0) return out;
+    if ((out = mon_report_ready(m)) != 0 || (out = mon_pin_label(m)) != 0 || (out = mon_params(m)) != 0) return out;
     return mon_image(m);
 }
 

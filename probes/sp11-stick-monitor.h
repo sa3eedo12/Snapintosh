@@ -34,6 +34,13 @@
 _Static_assert((SP11_MONITOR_OFFSET) % 4096 == 0 && (SP11_MONITOR_OFFSET) > 0 && (SP11_MONITOR_BYTES) >= 0x1000,
                "the monitor starts on a page and its vectors, 2 KiB into the image, are then 2 KiB aligned (VBAR_EL2)");
 
+/* The pinned build_label of a bundle built for this run starts with these bytes: tools/sp11_stick_bundle_m1.py LABEL_PREFIX, which adds them to the
+ * facts label for --m1-run and to no other kind of bundle (a facts label that carries them is refused there). The stage refuses a PIN.DAT whose label
+ * lacks them before it calls anything: SNAPMON-M1.BIN paired with the PIN.DAT of a bundle whose record says that no monitor is called (the dry run,
+ * the GIC and stop dry run) is the mix this catches. tools/test-sp11-stick-monitor-builder.py compares the two spellings. */
+#define SP11_STICK_MONITOR_LABEL_PREFIX "M1RUN-"
+_Static_assert(sizeof(SP11_STICK_MONITOR_LABEL_PREFIX) - 1 == 6, "the marker and the facts label must fit the 23 bytes that sp11sb_string_ok allows");
+
 /* ---- Parameters. A different value is a different binary and so a different authorisation. ---- */
 #ifndef SP11_STICK_MONITOR_BOX_MAX_S
 #define SP11_STICK_MONITOR_BOX_MAX_S 5u         /* the longest time box PARAMS may carry (D5: 5 s); the 20 s UPTIME precaution is not tested beyond it */
@@ -56,7 +63,7 @@ _Static_assert(SM_FILLER_AT == 0x13000u && SM_FILLER_BYTES == 0x2E000u && SM_FIL
 #define SM_PARAMS_BYTES 0x2410u
 #define SM_PARAMS_WATCHDOG 192u         /* watchdog_seconds: how long the guest runs before the monitor takes it back */
 #define SM_PARAMS_GPU_FLAGS 0x2340u     /* gpu.flags: zero leaves every Stage-4 GPU path off */
-#define SM_PARAMS_EARLY_STOP_FLAGS 0x23E0u      /* early_stop.flags: bit 3 would read the A16's thermal sensors at addresses that are not this machine's */
+#define SM_PARAMS_EARLY_STOP_FLAGS 0x23E0u      /* early_stop.flags: bit 3 makes setup allocate c->thermal and so opens the loads from the A16's sensor addresses */
 
 /* ---- sp11-stick-monitor.c ---- */
 /* Test-only faults (tools/test-sp11-stick-monitor.py proves each check can fail by building the stage with it). They exist only in the host build. */
@@ -65,7 +72,7 @@ _Static_assert(SM_FILLER_AT == 0x13000u && SM_FILLER_BYTES == 0x2E000u && SM_FIL
      defined(SP11_STICK_MONITOR_SEED_NO_S2) || defined(SP11_STICK_MONITOR_SEED_NO_OVERRUN_CHECK) || defined(SP11_STICK_MONITOR_SEED_STORE_AFTER) || \
      defined(SP11_STICK_MONITOR_SEED_REFUSE_AFTER) || defined(SP11_STICK_MONITOR_SEED_NO_GIC_FINISH) || defined(SP11_STICK_MONITOR_SEED_NO_FILLER_SCAN) || \
      defined(SP11_STICK_MONITOR_SEED_NO_FILLER_PRECHECK) || defined(SP11_STICK_MONITOR_SEED_NO_FILLER_CLEAN) || \
-     defined(SP11_STICK_MONITOR_SEED_FLUSH_UNWRITABLE) || \
+     defined(SP11_STICK_MONITOR_SEED_FLUSH_UNWRITABLE) || defined(SP11_STICK_MONITOR_SEED_NO_LABEL_CHECK) || \
      defined(SP11_STICK_MONITOR_SEED_TICKS_EARLY) || defined(SP11_STICK_MONITOR_SEED_NO_WINDOW_CLEAN) || \
      defined(SP11_STICK_MONITOR_SEED_NO_RECORD_CLEAN)) && !defined(SP11_STICK_HOST_TEST)
 #error "the seeded faults are part of the host test build only"

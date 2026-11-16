@@ -1,4 +1,4 @@
-# SP11 stick wrapper: the monitor entry (work item 4b, Phases A to C)
+# SP11 stick wrapper: the monitor entry (work item 4b, Phases A to D)
 
 Status: EXPERIMENTAL. Hardware NOT RUN. Nothing in this note authorises a run: the operator authorises by the SHA-256 of the record that
 `--m1-run` makes (sections 10 and 12), and only then. Labels: VERIFIED (a host test of this tree shows it; never a hardware result), OBSERVED (a run on the unit,
@@ -29,6 +29,7 @@ SNAPMON-M1.BIN and SNAPREP-M1.BIN: a different SHA-256 is a different authorisat
 | `tools/test-sp11-stick-monitor-call.S` | Phase C: the boot stub that runs the trampoline's real bytes at EL2 under QEMU (section 13) |
 | `tools/sp11_stick_bundle_m1.py`, `sp11_stick_bundle_build.py`, `sp11_stick_bundle_record.py` | Phase B (section 12): `--m1-run`, the build report read against the files, `PARAMS_LAUNCH`, `M1_TOUCHES` |
 | `tools/sp11_monitor_census.py`, `tools/test-sp11-stick-monitor-auth.py`, `tools/test-sp11-stick-monitor-interlock.py` | Phase B: the record checked against the binaries; the suites (the second: the interlock, reach and the corrected statements) |
+| `tools/sp11_stick_bundle_record_m1.py`, `tools/test-sp11-stick-monitor-{census,builder,devices}.py` | Phase D (section 14): the blocks of the M1 record that are checked against the binary or the sources (the guest SMC paragraph, the device section 3b, the placed entries); the three new suites |
 
 ## 3. Design
 
@@ -50,7 +51,7 @@ uses x18 freely (INFERRED harmless: the dry run returned to the runner).
 
 | Step | What | Failure |
 | --- | --- | --- |
-| COPIED 9 | checks, reads only: the record slot and the stack area probed writable (AT), the monitor's 64 KiB window and the 184 KiB filler below the stack's area zero, PARAMS (time box 1 to 5 s, `early_stop.flags` 0, `gpu.flags` 0), the five ID registers, the monitor image hashed in place | refuse GIC_NOT_READY, detail 64 to 73; the record is stored with it, except for 72 REPORT_UNWRITABLE: its slot is what was found unwritable, so the page says it and nothing is stored there |
+| COPIED 9 | checks, reads only: the record slot and the stack area probed writable (AT), the monitor's 64 KiB window and the 184 KiB filler below the stack's area zero, the PIN.DAT's `build_label` starting with `M1RUN-` (D2, section 14: after the probe, so that its refusal can store the record), PARAMS (time box 1 to 5 s, `early_stop.flags` 0, `gpu.flags` 0), the five ID registers, the monitor image hashed in place | refuse GIC_NOT_READY, detail 64 to 73 and 75; the record is stored with it, except for 72 REPORT_UNWRITABLE: its slot is what was found unwritable, so the page says it and nothing is stored there |
 | | `IC IALLUIS; DSB ISH; ISB` | none |
 | | `sw_gic_arm`: reads, the NEXT line, 8 s, stores G, R, C, read back; sets PREPARED | refuse GIC_NOT_READY, detail = the GIC outcome (0 to 48); put back first, and the GIC record finished (sub-stage DONE) as the dry run's `gic_finish` does |
 | PREPARED 10 | thirteen EL2 registers read ("pre"); the stack area filled with a pattern | none |
@@ -89,7 +90,7 @@ and the two PARAMS flags), the GIC reads and the NEXT line (WI 8), `MON CALL` (x
 | --- | --- | --- |
 | runner `PAYLOAD REFUSED=...` | the runner refused SNAPMON-M1.BIN (hash, size, ABI) | fix the file |
 | `REFUSED=<NAME>` at stage <= GUEST_OK | bundle, pins or placement disagree; no RAM beyond REPORT.DAT written | frozen table |
-| `MON VERDICT=<PARAMS_* or IMAGE_* or REPORT_UNWRITABLE or WINDOW_DIRTY>`, `REFUSED=GIC_NOT_READY DETAIL=0X40..0X49` | a check before the call; stage COPIED, placement written, no register written | the named field |
+| `MON VERDICT=<PARAMS_* or IMAGE_* or REPORT_UNWRITABLE or WINDOW_DIRTY or PIN_LABEL>`, `REFUSED=GIC_NOT_READY DETAIL=0X40..0X49 or 0X4B` | a check before the call; stage COPIED, placement written, no register written | the named field |
 | `GIC VERDICT=<name>`, `REFUSED=GIC_NOT_READY DETAIL=0X0..0X30` | the GIC arm refused or a store did not hold (U3); nothing called | docs/SP11-STICK-GIC.md |
 | last line `MON CALL ...`, no `MON RET` | the monitor never returned: unbounded guest (timer class or vector), a long prepare, or a fault in its first instructions. A hang or a reset then leaves in DRAM only the head and the CALLING record, both stored and cleaned before the call (its `ticks_call` is the counter read before the MON CALL line, section 5): the window is cleaned by the wrapper after the call returns, and the monitor's own clean at its exit covers the guest range, not REPORT.DAT (`publish(c->params->mem_low, c->params->mem_high)`, `probes/xnuboot/report.c:244`; `publish` is `probes/xnuboot/mmu_access.c:193`; INFERRED: the placement is above REPORT.DAT). All of it only if RAM survives the restart (U4) | power cycle |
 | q1n1 fault page after `PAYLOAD CALL` | a fault before the monitor's `msr vbar_el2` (offset 0x8c in the existing ELF) or in `xnuboot_setup/save`; else a wrapper bug. `_start` does not look at `xnuboot_setup`'s return value (below) | `llvm-nm -n` on the ELF |
@@ -146,12 +147,12 @@ and the key registers at 93-172), called ungated from probes/xnuboot/pauth.c:142
 calls one (INFERRED; whether it does inside the time box is UNKNOWN), and the record lists those writes as CONDITIONAL. VNCR_EL2 is NOT read (UNDEFINED
 without NV2) and is not put back.
 Outcomes: 0 NONE; refusals 64 PARAMS_PA, 65 PARAMS_SIZE, 66 PARAMS_EARLY_STOP, 67 PARAMS_GPU, 68 PARAMS_BOX, 69 IMAGE_SIZE, 70 IMAGE_UNREADABLE, 71
-IMAGE_DIGEST, 72 REPORT_UNWRITABLE, 73 WINDOW_DIRTY, 74 GIC_NOT_READY; results 96 RETURNED, 97 QUARANTINE, 98 RET_OTHER. The reporter's check names the
+IMAGE_DIGEST, 72 REPORT_UNWRITABLE, 73 WINDOW_DIRTY, 74 GIC_NOT_READY, 75 PIN_LABEL (Phase D); results 96 RETURNED, 97 QUARANTINE, 98 RET_OTHER. The reporter's check names the
 first failing class: 1 magic, 2 version, 3 size, 4 reserved, 5 values.
 
 The PARAMS words (VERIFIED against clang's record layout of the monitor translation unit, M1 profile, no SNAP_I2C_INPUT): `sizeof(struct params)`
 0x2410, `watchdog_seconds` 192, `gpu.flags` 0x2340, `txm_native` 0x23C0 (32 bytes, not read: Phase B's builder checks it), `early_stop.flags` 0x23E0
-(bit 3 would read the A16's thermal sensors at addresses that are not this machine's: `compat/a16-thermal.c`). The wrapper's check of these is a snapshot, not a
+(bit 1 lets the monitor call a function pointer that PARAMS holds, and bit 3 makes its setup allocate `c->thermal`, which opens the loads of `compat/a16-thermal.c` from the A16's sensor addresses: section 14). The wrapper's check of these is a snapshot, not a
 guard: it reads the two flag words once, before the call, and `txm_native` not at all (the builder checks all three); stage 2 gives the guest RW over DRAM and
 the reserve (`probes/xnuboot.py:243`, INFERRED) and the monitor re-reads `gpu.flags` and `early_stop.flags` live (`async.c:79,111`, `trap_dispatch.c:461-705`,
 `early_stop_thermal.c:66`: `xnuboot_async`, `xnuboot_trap`, `early_stop_host_tick`), so a guest that sets one opens that path.
@@ -196,15 +197,18 @@ Run from the repository root with `source <env>` first (clang, lld, llvm, QEMU o
 
 | H | Suite | What | Tests |
 | --- | --- | --- | --- |
-| H1, H2, H6 | test-sp11-stick-monitor.py | H1: a fake monitor returns ok, a prepare failure, an ESR, both quarantine codes, another value; leaves HCR, VBAR, TPIDR, DAIF, CNTHCTL, MDCR, VTTBR, CNTHP changed; stores beyond its window (three offsets); uses 1 KiB, 128 KiB, all of the stack. H2: order (copy, IC sync with no GIC access yet, arm, PREPARED, call); exact x0 to x4 and SP; no store to the placement after MONITOR_ENTERED; GIC writes only classes G, R, C to this CPU's frame; every check before the call (eight refusals, four GIC arm refusals). H6: the stop timer's interrupts as `async.c` takes them (transcribed): HPPIR1 26, IAR1 26, re-arm, EOIR1 (+ DIR with EOImode), post 1023, three times, then the deadline without an acknowledge leaves nothing pending; also from the OBSERVED firmware state of section 9. Phase C: the GIC record the reporter reads after a failed put-back, the filler below the stack (three overflows), the unwritable record slot, the tick of the call, and the model's dirty lines (section 13) | 31 |
+| H1, H2, H6 | test-sp11-stick-monitor.py | H1: a fake monitor returns ok, a prepare failure, an ESR, both quarantine codes, another value; leaves HCR, VBAR, TPIDR, DAIF, CNTHCTL, MDCR, VTTBR, CNTHP changed; stores beyond its window (three offsets); uses 1 KiB, 128 KiB, all of the stack. H2: order (copy, IC sync with no GIC access yet, arm, PREPARED, call); exact x0 to x4 and SP; no store to the placement after MONITOR_ENTERED; GIC writes only classes G, R, C to this CPU's frame; every check before the call (eight refusals, four GIC arm refusals). H6: the stop timer's interrupts as `async.c` takes them (transcribed): HPPIR1 26, IAR1 26, re-arm, EOIR1 (+ DIR with EOImode), post 1023, three times, then the deadline without an acknowledge leaves nothing pending; also from the OBSERVED firmware state of section 9. Phase C: the GIC record the reporter reads after a failed put-back, the filler below the stack (three overflows), the unwritable record slot, the tick of the call, and the model's dirty lines (section 13). Phase D: the PIN.DAT's label (section 14, D2): the reviewer's mix of a `--gic-stop` PIN.DAT with the M1 image, a marker that is late or one byte short, and a one-character facts label that passes | 33 |
 | H3, H4, H7 | test-sp11-stick-monitor-build.py | section 7; the gate off (the dry-run pair is the unit's, byte for byte; the GIC pair is not changed by this item: built twice from snapshots, with the earlier files as committed and as edited); the census; the stack census; hygiene | 33 |
 | H5 | test-sp11-stick-monitor-record.py | the record decoded independently; the page lines of wrapper and reporter against an independent renderer; the reporter on REPORT.DAT files built in Python; the window offsets and PARAMS words compiled against the monitor's own translation unit; the event and status names against the host's tables | 19 |
 | H8 | test-sp11-stick-monitor-build.py, class Trampoline | Phase C (section 13): the real bytes of `sw_monitor_call` run at EL2 under QEMU's `-cpu max`; the monitor and the wrapper as a whole are NOT RUN under QEMU (EDK2 sets T0SZ 16 under `-cpu max`; FEAT_NV2 there is UNKNOWN) | 4 (the suite: 37) |
+| H9 | test-sp11-stick-monitor-census.py | Phase D (section 14, D3): the second review's mutants (an MSR, an SMC, a TLBI, a DC and an IC written over the first instruction of `xnuboot_report`; an MRS turned into an MSR in the wrapper; a data word that is an MSR), each failing the placed check that the name check passes; the ties of both ELFs to section 1b; the parser and the decoder | 20 |
+| H10 | test-sp11-stick-monitor-builder.py | Phase D (D2, D4): the label marker in PIN.DAT, refused in the facts of every kind and when it does not fit; the two EFI digests; `real --m1-run` refused unless the panel is withheld and the HVC patch is 0; `real --m1-run` run end to end on the host (SKIP without the J700 boot set) | 14 |
+| H11 | test-sp11-stick-monitor-devices.py | Phase D (D1, D5, D6, D7): the families of device code against the symbol table, the families the build leaves out, every SMC owner, the sources the gates are read from, the interrupts the monitor acknowledges, the thermal text, the kernelcache scan (SKIP without the boot set) and the hygiene of the new files | 22 |
 
 Seeded-bad stages (a test define each; the real stage passes the check, the seeded one fails it; all as required): `no-params-check`, `no-digest`,
 `no-reg-check`, `no-ic-sync`, `stray-gic` (a write to another CPU's redistributor frame), `wrong-args` (x1 and x2 swapped), `no-s2`,
 `no-overrun-check`, `store-after` (a byte to the placement after MONITOR_ENTERED), `refuse-after` (a refusal after the call: the frozen head check
-rejects it); from Phase C `no-gic-finish`, `no-filler-scan`, `no-filler-precheck`, `no-filler-clean`, `flush-unwritable`, `ticks-early`, `no-window-clean`, `no-record-clean`.
+rejects it); from Phase C `no-gic-finish`, `no-filler-scan`, `no-filler-precheck`, `no-filler-clean`, `flush-unwritable`, `ticks-early`, `no-window-clean`, `no-record-clean`; from Phase D `no-label-check`.
 Build-side: an absolute-pointer object, a wrapper over OFFSET, a monitor that is not the named build's, a record of another profile,
 different GIC macros, a misplaced entry or vectors, an offset that is not a page, a monitor that is empty or over the 8 MiB bound: each REFUSED by name. The identity check can fail (an un-gated
 letter in a panel line changes the digest), the drift check can fail, and the replay ends in EV_ASYNC for a PPI whose group changed, a foreign
@@ -214,11 +218,15 @@ HPPIR value and a timer that never fires. What no host test shows: the monitor's
 
 The dry run of docs/SP11-STICK-GIC.md refused in its read phase (boot 12, one unit, from a photograph): ISENABLER0 0x4E800001 (SGI 0 and PPIs 23, 25,
 26, 27, 30 enabled), IPRIORITYR[26] 0xA0, all PPIs level, PPI 26 neither pending nor active, GICR awake, GICD_CTLR 0x10 (ARE_NS 1, DS 0), GICD_TYPER
-0xF87F051E, IIDR 0x4010438. These are the initial state of the `happy-observed` and `replay-observed*` cases. WI 8 relaxed the precondition (accept
+0xF87F051E, IIDR 0x401043B (the boot 12 note read 0x4010438 from the photograph: one digit misread, corrected from the boot 13 video, OBSERVED). These are the initial state of the `happy-observed` and `replay-observed*` cases. WI 8 relaxed the precondition (accept
 firmware-enabled PPIs, refuse only PPI 26 pending or active; ISENABLER0 written only when bit 26 is clear): with it the arm stores GICD_CTLR (G1A),
 IPRIORITYR[26] = 0x80 and the class C registers, leaves ISENABLER0 alone, and puts everything back (VERIFIED in the model). RISK (INFERRED): PPIs 23,
 25, 27 and 30 stay enabled while the guest runs and IRQ is routed to EL2: any of them arriving ends the run with EV_ASYNC (`async.c`: only
-HPPIR1 == 26 is the tick). Whether PPI 26 arrives at EL2 at all (U3), and from the guest at EL1, is UNKNOWN until the dry run's second half runs.
+HPPIR1 == 26 is the tick). Whether PPI 26 arrives at EL2 at all (U3), and from the guest at EL1, is UNKNOWN until the dry run's second half runs. Pass 5 (e9bc7c1,
+docs/SP11-STICK-GIC.md) changed the arm half after boot 13 showed INTID 27, the EL1 virtual timer, pending and enabled from firmware (OBSERVED from video): it takes the other
+enabled bits of this CPU's ISENABLER0 away (ICENABLER0, 0x4A800001 where firmware left 0x4E800001) before the call and puts them back after it (ISENABLER0 last), and refuses
+FOREIGN_PENDING (detail 23) when ICC_HPPIR1_EL1 shows anything but 1023 or 26. The cases above now expect those two writes. What the monitor does with an interrupt that is not
+PPI 26 is unchanged (section 14, D7).
 
 ## 10. For Phase B: the record text, the builder and the authorisation
 
@@ -238,8 +246,8 @@ registers, the keys and the maintenance, and names OSLAR, which is conditional a
   BPR1, IGRPEN1); the monitor's ICC_IAR1, EOIR1 and DIR. No GIC frame of another CPU, no ITS.
 - `ram`: the monitor's 64 KiB window, its 240 MiB work arena, the guest range and the cache maintenance that publishes it, REPORT.DAT's two records, and
   the 256 KiB stack in REPORT.DAT's tail (filled with a pattern, zeroed afterwards).
-D8 (thermal): the monitor has no thermal guard on this machine (the A16's reads TSENS at addresses that are not this one's, unreachable with
-`early_stop.flags` 0); its CPU time inside the time box is the exposure. Time: the wrapper's 2.92 s (measured, the dry run), the GIC arm's 8 s wait
+D8 (thermal): the monitor has no thermal guard on this machine (its own thermal code only loads from the A16's sensor addresses and is closed by `c->thermal`, which its
+setup makes only if `early_stop.flags` has the thermal bit: section 14, D6); its CPU time inside the time box is the exposure. Time: the wrapper's 2.92 s (measured, the dry run), the GIC arm's 8 s wait
 (`SW_GIC_WAIT_S`, an unconditional define in WI 8's header), the monitor's prepare (UNKNOWN), the 5 s box and the stop (up to 432 MiB of DC CIVAC,
 INFERRED about 0.6 s): about 17 s plus prepare against the 20 s UPTIME precaution (docs/SP11-MONITOR-PORT.md; untested beyond the wrapper's own run).
 
@@ -248,7 +256,7 @@ INFERRED about 0.6 s): about 17 s plus prepare against the 20 s UPTIME precautio
 From the operator: **D6**, the NV2 record (`tools/nv2_record.py ingest`, then `sp11_m1_profile.py build --nv2-record-header`, then this tool): until then
 the gate refuses with -90..-93 (certain). The monitor digests in this work's evidence are built with a LOCAL TEST RECORD (tool `wi4b-test-only`,
 synthetic, never offered as the unit's) and are not the unit's. **D8** as above. **D4**: the three store classes and the sub-lists of section 10.
-N1 (the boot seed) is a default label, entropy UNIMPLEMENTED. D9: the panel withheld and the stock kernel (`--sptm-hvc-calls 0`).
+N1 (the boot seed) is a default label, entropy UNIMPLEMENTED. D9: the panel withheld and the stock kernel (`--sptm-hvc-calls 0`); from Phase D `real --m1-run` refuses any other choice (section 14, D4).
 Change requests (frozen interfaces untouched): (1) a refusal code for "a check before the monitor call failed": none fits, GIC_NOT_READY is reused
 and a new code needs an `SP11SB_VERSION` bump; (2) WI 8: `#ifndef SW_GIC_WAIT_S` so that the M1 build can shorten the 8 s wait if the time budget needs it.
 UNKNOWN: U3 (PPI 26), the monitor's behaviour on Oryon (RNDR U5, PAC U8, the debug-register writes), prepare duration, whether RAM survives a warm
@@ -259,7 +267,8 @@ restart (U4), the real stack depth, the NV2 verdict.
 Implemented; hardware NOT RUN. `--m1-run BUILD_REPORT` (on `authorisation-template`, `synthetic` and `real` of `tools/sp11_stick_bundle_build.py`) makes the
 record of this run. BUILD_REPORT is the `build-report.json` of `tools/sp11_stick_wrapper_build.py --monitor` (it now also names the `profile`); the files come
 through the existing `--monitor` (SNAPMON-M1.BIN) and `--reporter` (SNAPREP-M1.BIN). The kind needs `--stores ram,el2_sysreg,gic` and a time box of 1 to 5 s (the
-wrapper refuses a longer one before the call; D5 is 5), else `OPTIONS_BAD`, as with `--gic-stop`. Without the flag nothing changes: the records of the dry run, of the
+wrapper refuses a longer one before the call; D5 is 5), else `OPTIONS_BAD`, as with `--gic-stop`. From Phase D it also needs `--m1-efi` for the two EFI files that run before the wrapper, and with `real` the panel
+withheld and the HVC patch 0 (section 14). Without the flag nothing changes: the records of the dry run, of the
 GIC and stop dry run and of its second attempt regenerate byte for byte (tested).
 
 **Inputs, checked and not trusted** (`tools/sp11_stick_bundle_m1.py`). Every size and digest in the record is recomputed from the files. SNAPMON-M1.BIN must be the
@@ -288,8 +297,8 @@ of `TOUCHES`, section 4 with the time budget and D8, two more stop rules and, fr
 8 s (`SW_GIC_WAIT_S`), prepare UNKNOWN, the box 5 s, the stop's clean of 432 MiB about 0.6 s (the plan's estimate, INFERRED) and at most 2.9 s (INFERRED bound: the dry run's 0.96 s
 for 141.4 MiB included the re-hash): 2.9 + 8 + prepare + 5 + 0.6 is at least 16.5 s, at most 18.8 s, plus the prepare. The earliest restart datum is about UPTIME 17 s (INFERRED: one
 boot, in a run that started secondary CPUs; plan section 10), so the run is as long as that by construction; it does not meet the plan's "well under 20 s", a precaution of low weight
-(the PSCI-only control was alive at 268 s, OBSERVED). The 8 s is the operator's to change; change request (2) above is parked. D8: no thermal guard exists on this path; the A16's reads
-sensors that are not this machine's and is reached only through early_stop.flags (required zero); approving the record accepts the exception.
+(the PSCI-only control was alive at 268 s, OBSERVED). The 8 s is the operator's to change; change request (2) above is parked. D8: no thermal guard exists on this path; the monitor's own thermal code only loads
+from the A16's sensor addresses and is closed by `c->thermal`, a private gate that its setup makes only if `early_stop.flags` has the thermal bit (required zero); approving the record accepts the exception.
 
 **The record against the binary** (`tools/sp11_monitor_census.py`; the suite runs it on the monitor built with the local test record, 542 functions, and on the wrapper).
 llvm-objdump finds in the monitor 66 registers written by MSR, 121 read, 13 TLBI, DC, IC and AT operations, SMC, ERET and WFE; in the wrapper 3 registers and 5
@@ -306,12 +315,13 @@ authenticate endpoints call `pauth_pointer` and `pauth_batch_sign`; the key bank
 AFFINITY_INFO query is also inlined in `xnuboot_report`, asked only while a released secondary is unaccounted for) and the guest's two GPU calls: Phase A's text put an SMC and WFE
 under the A16 early stop, which was wrong (`early_off` is the secondary entry's CPU_OFF). The distributor's address is built in `secondary_run` alone (a test). It cannot show which group is
 reached when (333 indirect branches, 324 BLR and 9 BR, are not followed), MMIO by a
-computed address, or the binary of the real record (the census is of the test-record build; LTO folding a record is INFERRED not to add code): run the tool on the real ELF.
+computed address, or the binary of the real record (the census is of the test-record build; LTO folding a record is INFERRED not to add code): run the tool on the real ELF. Phase D
+adds the placement of every register, operation and data word, the ties of both ELFs to section 1b and the refusal of an unplaced data word (section 14, D3).
 
 **Evidence.** `test-sp11-stick-monitor-auth.py` (53 tests in Phase B, 54 now): the options, each refusal, the text, the budget and D8, the census, the pinned records (`$SP11_GICDRY2_DIR`
 for the third), hygiene. `test-sp11-stick-monitor-interlock.py` (37 in Phase B, 46 now): the interlock both ways on fabricated images and on the binaries, the reach claims against the census, the call
 graph and the sources they cite, the corrected statements; `test-sp11-stick-monitor-build.py` (33 in Phase B, 37 now) gained the profile's flag rules, the layout check of the relinked ELF and the stated
-limits of the position proof, each with a faulty case. NOT RUN: `real` with `--m1-run` (no kernelcache here), hardware. Still the operator's: D4 (the classes as the record lists them),
+limits of the position proof, each with a faulty case. Phase D ran `real --m1-run` once on the host (section 14, D4); the stage tree, the unit and hardware are NOT RUN. Still the operator's: D4 (the classes as the record lists them),
 D6, D8, D10 (`SNAP_FAIR_TOKEN=1` is in the profile), D11 proper, N1.
 
 ## 13. Phase C: the code findings of the independent review (host only)
@@ -333,3 +343,71 @@ byte for byte (section 8), and the M1 pair has new digests. Each item has a test
 What C5 shows and does not: it shows that the instructions of the real function do what their comment says on QEMU's CPU model, and that each check can fail. It does not show the unit
 (the MMU and the caches are off here; the runner's regime and the monitor's are not), the monitor's code, or any build but this one: the test expects the encoding of each word it
 changes and says so if the compiler has made another. The verdicts are the stub's own comparisons on the CPU model, not the host's. EXPERIMENTAL.
+
+## 14. Phase D: the second review's findings (host only)
+
+Implemented; hardware NOT RUN. Every change under `probes/` is inside `SNAP_SP11_STICK_MONITOR`, so the monitor-off binaries are unchanged byte for byte (section 8); the M1 pair, the
+M1 record text (its digest is re-pinned with it) and the test record's template have new digests. The findings are those of the second independent review (read only, on ee9814a), in its
+order. Each new check has a faulty case that fails it. What the code does is VERIFIED only for what a host test shows, whether the guest reaches it is INFERRED, and nothing about the
+unit is VERIFIED. The record's new blocks (the guest SMC paragraph, section 3b, the placed entries) are in `tools/sp11_stick_bundle_record_m1.py`, whose prose is filled by one function, so
+that the bytes the operator approves depend on nothing else; the sentences that were wrong are reworded in place in `tools/sp11_stick_bundle_record.py`, none cut.
+
+**D1, device code and its gates (finding 1).** The monitor binary holds code that stores to devices and calls firmware: the GPU's registers at PA 0x03d00000 to 0x03df0000 (`compat/adreno.h:42-70`;
+the same base on the X1E80100 per `docs/SP11-GPU-A7XX-STUDY.md`, INFERRED for this unit), the GIC distributor at the address that PARAMS `gpu.gicd` holds (`gpu_glue.c:47-59`), a real `smc #0`
+for an HVC #0 (`trap_dispatch.c:701`; `adreno_smc` has no ADOPTED test; `gpu_glue.c:10-16`) and a call through the PARAMS pointer `early_stop.host_call` (`early_stop_thermal.c:45-50`), so the record's
+"no device" and "closed by gpu.flags" were wrong. Section 3b of the record names five families (adreno, early_stop, thermal, nvmeh, secondary) with their gates. PRIVATE: state in the work
+area, which stage 2 makes read-only to the guest (`ADOPTED`, `c->thermal`, `host_cpus`). LIVE: a PARAMS word read again while the guest runs (`trap_dispatch.c:570,701`, `async.c:79,111,115`): with
+`gpu.flags` set the guest reaches `adreno_smc` and `gpu_irq`, with `early_stop.flags` HOST and a `host_call` the pointer call. A LIVE gate is a bar a guest can lift; that it can write PARAMS is
+INFERRED (stage 2 gives it DRAM and the reserve, `probes/xnuboot.py:243`) and whether the SPTM stops it is UNKNOWN (the page's typing was not traced). Not confirmed from the review:
+`stage2.c:202` reads `gpu.flags` once, at prepare, to build the guest's GPU windows: it is no live gate (with the flag 0 there is no GPU window). The test
+(`test-sp11-stick-monitor-devices.py`) reads the symbol table (llvm-nm): every family in the binary is named in 3b with its gate words, a family named there is in the binary, none of the
+families the build leaves out (hamoa_, edp_, qcc, i2c_input, guest_net, dvfs, boot_reloc, boot_relay, display_timing, adreno_recover, adreno_coherent) is, every SMC is in a family or the report
+path, and the source lines that the gates are read from are pinned. Faulty cases: a record without a family or a gate word, a `hamoa_` symbol added to a binary, an SMC in `vcpu_arch_prepare`.
+Limits: the guest-device models (`sptm_*`, `sep_*`, `txm_*`, `device_*` and the like) are INFERRED to work on RAM and were not all read; the census sees system registers and not MMIO; an exploratory
+scan for straight-line constant-address stores found `adreno_ring_kick`, `adreno_ring_reserve`, `tlbi` and `xnuboot_report` (the inlined `gpu_quiesce`) only and cannot see a runtime base such as
+`gpu.gicd` (it is not kept as a test). The review's offer stands: compiling the families out of the M1 monitor (a profile change and new default-off gates in compat/) is a separate hardening item,
+to be offered to the operator at the authorisation.
+
+**D2, PIN.DAT bound to this record (finding 2).** For `--m1-run` only, the builder writes `M1RUN-` in front of the facts label in `build_label` (the facts label then holds 17 characters, else
+`PIN_STRING`) and every kind refuses a facts label that carries it. The stage refuses a PIN.DAT whose label lacks it before the call: PIN_LABEL, SM_OUT 75, GIC_NOT_READY with that detail, after the
+probe of the record slot so that the refusal stores its record. The reviewer's mix, the PIN.DAT of a `--gic-stop` bundle with the M1 image, runs through the real C stage in the harness: refused,
+nothing stored but REPORT.DAT, the monitor not called; so is a marker that is late or one byte short; `no-label-check` is the seeded stage that lets it through. What it shows: which builder path made
+the PIN.DAT, not what its record says; a label is no digest, and an edited PIN.DAT carries any label (the interface's checks and the operator's stager verify stand against that). The reverse, this
+PIN.DAT with the dry-run or the GIC wrapper, is NOT refused: the first is frozen and the second does not know the marker. Section 1b now names SLBOUNCE-DEVHE-MARK.EFI and Q1N1-PAYLOAD.EFI by
+SHA-256: `--m1-efi NAME=SHA256`, once each, required with `--m1-run` (the template, synthetic and real commands give the same text for the same inputs), refused without it, and compared with the
+stage tree's `--file NAME PATH SHA256`. Nothing at boot compares them with the record (INFERRED from the review of the boot path: the runner hashes the payloads, the wrapper checks PIN.DAT and the
+data): the operator's stager verify and STICK-FILES.TXT are the control. The autorun plan's name is the pinned label unless `--plan-name` is given, and it still fits the stager's rule
+(`tools/sp11_autorun.py`: at most 24 characters of letters, digits, `.`, `_` and `-`); the stage tree itself is NOT RUN here.
+
+**D3, the census places writes (finding 3).** The el2_sysreg class of the record ends with `placed` entries: for the wrapper and for the monitor every register written, every SYS operation, SMC,
+ERET and WFE, and every data word that decodes as a system instruction, with the functions that hold it and how many each holds (`sp11_monitor_census.py placed --binary wrapper|monitor ELF`
+prints them). The check is complete both ways, so a write that moves, doubles or appears anywhere fails. The review's ten monitor mutants (an MSR of TTBR0_EL2, SCTLR_EL2, TCR_EL2, MAIR_EL2 or CPTR_EL2, an SMC, a TLBI ALLE1IS, a DC CIVAC, an IC IALLUIS or a TLBI VMALLS12E1IS written over the first
+instruction of `xnuboot_report`, the record's elf line re-synced) and the wrapper's MRS turned into an MSR pass the name check and fail the placed check. Both ELFs are tied to section 1b: their flat
+bytes (llvm-objcopy -O binary) must have the size and SHA-256 that it names for the wrapper and the monitor. A data word that decodes as MSR, SYS, SYSL, WFE, WFI, SEV, SEVL, SVC, HVC, SMC, BRK, HLT, DCPS or
+ERET fails unless the record places that word. One deviation from the brief: the monitor's own table of guest instruction words (`compat/native-writer.h:20-25`, six MSR words for ELR_EL1 and SPSR_EL1,
+compared with the guest's code and never executed: INFERRED) would fail every check on the real binary, so the record names those six and any other, or a changed one, fails. Limits: data is decoded only in the
+executable sections that llvm-objdump lists; indirect branches are not followed; the tool says which instructions exist and where, not which run; a rebuilt monitor or wrapper needs its `placed` entries
+regenerated, and a stale one fails.
+
+**D4, `real --m1-run` and D9 (finding 4).** `real --m1-run` is `OPTIONS_BAD`, the message naming D9, unless `--panel withheld` and `--sptm-hvc-calls 0`: the record says the guest gets no framebuffer and a
+stock kernel, and stage 2 maps the framebuffer range from PARAMS when a panel is handed. Run once on the host: the J700 26A428 kernelcache, the M1 pair of the LOCAL TEST RECORD, the template's text approved,
+17.6 s in all and GUEST.DAT 118,870,336 bytes; PIN.DAT and GUEST.DAT pass the interface's checks, `authorised_stores` is 7, the label is `M1RUN-example-synthetic`, and the census check passes on that record and both
+ELFs. The test SKIPs (never passes) without the boot set. The stage tree, the unit and hardware are NOT RUN; the `SNAP_*` environment must be unset (`ENV_SNAP_SET`).
+
+**D5, a guest SMC is not trapped (finding 5).** HCR_EL2 starts as `probes/xnuboot.S:128-142` sets it, 0xC4144001 (RW, TRVM, TVM, TIDCP, TID3, TWE, VM; no TSC, bit 19), every later write in the monitor changes other
+bits (IMO and FMO `xnuboot.S:174-177`, NV and NV2 `prepare.c:466-473`, TWE `:481`, VI and VF `stage2.c:402-416`, API `pauth.c:65`, TVM and TRVM `pauth.c:116`) and `trap_dispatch.c` has no handler for EC 0x17:
+an SMC that the guest executes at EL1 is not mediated (INFERRED from reading every write; a test pins it). Basis for not expecting one, reproduced: every 4-byte word of the two segments with execute permission
+of the local J700 26A428 kernelcache (the only two: `__TEXT_EXEC`, 14,774,272 words, and `__TEXT_BOOT_EXEC`, 8,192; data words included) masked for SMC (0xD4000003) and HVC (0xD4000002): 0 and 0 (OBSERVED, a host
+file, one kernelcache); the same scan finds 1 SVC, 1 ERET and 146 WFE, so it does find instructions. Whether the guest runs SMC code from anywhere else (a kext loaded later, an AuxKC) is UNKNOWN. The record says this
+after its "Not authorised" line, with those labels, and does not claim "no firmware write"; setting TSC would change the monitor and is not done.
+
+**D6, the thermal text (finding 6).** `compat/a16-thermal.c` only loads: SROT at 0x0c222000 + n * 0x1000, which `compat/hamoa-thermal.c` gives as this machine's TSENS SROT (INFERRED there), and TM at
+0x0c22c000 + n * 0x1000, where this machine's is UNKNOWN. The gate is `c->thermal`, which `xnuboot_setup` makes only if `early_stop.flags` has the thermal bit then (`setup.c:102`): the builder requires it zero, the
+wrapper checks it again and nothing makes it later (PRIVATE). `compat/hamoa-thermal.c` is not in the monitor (no `hamoa_` symbol, tested); the old text had it linked.
+
+**D7, which interrupts are acknowledged (finding 7).** The boot CPU reads ICC_IAR1_EL1 in two places, both in `xnuboot_async` (the census: that function twice, `secondary_gic_stop`, not reached, once): INTID 26, when
+`ICC_HPPIR1_EL1` names it, the timer's ISTATUS is set and the run's deadline is ahead (`async.c:87-94`), and, behind the LIVE gate `gpu.flags`, INTID 0x14C (`gpu_irq`, `async.c:79-83`). Any other IRQ or FIQ, and the timer at the
+deadline, ends the run with the interrupt not acknowledged (`async.c:167`): the monitor records it, disables its timer and returns, so a foreign interrupt stays pending (INFERRED). The arm half's quarantine of the
+firmware's enabled interrupts is pass 5's (section 9); the record's `gic` class says nothing of it here.
+
+Counts: monitor 33, record 19, build 37, auth 54, interlock 46, census 20, builder 14, devices 22. The size caps of this note and of the auth suite's check of it were raised for this section; nothing was cut.

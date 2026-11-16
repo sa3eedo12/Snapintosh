@@ -34,13 +34,16 @@ ch.KNOWN_REFUSALS.add('OPTIONS_BAD')
 Refused = ch.Refused
 IMAGE, REPORTER = 'SNAPMON-M1.BIN', 'SNAPREP-M1.BIN'
 PROFILE = 'sp11-m1'
+LABEL_PREFIX = 'M1RUN-'         # SP11_STICK_MONITOR_LABEL_PREFIX in probes/sp11-stick-monitor.h: what the wrapper of this kind requires at the start of PIN.DAT's label
+PIN_LABEL_MAX = 23              # sp11sb_string_ok: build_label is 24 bytes and a string of 1 to 23 characters
+EFI_NAMES = ('SLBOUNCE-DEVHE-MARK.EFI', 'Q1N1-PAYLOAD.EFI')       # the two files that run at EL2 before the wrapper: the builder's SLBOUNCE and RUNNER
 REPORT_CAP = 1 << 20
 BOX_MAX_S = 5           # the longest time box the wrapper's pre-call check accepts (SP11_STICK_MONITOR_BOX_MAX_S, D5)
 TEST_TOOL = 'wi4b-test-only'        # the `tool` field of the LOCAL TEST RECORD that the host tests build a monitor with: never the unit's
 PARAMS_BYTES = 0x2410       # sizeof(struct params) (probes/xnuboot/report_layout.c): the wrapper refuses a shorter chunk before the call
 # What the monitor would do with these words (docs/SP11-STICK-MONITOR.md section 10): gpu.flags opens the GPU paths (one SMC among them),
-# early_stop.flags bit 3 the A16's thermal sensors at addresses that are not this machine's, txm_native (image, work, size, tree_size) a native
-# TXM image. The wrapper reads the first two before the call; the third only this builder reads.
+# early_stop.flags bit 1 a call through a PARAMS pointer and bit 3 the loads from the A16's sensor addresses (record section 3b), txm_native (image,
+# work, size, tree_size) a native TXM image. The wrapper reads the first two before the call; the third only this builder reads.
 LAUNCH_WORDS = (('gpu.flags', 0x2340, 8), ('txm_native', 0x23C0, 32), ('early_stop.flags', 0x23E0, 8))
 # What the wrapper tool leaves in front of an appended monitor, and what the wrapper prints when it has one (probes/sp11-stick-monitor.c) or has none
 # (probes/sp11-stick-wrapper.c). The first 1 MiB of a file is searched for a call: the wrapper is under the monitor's offset, 128 KiB by default.
@@ -65,8 +68,10 @@ def _no_duplicates(pairs):
     return out
 
 
-def check_options(stores, gic_stop, time_box_s):
-    """--m1-run runs the wrapper's GIC arm (gic), the monitor (el2_sysreg) and RAM stores, with the time box the wrapper's pre-call check accepts."""
+def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None):
+    """--m1-run runs the wrapper's GIC arm (gic), the monitor (el2_sysreg) and RAM stores, with the time box the wrapper's pre-call check accepts. With `real`
+    (panel and hvc_calls given) only D9's first choice: the record says the guest gets no framebuffer and a stock kernel, and stage 2 maps the
+    framebuffer range from PARAMS when it is handed (probes/xnuboot/stage2.c), so another choice would make the text false."""
     need = sb.STORE_RAM | sb.STORE_EL2_SYSREG | sb.STORE_GIC
     if stores & need != need:
         raise ch.Refused('OPTIONS_BAD', '--m1-run stores in all three classes: --stores must include ram, el2_sysreg and gic')
@@ -74,6 +79,41 @@ def check_options(stores, gic_stop, time_box_s):
         raise ch.Refused('OPTIONS_BAD', '--m1-run and --gic-stop are two kinds of record: give one')
     if not 1 <= time_box_s <= BOX_MAX_S:
         raise ch.Refused('OPTIONS_BAD', f'--m1-run: the wrapper refuses a time box outside 1 to {BOX_MAX_S} s before it calls the monitor (D5)')
+    if panel is not None and (panel, hvc_calls) != ('withheld', 0):
+        raise ch.Refused('OPTIONS_BAD', f'--m1-run with real: D9 is open, and this record is written for --panel withheld and --sptm-hvc-calls 0 only '
+                                        f'(the guest gets no framebuffer and a stock kernel); got --panel {panel} and --sptm-hvc-calls {hvc_calls}')
+
+
+def pinned_label(label, is_m1):
+    """The build_label PIN.DAT carries. For this kind the marker comes first (the wrapper of this kind refuses a PIN.DAT without it, D2); for every other
+    kind the label is the facts' and may not start with the marker, or a PIN.DAT of another kind would pass for this one. PIN_STRING: it does not fit."""
+    if label.startswith(LABEL_PREFIX):
+        raise ch.Refused('PIN_STRING', f'build_label starts with {LABEL_PREFIX}, which only --m1-run adds')
+    if is_m1 and len(LABEL_PREFIX + label) > PIN_LABEL_MAX:
+        raise ch.Refused('PIN_STRING', f'--m1-run puts {LABEL_PREFIX} in front of build_label and the pinned label holds {PIN_LABEL_MAX} characters: the facts label holds '
+                                       f'{PIN_LABEL_MAX - len(LABEL_PREFIX)}')
+    return LABEL_PREFIX + label if is_m1 else label
+
+
+def read_efi(given, files, is_m1):
+    """{name: sha256} of the two EFI files that run at EL2 before the wrapper, for section 1b of the record, from --m1-efi NAME=SHA256 (both, once each) and
+    checked against the stage tree's --file NAME PATH SHA256 when those are given: the record must name the files the tree is made of. None for another
+    kind, which refuses --m1-efi."""
+    if not is_m1:
+        if given:
+            raise ch.Refused('OPTIONS_BAD', '--m1-efi belongs to the --m1-run record')
+        return None
+    efi = {}
+    for item in given:
+        name, _, digest = item.partition('=')
+        if name not in EFI_NAMES or name in efi or not HEX64.fullmatch(digest):
+            raise ch.Refused('OPTIONS_BAD', f'--m1-efi is NAME=SHA256 (64 lower-case hex digits) once for each of {" and ".join(EFI_NAMES)}')
+        efi[name] = digest
+    if sorted(efi) != sorted(EFI_NAMES):
+        raise ch.Refused('OPTIONS_BAD', f'--m1-run names the two EFI files that run before the wrapper: --m1-efi for {" and ".join(EFI_NAMES)}')
+    if bad := [name for name, _, digest in files if name in efi and digest.lower() != efi[name]]:
+        raise ch.Refused('OPTIONS_BAD', f'--file {", ".join(bad)} has another SHA-256 than --m1-efi names: the record must name the files the stage tree is made of')
+    return {name: efi[name] for name in EFI_NAMES}
 
 
 def pinned_defines(monitor, offset):
@@ -164,10 +204,11 @@ def _entry(entry, what):
     return dict(bytes=_int(entry['bytes'], f'{what} bytes', 1), sha256=_digest(entry['sha256'], f'{what} sha256'))
 
 
-def read_report(data, image, reporter):
+def read_report(data, image, reporter, efi=None):
     """The record's M1 facts: the report `data` (the bytes of build-report.json) read strictly, then checked against `image` (SNAPMON-M1.BIN) and
     `reporter` (SNAPREP-M1.BIN), the bytes given as --monitor and --reporter. M1_REPORT_BAD: not a report of this kind. M1_REPORT_MISMATCH: a
-    report of this kind that does not describe these files. A detail quotes no text of the file: it is printed on the operator's terminal."""
+    report of this kind that does not describe these files. A detail quotes no text of the file: it is printed on the operator's terminal. `efi`
+    (read_efi's result) is carried into the facts for section 1b; the report does not know the stick's EFI files."""
     try:
         raw = json.loads(data.decode('utf-8'), object_pairs_hook=_no_duplicates)
         if raw['hardware'] != 'NOT RUN' or raw['profile'] != PROFILE or not str(raw['variant']).startswith('m1:'):
@@ -210,7 +251,7 @@ def read_report(data, image, reporter):
         raise Refused('M1_NO_MONITOR_CALL', 'the wrapper in --monitor says that it calls no monitor, whatever else it holds')
     fields = found[0][1]
     return dict(profile=PROFILE, image=listed, wrapper=wrap, monitor=monitor, reporter=rep, nv2=dict(sha256=nv2_digest, **{k: fields[k] for k in NV2_KEYS}),
-                test_record=fields['tool'] == TEST_TOOL)
+                test_record=fields['tool'] == TEST_TOOL, efi=efi)
 
 
 def check_launch(chunks):

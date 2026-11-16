@@ -6,7 +6,8 @@ reading, the approval check and the pipeline.
 
 The text is wrapped by hand, never by a library: its digest is the operator's approval, so it must not depend on how a library version breaks
 lines, and a changed byte is another record. A record of a synthetic build must not change when a line about a real build is added: the
-lines of section 1a exist only for kind `real`. In the same way the lines of section 1b, the touches of M1_TOUCHES, the budget of section 4, the
+lines of section 1a exist only for kind `real`. In the same way the lines of section 1b, the touches of M1_TOUCHES, the paragraphs of
+tools/sp11_stick_bundle_record_m1.py (the guest SMC and section 3b), the budget of section 4, the
 silence rule of section 5 (M1_SILENCE_RULE, in place of SILENCE_RULE) and the two stop rules of M1_STOP_RULES exist only for a record of the monitor
 entry run (--m1-run), and the records of the other kinds are what they were (tools/test-sp11-stick-bundle-record.py pins their digests).
 
@@ -19,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sp11_stick_bundle as sb  # noqa: E402
 import sp11_stick_bundle_chunks as ch  # noqa: E402
 import sp11_stick_bundle_record_gic as gq  # noqa: E402
+import sp11_stick_bundle_record_m1 as m1t  # noqa: E402
 
 ch.KNOWN_REFUSALS.add('NOTE_BAD')       # the builder lists it among its own refusals too
 MIB = sb.MIB
@@ -87,15 +89,19 @@ M1_TOUCHES = {
             'REPORT.DAT 0x1000), its work area (work_size bytes at work_base: tables, logs, a console buffer), the page tables',
             'and frame tables it builds over the guest, and the cache maintenance that publishes them. The guest: its own RAM',
             'and the reserve above it, guest_base to work_base; its other accesses are meant to fault at stage 2 and stop the',
-            'run (docs/SP11-MONITOR-PORT.md section 12; INFERRED from the sources, never run). No disk, no device, no RAM',
-            'outside the placement and REPORT.DAT.'),
+            'run (docs/SP11-MONITOR-PORT.md section 12; INFERRED from the sources, never run). No disk and no RAM',
+            'outside the placement and REPORT.DAT. The monitor binary also holds code that stores to devices and calls',
+            'firmware, behind gates that a guest can lift: section 3b says which, and that with the PARAMS this builder',
+            'makes none of it runs (INFERRED).'),
     'el2_sysreg': ('required in every PIN.DAT by the interface (STORE_REQUIRED). The writers, in the order they act:',
                    'The registers are named as llvm-objdump names them. tools/sp11_monitor_census.py compares every name below with',
                    'the disassembly of both binaries, in both directions: an instruction that a binary has and no group names, and a',
-                   'name that the binary lacks, are both failures. The builder does not run it (it needs the ELF that section 1b names',
-                   'by digest). Which group is reached when is INFERRED from the sources (the monitor has indirect branches that no',
-                   'static pass follows); no write below was run by the monitor on the unit (boot 11\'s payload wrote CNTHCTL_EL2 and',
-                   'HCR_EL2: OBSERVED). The monitor reads CNTVOFF_EL2 and never writes it.',
+                   'name that the binary lacks, are both failures; so is a register, an operation or a data word that is not in the',
+                   'placed entries at the end of this class with the functions that hold it and how many times, or is held elsewhere;',
+                   'and the ELFs it reads must be the wrapper and the monitor that section 1b names by digest. The builder does',
+                   'not run it (it needs those ELFs). Which group is reached when is INFERRED from the sources (the monitor has',
+                   'indirect branches that no static pass follows); no write below was run by the monitor on the unit (boot 11\'s',
+                   'payload wrote CNTHCTL_EL2 and HCR_EL2: OBSERVED). The monitor reads CNTVOFF_EL2 and never writes it.',
                    'wrapper: ICC_PMR_EL1, ICC_BPR1_EL1 and ICC_IGRPEN1_EL1, each read first, set, read back and put back after the',
                    '   call (class C, with the gic class); IC IALLUIS once after the copy; DC CVAC and DC CIVAC by VA; AT S1E2R and',
                    '   AT S1E2W (they set PAR_EL1). It writes no other register. Before and after the call it reads DAIF, SPSel,',
@@ -156,10 +162,11 @@ M1_TOUCHES = {
                    '   WFE, and in the monitor ICC_PMR_EL1, ICC_BPR1_EL1 and ICC_IGRPEN1_EL1 (the wrapper writes those three before',
                    '   the call); SMC for PSCI CPU_ON, CPU_OFF and AFFINITY_INFO (the last also in the report path, inlined, asked',
                    '   only while a released secondary is unaccounted for). The secondary entry also writes SCTLR_EL2, TCR_EL2 and',
-                   '   TLBI ALLE2, which group F reaches too: they are not claimed unreached. The GPU calls of the guest, closed by',
-                   '   gpu.flags (the builder requires zero): SMC, the two TrustZone calls, and DC IVAC. The A16 thermal sensors,',
-                   '   closed by early_stop.flags (required zero), are memory-mapped and write no system register. SMC is a call to',
-                   '   firmware.'),
+                   '   TLBI ALLE2, which group F reaches too: they are not claimed unreached. The GPU calls of the guest, behind the',
+                   '   LIVE gate gpu.flags (the builder requires zero; a guest that writes PARAMS can lift it: section 3b): SMC,',
+                   '   the two TrustZone calls, and DC IVAC. The A16 thermal sensors are memory-mapped and are read only through',
+                   '   c->thermal (section 3b); they write no system register. SMC is a call to firmware.',
+                   *m1t.PLACED_LINES),
     'gic': ('memory-mapped GIC registers in the pinned frames only (PIN.DAT gicd_base, gicr_first, gicr_stride, gicr_count),',
             'written by the wrapper before the call and put back after it, as in the GIC and stop dry run',
             '(docs/SP11-STICK-GIC.md). Class G: GICD_CTLR, only when group 1 reads disabled (a read of 0x10 becomes 0x13).',
@@ -167,10 +174,14 @@ M1_TOUCHES = {
             'GICR_TYPER only), the SGI frame of INTID 26: IPRIORITYR byte (0x80 if it differs), ISENABLER0 bit 26 only when it',
             'reads clear (the other PPIs that firmware enabled stay as found: one boot read ISENABLER0 0x4E800001, OBSERVED),',
             'ICFGR1 field if it reads edge, IGROUPR0 bit if the distributor shows one security state, and the put-backs',
-            'ICENABLER0 and ICPENDR0. The monitor writes no memory-mapped GIC register: the census finds the distributor',
-            'address in one function only, secondary_run, which this run does not reach (group G). It uses the CPU interface',
-            '(group D) and acknowledges and ends whatever interrupt reaches EL2 while the guest runs, the firmware-enabled PPIs',
-            'among them (INFERRED); any interrupt but PPI 26 stops the run. Never the ITS, SMMU, PCIe, USB or the framebuffer.')}
+            'ICENABLER0 and ICPENDR0. The census cannot see the monitor\'s stores to the GIC distributor: they are in the GPU',
+            'code of section 3b, at the address that PARAMS gpu.gicd holds, and its one fixed distributor address is in',
+            'secondary_run (group G, not reached). The monitor uses the CPU interface (group D) and, on the boot CPU,',
+            'acknowledges an interrupt in two cases only: INTID 26 (the timer) when its ISTATUS is set and the run\'s deadline',
+            'is ahead, and INTID 0x14C when gpu.flags has its enable bit (a LIVE gate). Any other IRQ or FIQ, and the timer at',
+            'the deadline, ends the run with the interrupt not acknowledged: the monitor records it, disables its timer and',
+            'returns, and a foreign interrupt stays pending (INFERRED from probes/xnuboot/async.c). Never the ITS, SMMU, PCIe,',
+            'USB or the framebuffer.')}
 M1_STOP_RULES = ('   - MON STATUS -90 to -95 is the monitor\'s NV2 and PAuth gate refusing: a result, and the expected first one while D6',
                  '     is open; the same bundle is not retried.',
                  '   - MON QUARANTINE on the page (RET=0X51554E01 or 0X51554E02): the monitor\'s window is partial. Power cycle; never',
@@ -186,8 +197,18 @@ M1_SILENCE_RULE = ('   - No page change for 60 seconds after the MON CALL line: 
 def m1_lines(m1):
     """Section 1b of the record of an M1 run: SNAPMON-M1.BIN taken apart (wrapper, padding, monitor), the profile and the NV2 record the monitor was
     built with, as tools/sp11_stick_bundle_m1.py read them from the build report and checked them against the bytes of the files."""
-    w, m, n, image, reporter = m1['wrapper'], m1['monitor'], m1['nv2'], m1['image'], m1['reporter']
+    w, m, n, image, reporter, efi = m1['wrapper'], m1['monitor'], m1['nv2'], m1['image'], m1['reporter'], m1['efi']
     lines = ['1b. The monitor entry run (docs/SP11-STICK-MONITOR.md): payload 0 is SNAPMON-M1.BIN, the wrapper plus the monitor',
+             '   EFI files    the two that run at EL2 before the wrapper, named by SHA-256 as the builder was given them:',
+             *(f'                {name:<23} sha256 {digest}' for name, digest in efi.items()),
+             '                No check at boot compares them with this record: the wrapper sees PIN.DAT and the data, and the',
+             '                runner checks the payloads (INFERRED from the review of the boot path). The operator\'s own check of',
+             '                the stick is the control: the stager\'s verify and every staged file against STICK-FILES.TXT, which',
+             '                these digests are compared with',
+             '   label        PIN.DAT\'s build_label starts with M1RUN-, which only this kind\'s builder writes and the wrapper',
+             '                requires: a PIN.DAT of another kind, whose record says that no monitor is called, is refused before',
+             '                the call (docs/SP11-STICK-MONITOR.md section 14). The reverse, this PIN.DAT with another wrapper, is',
+             '                not refused: those wrappers do not know the marker',
              f'   file         SNAPMON-M1.BIN  {image["bytes"]} bytes  sha256 {image["sha256"]}',
              '                (payload 0 above: the stick names it SNAPMON.BIN)',
              f'   wrapper      {w["bytes"]} bytes  sha256 {w["sha256"]}',
@@ -254,10 +275,14 @@ def m1_time_lines(box_s, place):
         '   in a run that started secondary CPUs; the plan, section 10): this run is as long as that by construction. On',
         '   restarts: a PSCI-only control was alive at UPTIME 224 s and 268 s (OBSERVED, two boots); the restarts seen went',
         '   with CPU_ON and CPU_OFF (INFERRED) and this run starts no secondary (x4 = 0).',
-        '   Thermal (D8): no thermal guard exists on this path. The monitor\'s own (compat/a16-thermal.c) reads the A16\'s',
-        '   sensors at addresses that are not this machine\'s and is reachable only through PARAMS early_stop.flags, which',
-        '   the builder required zero (PARAMS_LAUNCH) and the wrapper checks again before the call; compat/hamoa-thermal.c is',
-        '   linked and no caller was found (INFERRED). Nothing reads a temperature during the run. The exposure is the CPU',
+        '   Thermal (D8): no thermal guard exists on this path. The monitor\'s own (compat/a16-thermal.c) only loads, from the',
+        '   A16\'s sensor addresses: SROT at 0x0c222000 + n * 0x1000, which compat/hamoa-thermal.c gives as this machine\'s TSENS',
+        '   SROT (INFERRED there), and TM at 0x0c22c000 + n * 0x1000, where this machine\'s is UNKNOWN. It is closed by',
+        '   c->thermal, which the monitor\'s setup (probes/xnuboot/setup.c) makes only if PARAMS early_stop.flags has the thermal',
+        '   bit at that moment: the builder required it zero (PARAMS_LAUNCH), the wrapper checks it again before the call, and',
+        '   nothing makes c->thermal later (a PRIVATE gate, section 3b). compat/hamoa-thermal.c is not in the monitor: its',
+        '   binary has no hamoa_ symbol (tools/test-sp11-stick-monitor-devices.py). Nothing reads a temperature during the',
+        '   run. The exposure is the CPU',
         f'   time of one CPU, {low} to {high} s plus the prepare in all, of which the guest runs at most {box_s} s. No clock, voltage or',
         '   DVFS write is compiled in or reachable by the sources read (INFERRED from the profile\'s gates; the census sees',
         '   system registers only, not MMIO). Approving this record accepts the exception D8 describes',
@@ -346,7 +371,8 @@ def record_text(r):
             first, *rest = touches[name]
             lines += [f'   {name}: {first}', *(f'      {line}' for line in rest)]
     lines += gq.FACT_LINES if r.get('gic_quarantine') else ()
-    lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.', '',
+    lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.',
+              *(m1t.SMC_LINES if m1 else ()), *(('', *m1t.DEVICE_LINES) if m1 else ()), '',
               *(m1_time_lines(r['time_box_s'], p) if m1 else
                 [f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.']), '',
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',

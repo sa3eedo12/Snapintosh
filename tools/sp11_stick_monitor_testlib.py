@@ -36,15 +36,17 @@ ROWS = ('DAIF', 'SPSEL', 'VBAR_EL2', 'HCR_EL2', 'TPIDR_EL2', 'SCTLR_EL2', 'TCR_E
         'VMPIDR_EL2')
 ROW_MASKS = {'DAIF': 0x3C0, 'SPSEL': 1, 'CNTHP_CTL_EL2': 3}
 OUTCOMES = {0: 'NONE', 64: 'PARAMS_PA', 65: 'PARAMS_SIZE', 66: 'PARAMS_EARLY_STOP', 67: 'PARAMS_GPU', 68: 'PARAMS_BOX', 69: 'IMAGE_SIZE',
-            70: 'IMAGE_UNREADABLE', 71: 'IMAGE_DIGEST', 72: 'REPORT_UNWRITABLE', 73: 'WINDOW_DIRTY', 74: 'GIC_NOT_READY', 96: 'RETURNED', 97: 'QUARANTINE',
-            98: 'RET_OTHER'}
+            70: 'IMAGE_UNREADABLE', 71: 'IMAGE_DIGEST', 72: 'REPORT_UNWRITABLE', 73: 'WINDOW_DIRTY', 74: 'GIC_NOT_READY', 75: 'PIN_LABEL', 96: 'RETURNED',
+            97: 'QUARANTINE', 98: 'RET_OTHER'}
 OUT = type('OUT', (), {name: code for code, name in OUTCOMES.items()})
 SUBSTAGES = ('NONE', 'CHECKS', 'SYNCED', 'ARMING', 'ARMED', 'CALLING', 'RETURNED', 'DONE')
 FLAGS = dict(IC_SYNC=1, CALLED=2, RETURNED=4, STACK_S2=8, WINDOW_OVERRUN=16, REGS_CHANGED=32, STACK_FULL=64, GIC_NOT_RESTORED=128)
 SEEDS = {'no-params-check': 'NO_PARAMS_CHECK', 'no-digest': 'NO_DIGEST', 'no-reg-check': 'NO_REG_CHECK', 'no-ic-sync': 'NO_IC_SYNC', 'stray-gic': 'STRAY_GIC',
          'wrong-args': 'WRONG_ARGS', 'no-s2': 'NO_S2', 'no-overrun-check': 'NO_OVERRUN_CHECK', 'store-after': 'STORE_AFTER', 'refuse-after': 'REFUSE_AFTER',
          'no-gic-finish': 'NO_GIC_FINISH', 'no-filler-scan': 'NO_FILLER_SCAN', 'no-filler-precheck': 'NO_FILLER_PRECHECK', 'flush-unwritable': 'FLUSH_UNWRITABLE',
-         'ticks-early': 'TICKS_EARLY', 'no-window-clean': 'NO_WINDOW_CLEAN', 'no-record-clean': 'NO_RECORD_CLEAN', 'no-filler-clean': 'NO_FILLER_CLEAN'}
+         'ticks-early': 'TICKS_EARLY', 'no-window-clean': 'NO_WINDOW_CLEAN', 'no-record-clean': 'NO_RECORD_CLEAN', 'no-filler-clean': 'NO_FILLER_CLEAN',
+         'no-label-check': 'NO_LABEL_CHECK'}
+LABEL_PREFIX = 'M1RUN-'         # tools/sp11_stick_bundle_m1.py LABEL_PREFIX, spelled again here so that the harness does not take it from the code it tests
 GIC_REFUSAL = 'GIC_NOT_READY'
 
 # ---- The record, from the document's table (section 5), independent of the C header ------------------------------------------
@@ -244,7 +246,13 @@ def run(exe, scenarios, cfg=None, timeout=1800):
     return Out(T.parse_output(done.stdout), G.parse_gic(done.stdout), marks, replay, state, recs, dirty)
 
 
+def marked_pin(bundle, label=None):
+    """PIN.DAT as the builder writes it for --m1-run: the marker in front of the facts' label (or `label` as given), the record digest recomputed."""
+    return bundle.repacked_pin(build_label=(LABEL_PREFIX.encode() + bundle.fields['build_label'].rstrip(b'\0')) if label is None else label)
+
+
 def world(bundle, directory, **over):
     """The base fake machine around `bundle` with the monitor's file in slot 0: the wrapper's part is zeros here (the wrapper is the host code),
-    then the fake image, and the sizes that follow. `over` replaces any of it."""
-    return T.World(bundle, directory, **{'images': {0: FAKE_FILE}, 'sizes': {0: len(FAKE_FILE), 1: 0x6000}, **over})
+    then the fake image, and the sizes that follow. The PIN.DAT is the bundle's with the label of an --m1-run build (the bundle is a --gic-stop one,
+    so its own label lacks the marker: a case that wants that passes `pin=bundle.pin`). `over` replaces any of it."""
+    return T.World(bundle, directory, **{'pin': marked_pin(bundle), 'images': {0: FAKE_FILE}, 'sizes': {0: len(FAKE_FILE), 1: 0x6000}, **over})

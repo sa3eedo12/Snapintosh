@@ -33,7 +33,7 @@
  * own refusals keep their sg_outcome values, 0 to 48) and what the call came to (never a refusal). */
 #define SM_OUTCOMES(X) \
     X(NONE, 0) X(PARAMS_PA, 64) X(PARAMS_SIZE, 65) X(PARAMS_EARLY_STOP, 66) X(PARAMS_GPU, 67) X(PARAMS_BOX, 68) X(IMAGE_SIZE, 69) \
-    X(IMAGE_UNREADABLE, 70) X(IMAGE_DIGEST, 71) X(REPORT_UNWRITABLE, 72) X(WINDOW_DIRTY, 73) X(GIC_NOT_READY, 74) \
+    X(IMAGE_UNREADABLE, 70) X(IMAGE_DIGEST, 71) X(REPORT_UNWRITABLE, 72) X(WINDOW_DIRTY, 73) X(GIC_NOT_READY, 74) X(PIN_LABEL, 75) \
     X(RETURNED, 96) X(QUARANTINE, 97) X(RET_OTHER, 98)
 enum sm_outcome {
 #define X(name, value) SM_OUT_##name = value,

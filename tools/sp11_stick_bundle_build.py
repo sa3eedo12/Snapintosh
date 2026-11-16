@@ -9,7 +9,9 @@
     sp11_stick_bundle_build.py real         --kernelcache K ...   the same from a kernelcache (docs/SP11-STICK-REAL.md): EXPERIMENTAL, host only
 
 --m1-run BUILD_REPORT (synthetic, real and the template) makes the record that of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10). It is
-the only kind that authorises a wrapper that calls a monitor, and it refuses one that calls none (tools/sp11_stick_bundle_m1.py).
+the only kind that authorises a wrapper that calls a monitor, and it refuses one that calls none (tools/sp11_stick_bundle_m1.py). It also needs --m1-efi for
+the two EFI files that run before the wrapper, pins `M1RUN-` in front of the facts label (which the wrapper of this kind requires) and, with `real`, takes
+only a withheld panel and no HVC patch (section 14 of that note).
 The bundle is the five files of docs/SP11-STICK-BUNDLE.md, q1n1's PAYLOAD.MAN and, with --base-tree, a stage tree that the stager verifies.
 A refusal prints `REFUSED=<NAME>` and exits 1: the interface's name (tools/sp11_stick_bundle.py) where it has one, else BUILDER_REFUSALS.
 Output is deterministic and is written only below --out, which must be under build/ (or --allow-under). The placement (D1), the stores (D4),
@@ -499,14 +501,16 @@ def prepare(a, kind, before_filler=None):
     gq.check_options(gic_stop, gic_quarantine)
     m1_path = getattr(a, 'm1_run', None)
     if m1_path is not None:         # an empty path is the kind with a file that cannot be read, never the other kind
-        m1.check_options(stores, gic_stop, a.time_box_s)
+        m1.check_options(stores, gic_stop, a.time_box_s, getattr(a, 'panel', None), getattr(a, 'sptm_hvc_calls', None))
+    efi = m1.read_efi(getattr(a, 'm1_efi', []), getattr(a, 'file', []), m1_path is not None)
+    facts = dict(facts, build_label=m1.pinned_label(facts['build_label'], m1_path is not None))     # the marker of this kind, PIN.DAT's and the record's
     descriptor, state, board = descriptor_digest(a, facts, kind)
     monitor, reporter = read_regular(a.monitor, '--monitor', minimum=4), read_regular(a.reporter, '--reporter', minimum=4)
     m1.refuse_monitor_reporter(reporter)        # every kind, the M1 kind too: the reporter slot is executed in the same boot
     if m1_path is None:
         m1.refuse_monitor_wrapper(monitor)
         gq.check_wrapper(monitor, gic_quarantine, bool(stores & sb.STORE_GIC))
-    m1_facts = m1.read_report(read_m1_report(m1_path), monitor, reporter) if m1_path is not None else None
+    m1_facts = m1.read_report(read_m1_report(m1_path), monitor, reporter, efi) if m1_path is not None else None
     declared = declared_ranges(a.declared)
     early = pack_pin(pin_fields(facts, place, stores, DUMMY, DUMMY, dict(guest_file_size=1024, guest_chunk_count=1, guest_file_sha256=DUMMY,
                                                                        guest_index_sha256=DUMMY)), check=False)
@@ -681,6 +685,8 @@ def build_opts(p, kind, template=False):
                                                                    'tools/sp11_stick_wrapper_build.py --monitor, which made the SNAPMON-M1.BIN and SNAPREP-M1.BIN given '
                                                                    'as --monitor and --reporter; needs ram, el2_sysreg and gic in --stores and a time box of 1 to 5 s')),
                      ('--time-box-s', dict(type=int, required=True, help='D5')), ('--descriptor', dict(help='a boot-ready board descriptor (real needs one)')),
+                     ('--m1-efi', dict(action='append', default=[], metavar='NAME=SHA256', help='with --m1-run, once for SLBOUNCE-DEVHE-MARK.EFI and Q1N1-PAYLOAD.EFI: '
+                                                                                              'the EFI files that run before the wrapper, named in section 1b')),
                      ('--note', dict(help='a text file (printable ASCII, at most 40 lines of 120 characters) appended to the record as its section 6'))):
         p.add_argument(flag, **kw)
     if kind == 'synthetic':
