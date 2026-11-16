@@ -12,12 +12,13 @@
  * know and a zero tag means the stage did not run. The head page keeps its zero tail and the head's monitor_* fields stay zero when no
  * monitor is called, so sp11sb_report_check passes (a host test proves it).
  *
- * Shape. 172 little-endian 64-bit words, no padding, reserved words zero, an unknown value in a field a refusal (the reporter says the
+ * Shape. 182 little-endian 64-bit words, no padding, reserved words zero, an unknown value in a field a refusal (the reporter says the
  * record is damaged and prints nothing of it). Every register the stage touches has one row (old value read before any change, the value
  * written, the read-back after the write, the final value after the put-back), so "old and new values" and "restored" are read from one
- * table. The stage keeps the record in its stack, stores it whole after every step (so a hang is named in RAM by the last sub-stage and
- * by the classes begun) and prints its page lines from the same bytes the reporter reads (sg_line below): the two pages cannot disagree
- * about a number.
+ * table; after the table, the survey of version 3 (what the reads saw beyond the stage's own PPI: the EL1 timers, the SPIs, the other PPIs'
+ * priorities) and the quarantine's own words. The stage keeps the record in its stack, stores it whole after every step (so a hang is named
+ * in RAM by the last sub-stage and by the classes begun) and prints its page lines from the same bytes the reporter reads (sg_line below):
+ * the two pages cannot disagree about a number.
  *
  * Evidence: EXPERIMENTAL; hardware NOT RUN. */
 #include "sp11-stick-hw.h"
@@ -25,9 +26,9 @@
 #if SNAP_SP11_STICK_GIC
 #include "sp11-stick-common.h"
 
-#define SG_REC_VERSION 2u
+#define SG_REC_VERSION 3u       /* 2 was 1376 bytes, the table alone; 3 adds struct sg_survey after it */
 #define SG_REC_MAGIC "SNAPGIC1"
-#define SG_REC_BYTES 1376u
+#define SG_REC_BYTES 1456u
 #define SG_MONITOR_WINDOW 0x10000u          /* what the monitor's report may occupy from its x0 (VERIFIED: the static asserts of report_layout.c) */
 #define SG_REC_AT (SP11SB_REPORT_OUT + SG_MONITOR_WINDOW)       /* the offset in REPORT.DAT: 0x11000, the first extension slot */
 #define SG_REC_SLOT 0x1000u                 /* the slot of this record: the next extension record starts at the next page */
@@ -38,7 +39,7 @@ _Static_assert(SG_REC_AT == 0x11000u && SG_REC_BYTES <= SG_REC_SLOT && SG_REC_AT
 /* Store classes of the stage, one bit each. The authorisation record (docs/SP11-STICK-GIC.md section 7) groups them: G and R are the
  * frozen format's GIC class, C, T, V and E its EL2 system register class. */
 #define SG_CLASS_G 1u       /* the distributor's non-secure group 1 enable: GICD_CTLR */
-#define SG_CLASS_R 2u       /* this CPU's redistributor, PPI 26 only: IGROUPR0, IPRIORITYR byte, ICFGR1, ISENABLER0 (only when found disabled), and their put-back */
+#define SG_CLASS_R 2u       /* this CPU's redistributor: the quarantine of the other enabled interrupts first, then PPI 26 only: IGROUPR0, IPRIORITYR byte, ICFGR1, ISENABLER0 (only when found disabled), and their put-back, the quarantine's last */
 #define SG_CLASS_C 4u       /* the CPU interface: ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1 */
 #define SG_CLASS_T 8u       /* the EL2 physical timer: CNTHP_CVAL_EL2, CNTHP_CTL_EL2 */
 #define SG_CLASS_V 16u      /* VBAR_EL2 and PSTATE.I, inside the window routines only */
@@ -58,14 +59,16 @@ enum sg_reg_id {
 };
 #define SG_R_MASK ((1u << SG_R_COUNT) - 1)
 
-/* What the stage decided, in one number: a refusal before any store (1 to 15), a store that did not hold (16 to 31), what the windows
- * showed (32 to 47) or a put-back that failed (48). The number is the head's refusal_detail when the stage returns a refusal. The
- * verdicts of the EL2 window come first in the order the checks run; the last three are the EL1 window's. */
+/* What the stage decided, in one number: a refusal before any store (1 to 15), a store that did not hold or an arm that left a foreign
+ * interrupt pending (16 to 31, always after a store and so always with a put-back), what the windows showed (32 to 47) or a put-back that
+ * failed (48). The number is the head's refusal_detail when the stage returns a refusal. The verdicts of the EL2 window come first in the
+ * order the checks run; the last three are the EL1 window's. */
 #define SG_OUTCOMES(X) \
     X(NONE, 0) X(NOT_EL2, 1) X(SPSEL_NOT_1, 2) X(DAIF_NOT_MASKED, 3) X(IMO_CLEAR, 4) X(PIN_GIC, 5) X(COUNTER, 6) X(GICD_VIEW, 7) \
     X(GICR_NOT_FOUND, 8) X(GICR_ASLEEP, 9) X(PPI_OWNED, 10) X(SRE_CLEAR, 11) X(TIMER_OWNED, 12) X(WINDOW_UNWRITABLE, 13) \
     X(EL1_PCT_TRAPPED, 14) X(EL1_IMAGE, 15) \
     X(G_NOT_HELD, 16) X(R_NOT_HELD, 17) X(C_NOT_HELD, 18) X(T_NOT_HELD, 19) X(PRIO_NOT_BELOW_PMR, 20) X(EL1_NOT_HELD, 21) \
+    X(Q_NOT_HELD, 22) X(FOREIGN_PENDING, 23) \
     X(IRQ_OK, 32) X(NO_IRQ, 33) X(WRONG_INTID, 34) X(EXCEPTION, 35) X(STORM, 36) X(CYCLE_LOST, 37) X(HPPIR_NOT_26, 38) X(NO_ISTATUS, 39) \
     X(NOT_CLEAN, 40) X(FINAL_PENDING, 41) X(NO_IRQ_FROM_EL1, 42) X(EL1_WRONG_INTID, 43) X(EL1_EXCEPTION, 44) X(NOT_RESTORED, 48)
 enum sg_outcome {
@@ -113,6 +116,19 @@ enum sg_substage {
 #define SG_CNTHP_ISTATUS 4u /* CNTHP_CTL_EL2.ISTATUS */
 #define SG_INTID_NONE 1023u /* ICC_HPPIR1_EL1 with nothing pending */
 
+/* What struct sg_survey holds, one bit each: set when the stage read (or wrote) it, so that a zero is never taken for an observation. */
+#define SG_SV_TIMERS 1u     /* the EL1 timers, read at EL2 (the dry run's build only: the monitor entry's arm half does not read them) */
+#define SG_SV_SPI 2u        /* the SPIs' enable and pending registers of the distributor */
+#define SG_SV_PPI 4u        /* the priorities of the other enabled PPIs */
+#define SG_SV_QUAR 8u       /* the quarantine's write was made: its mask, and the enable register read back after it */
+#define SG_SV_HPPIR 16u     /* ICC_HPPIR1_EL1 was read after every store and before any interrupt was unmasked */
+#define SG_SV_ALL 31u
+#define SG_SPI_LINES_MAX 31u    /* GICD_TYPER.ITLinesNumber is five bits: GICD_ISENABLER[1..31] and GICD_ISPENDR[1..31], INTIDs 32 to 1023 */
+#define SG_SURVEY_PPI0 23u      /* INTIDs 23, 25, 27 and 30: the PPIs the firmware left enabled besides PPI 26 (boot 12, OBSERVED); SGI 0 is the fifth enabled bit */
+#define SG_SURVEY_PPI1 25u
+#define SG_SURVEY_PPI2 27u      /* the EL1 virtual timer's: the unit's GTDT gives Virtual EL1 GSIV 27 (OBSERVED) */
+#define SG_SURVEY_PPI3 30u
+
 struct sg_reg {
     uint64_t old;       /* read before any change */
     uint64_t new;       /* what the stage wrote, 0 when it wrote nothing */
@@ -143,6 +159,16 @@ struct sg_win {
     uint64_t dg_rpr, dg_pmr, dg_hcr, dg_spsr;   /* +0x68 */
 };
 
+struct sg_survey {      /* version 3: what the reads saw beyond the stage's own PPI, and the quarantine; SG_SV_* says which words are observations */
+    uint64_t cntv_ctl, cntv_cval, cntp_ctl, cntp_cval;     /* +0x00 CNTV_CTL_EL0, CNTV_CVAL_EL0, CNTP_CTL_EL0, CNTP_CVAL_EL0 as read at EL2 */
+    uint32_t spi_lines, spi_enabled;    /* +0x20 ITLinesNumber as used; INTIDs enabled in GICD_ISENABLER[1..lines] */
+    uint32_t spi_pending, spi_both;     /* +0x28 INTIDs pending in GICD_ISPENDR[1..lines]; INTIDs that are both */
+    uint32_t spi_first, spi_second;     /* +0x30 the first two INTIDs that are enabled and pending, 0 when there are fewer */
+    uint32_t ppi_prio, quarantined;     /* +0x38 IPRIORITYR bytes of INTIDs 23, 25, 27 and 30, the first in the low byte; the ISENABLER0 bits written to ICENABLER0 (never PPI 26's) */
+    uint32_t quar_rb, hppir_pre;        /* +0x40 ISENABLER0 read right after that write; ICC_HPPIR1_EL1 after every store, with IRQ still masked */
+    uint32_t flags, reserved;           /* +0x48 SG_SV_*; zero */
+};
+
 struct sw_gic_rec {
     uint8_t magic[8];                           /* 0x000 SG_REC_MAGIC */
     uint32_t version, size;                     /* 0x008 */
@@ -162,14 +188,17 @@ struct sw_gic_rec {
     struct sg_irq irq[SG_IRQ_N];                /* 0x0A8 */
     struct sg_win win[SG_WIN_N];                /* 0x210 */
     struct sg_reg reg[SG_R_COUNT];              /* 0x320 */
+    struct sg_survey sv;                        /* 0x560 */
 };
-_Static_assert(sizeof(struct sg_reg) == 32 && sizeof(struct sg_irq) == 0x48 && sizeof(struct sg_win) == 0x88, "a row is four words, an interrupt nine, a window seventeen");
-_Static_assert(sizeof(struct sw_gic_rec) == SG_REC_BYTES && SG_REC_BYTES % 8 == 0, "the record is 172 words with no padding");
+_Static_assert(sizeof(struct sg_reg) == 32 && sizeof(struct sg_irq) == 0x48 && sizeof(struct sg_win) == 0x88 && sizeof(struct sg_survey) == 0x50,
+               "a row is four words, an interrupt nine, a window seventeen, the survey ten");
+_Static_assert(sizeof(struct sw_gic_rec) == SG_REC_BYTES && SG_REC_BYTES % 8 == 0, "the record is 182 words with no padding");
 _Static_assert(offsetof(struct sw_gic_rec, outcome) == 0x10 && offsetof(struct sw_gic_rec, done) == 0x30 &&
                offsetof(struct sw_gic_rec, counter_hz) == 0x38 && offsetof(struct sw_gic_rec, gicd_base) == 0x58 &&
                offsetof(struct sw_gic_rec, gicr_typer) == 0x80 && offsetof(struct sw_gic_rec, cnthctl_el2) == 0x98 &&
                offsetof(struct sw_gic_rec, irq) == 0xA8 && offsetof(struct sw_gic_rec, win) == 0x210 &&
-               offsetof(struct sw_gic_rec, reg) == 0x320, "record group starts: a padding byte before one would shift every later field");
+               offsetof(struct sw_gic_rec, reg) == 0x320 && offsetof(struct sw_gic_rec, sv) == 0x560,
+               "record group starts: a padding byte before one would shift every later field");
 #define SW_GIC_REC_DONE 0x30        /* offsetof(struct sw_gic_rec, done): the window routines poll it, the handlers set it */
 
 #define SG_U32(b, f) sp11sb_rd32((b) + offsetof(struct sw_gic_rec, f))
@@ -185,6 +214,9 @@ _Static_assert(offsetof(struct sw_gic_rec, outcome) == 0x10 && offsetof(struct s
 #define SG_WIN_AT(b, w) ((b) + offsetof(struct sw_gic_rec, win) + sizeof(struct sg_win) * (w))
 #define SG_WIN_U64(b, w, f) sp11sb_rd64(SG_WIN_AT(b, w) + offsetof(struct sg_win, f))
 #define SG_WIN_U32(b, w, f) sp11sb_rd32(SG_WIN_AT(b, w) + offsetof(struct sg_win, f))
+#define SG_SV_AT(b) ((b) + offsetof(struct sw_gic_rec, sv))
+#define SG_SV_U64(b, f) sp11sb_rd64(SG_SV_AT(b) + offsetof(struct sg_survey, f))
+#define SG_SV_U32(b, f) sp11sb_rd32(SG_SV_AT(b) + offsetof(struct sg_survey, f))
 
 /* Names as a table of characters, as the interface's: nothing here needs a relocation to be printed. */
 struct sg_name_row { uint8_t value; char name[SG_NAME_MAX + 1]; };
@@ -237,18 +269,40 @@ static inline int sg_irq_check(const uint8_t *b, unsigned i)
     return (SG_IRQ_U32(b, i, flags) & ~SG_IRQF_ALL) || SG_IRQ_U32(b, i, hppir_vec) > SG_INTID_LIMIT || SG_IRQ_U32(b, i, hppir_post) > SG_INTID_LIMIT ||
            lat < -SG_LATENCY_CLAMP || lat > SG_LATENCY_CLAMP || us < -SG_LAT_US_CLAMP || us > SG_LAT_US_CLAMP;
 }
+/* The survey of version 3: a word whose flag is clear is zero (so that an unfilled word is never printed as an observation), the counts are what
+ * the registers can hold, and the two INTIDs agree with the count of INTIDs that are enabled and pending. The PPI's own bit is never in the
+ * quarantine. */
+static inline int sg_survey_check(const uint8_t *b)
+{
+    uint32_t flags = SG_SV_U32(b, flags), lines = SG_SV_U32(b, spi_lines), en = SG_SV_U32(b, spi_enabled), pend = SG_SV_U32(b, spi_pending);
+    uint32_t both = SG_SV_U32(b, spi_both), first = SG_SV_U32(b, spi_first), second = SG_SV_U32(b, spi_second);
+    uint32_t most = 32u * SG_SPI_LINES_MAX;
+    if (flags & ~SG_SV_ALL) return 1;
+    if (!(flags & SG_SV_TIMERS) && (SG_SV_U64(b, cntv_ctl) | SG_SV_U64(b, cntv_cval) | SG_SV_U64(b, cntp_ctl) | SG_SV_U64(b, cntp_cval))) return 1;
+    if (!(flags & SG_SV_SPI) && (lines | en | pend | both | first | second)) return 1;
+    if (!(flags & SG_SV_PPI) && SG_SV_U32(b, ppi_prio)) return 1;
+    if (!(flags & SG_SV_QUAR) && (SG_SV_U32(b, quarantined) | SG_SV_U32(b, quar_rb))) return 1;
+    if (!(flags & SG_SV_HPPIR) && SG_SV_U32(b, hppir_pre)) return 1;
+    if (lines > SG_SPI_LINES_MAX || en > most || pend > most || both > en || both > pend) return 1;
+    if ((both == 0) != (first == 0) || (both < 2) != (second == 0) || (second && first >= second)) return 1;
+    if ((first && (first < 32 || first > 1023)) || (second && second > 1023)) return 1;
+    if (SG_SV_U32(b, hppir_pre) > SG_INTID_LIMIT || (SG_U32(b, intid) < 32 && (SG_SV_U32(b, quarantined) >> SG_U32(b, intid) & 1))) return 1;
+    return 0;
+}
 static inline int sg_record_check(const uint8_t *b, uint64_t len)
 {
     unsigned i;
     if (!b || len < SG_REC_BYTES || !sp11sb_magic(b, SG_REC_MAGIC)) return SG_E_MAGIC;
     if (SG_U32(b, version) != SG_REC_VERSION) return SG_E_VERSION;
     if (SG_U32(b, size) != SG_REC_BYTES) return SG_E_SIZE;
-    if (SG_U32(b, reserved0) || SG_U32(b, gicr_index) > SP11SB_GICR_MAX || SG_WIN_U32(b, SG_WIN_EL2, reserved) || SG_WIN_U32(b, SG_WIN_EL1, reserved)) return SG_E_RESERVED;
+    if (SG_U32(b, reserved0) || SG_U32(b, gicr_index) > SP11SB_GICR_MAX || SG_WIN_U32(b, SG_WIN_EL2, reserved) || SG_WIN_U32(b, SG_WIN_EL1, reserved) ||
+        SG_SV_U32(b, reserved))
+        return SG_E_RESERVED;
     if (!sg_outcome_known(SG_U32(b, outcome)) || !sg_outcome_known(SG_U32(b, first_outcome)) || SG_U32(b, substage) > SG_SUB_LAST ||
         (SG_U32(b, planned) & ~SG_CLASS_ALL) || (SG_U32(b, begun) & ~SG_CLASS_ALL) || (SG_U32(b, wrote) & ~SG_R_MASK) ||
         (SG_U32(b, restore_failed) & ~SG_R_MASK) || (SG_U32(b, restore_retried) & ~SG_R_MASK) || SG_U32(b, done) > 1 || SG_U32(b, cycle) > SG_CYCLES + 1 ||
         SG_U32(b, intid) < 16 || SG_U32(b, intid) > 31 || SG_U64(b, timebox_ticks) > SG_TICKS_LIMIT || SG_U64(b, slack_ticks) > SG_TICKS_LIMIT ||
-        SG_U64(b, cycle_ticks) > SG_TICKS_LIMIT)
+        SG_U64(b, cycle_ticks) > SG_TICKS_LIMIT || sg_survey_check(b))
         return SG_E_VALUE;
     for (i = 0; i < SG_IRQ_N; i++)
         if (sg_irq_check(b, i)) return SG_E_VALUE;
@@ -269,8 +323,14 @@ enum sg_line_id {
     SG_L_FRAMES, SG_L_OLD, SG_L_NEW, SG_L_TIMER,                    /* the reporter's own */
     SG_L_CYC0, SG_L_CYC1, SG_L_CYC2, SG_L_CYC3, SG_L_CYC4,          /* one per interrupt of the windows: the row of SG_IRQ_N */
     SG_L_EXC, SG_L_EXC1, SG_L_HVC, SG_L_HCR, SG_L_VBAR1, SG_L_SCTLR1, SG_L_FINAL,
+    SG_L_TIMERS, SG_L_SPI, SG_L_PPIP, SG_L_QUAR,                    /* version 3: the survey of the reads (the reporter's), and the quarantine and the check before the window (also the wrapper's on a refusal) */
     SG_L_COUNT
 };
+/* The reporter's order for the dry run's page: the head of the stage first, then what was read, what was surveyed, what was stored, and what the windows
+ * showed. The monitor entry's page prints its own shorter list. At most 27 lines when every one applies, of the reporter's 40. */
+#define SG_REPORTER_ORDER {SG_L_VERDICT, SG_L_FRAMES, SG_L_GICD, SG_L_GICR, SG_L_CPU, SG_L_OLD, SG_L_SPI, SG_L_PPIP, SG_L_TIMERS, SG_L_QUAR, SG_L_NEW, \
+                           SG_L_TIMER, SG_L_IRQ, SG_L_CYC0, SG_L_CYC1, SG_L_CYC2, SG_L_CYC3, SG_L_DIAG, SG_L_EXC, SG_L_EL1, SG_L_CYC4, SG_L_DIAG1, \
+                           SG_L_HVC, SG_L_EXC1, SG_L_HCR, SG_L_VBAR1, SG_L_SCTLR1, SG_L_FINAL, SG_L_RESTORE}
 
 SC_INLINE void sg_dec_signed(struct pl_line *l, int64_t value)
 {
@@ -527,6 +587,44 @@ SC_INLINE int sg_line(const struct q1n1_payload_args *a, struct pl_line *l, unsi
         sg_key_bit(l, " IGRPEN1=", SG_REG_FIN(b, SG_R_ICC_IGRPEN1), 0);
         sg_key_h8(a, l, " RPR=", SG_REG_FIN(b, SG_R_ICC_RPR));
         sg_key_h32(a, l, " DAIF=", SG_REG_FIN(b, SG_R_DAIF) & SG_DAIF_SHOWN);
+        return 1;
+    case SG_L_TIMERS:       /* the EL1 timers as read at EL2: CTL bits 2:0 are ENABLE, IMASK and ISTATUS; V is virtual, P physical */
+        if (!(SG_SV_U32(b, flags) & SG_SV_TIMERS)) return 0;
+        pl_text(l, "GIC TIMERS");
+        sg_key_h8(a, l, " VCTL=", SG_SV_U64(b, cntv_ctl) & 7);
+        sc_key_hex(a, l, " VCVAL=", SG_SV_U64(b, cntv_cval));
+        sg_key_h8(a, l, " PCTL=", SG_SV_U64(b, cntp_ctl) & 7);
+        sc_key_hex(a, l, " PCVAL=", SG_SV_U64(b, cntp_cval));
+        return 1;
+    case SG_L_SPI:          /* counts of INTIDs; FIRST and SECOND are the first two that are enabled and pending, 0 for none */
+        if (!(SG_SV_U32(b, flags) & SG_SV_SPI)) return 0;
+        pl_text(l, "GIC SPI");
+        sc_key_dec(l, " LINES=", SG_SV_U32(b, spi_lines));
+        sc_key_dec(l, " EN=", SG_SV_U32(b, spi_enabled));
+        sc_key_dec(l, " PEND=", SG_SV_U32(b, spi_pending));
+        sc_key_dec(l, " BOTH=", SG_SV_U32(b, spi_both));
+        sc_key_dec(l, " FIRST=", SG_SV_U32(b, spi_first));
+        sc_key_dec(l, " SECOND=", SG_SV_U32(b, spi_second));
+        return 1;
+    case SG_L_PPIP:         /* the priorities of SG_SURVEY_PPI0 to SG_SURVEY_PPI3, in that order */
+        if (!(SG_SV_U32(b, flags) & SG_SV_PPI)) return 0;
+        pl_text(l, "GIC PPIP");
+        sg_key_h8(a, l, " P23=", SG_SV_U32(b, ppi_prio));
+        sg_key_h8(a, l, " P25=", SG_SV_U32(b, ppi_prio) >> 8);
+        sg_key_h8(a, l, " P27=", SG_SV_U32(b, ppi_prio) >> 16);
+        sg_key_h8(a, l, " P30=", SG_SV_U32(b, ppi_prio) >> 24);
+        return 1;
+    case SG_L_QUAR:         /* the first store and the last check of the arm: what was disabled and read back, and what the CPU interface would hand out next */
+        if (!(SG_SV_U32(b, flags) & (SG_SV_QUAR | SG_SV_HPPIR))) return 0;
+        pl_text(l, "GIC QUAR");
+        if (SG_SV_U32(b, flags) & SG_SV_QUAR) {
+            sg_key_h32(a, l, " MASK=", SG_SV_U32(b, quarantined));
+            sg_key_h32(a, l, " DONE=", SG_SV_U32(b, quar_rb));
+        } else {
+            pl_text(l, " MASK=NONE");
+        }
+        if (SG_SV_U32(b, flags) & SG_SV_HPPIR) sc_key_dec(l, " HPPIR=", SG_SV_U32(b, hppir_pre));
+        else pl_text(l, " HPPIR=-");
         return 1;
     default:
         return 0;

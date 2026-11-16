@@ -35,9 +35,12 @@ def le(value, size):
 
 # name -> (offset, little-endian bytes, the code the check must give), written from the document's section 5.
 IRQ0, WIN0, WIN1, IRQ_LAST = G.IRQ_AT, G.WIN_AT, G.WIN_AT + G.WIN_SIZE, G.IRQ_AT + (G.IRQ_N - 1) * G.IRQ_SIZE
+SV0 = G.SV_AT
 DAMAGED = {
-    'magic': (0x00, le(0x4141414141414141, 8), G.E_MAGIC), 'version': (0x08, le(3, 4), G.E_VERSION), 'size': (0x0C, le(256, 4), G.E_SIZE),
+    'magic': (0x00, le(0x4141414141414141, 8), G.E_MAGIC), 'version': (0x08, le(2, 4), G.E_VERSION), 'version-4': (0x08, le(4, 4), G.E_VERSION),
+    'size': (0x0C, le(256, 4), G.E_SIZE),
     'reserved0': (0x7C, le(1, 4), G.E_RESERVED), 'gicr-index': (0x68, le(sb.GICR_MAX + 1, 4), G.E_RESERVED), 'win-reserved': (WIN1 + 0x1C, le(1, 4), G.E_RESERVED),
+    'sv-reserved': (SV0 + 0x4C, le(1, 4), G.E_RESERVED),
     'outcome': (0x10, le(99, 4), G.E_VALUE), 'first-outcome': (0x2C, le(99, 4), G.E_VALUE), 'substage': (0x14, le(12, 4), G.E_VALUE),
     'planned': (0x18, le(0x40, 4), G.E_VALUE), 'begun': (0x1C, le(0x40, 4), G.E_VALUE), 'wrote': (0x20, le(0x40000, 4), G.E_VALUE),
     'restore-failed': (0x24, le(0x40000, 4), G.E_VALUE), 'restore-retried': (0x28, le(0x40000, 4), G.E_VALUE), 'done': (0x30, le(2, 4), G.E_VALUE),
@@ -48,13 +51,29 @@ DAMAGED = {
     'lat-ticks-high': (IRQ0 + 0x38, le(G.LATENCY_CLAMP + 1, 8), G.E_VALUE), 'lat-ticks-low': (IRQ0 + 0x38, le(-G.LATENCY_CLAMP - 1, 8), G.E_VALUE),
     'lat-us-high': (IRQ0 + 0x40, le(G.LAT_US_CLAMP + 1, 8), G.E_VALUE), 'lat-us-low': (IRQ0 + 0x40, le(-G.LAT_US_CLAMP - 1, 8), G.E_VALUE),
     'el1-lat-us-high': (IRQ_LAST + 0x40, le(G.LAT_US_CLAMP + 1, 8), G.E_VALUE), 'win-irq-entries': (WIN0 + 0x10, le(0x10000, 4), G.E_VALUE),
-    'win-other-entries': (WIN1 + 0x14, le(0x10000, 4), G.E_VALUE), 'win-hvc-end': (WIN1 + 0x18, le(2, 4), G.E_VALUE)}
+    'win-other-entries': (WIN1 + 0x14, le(0x10000, 4), G.E_VALUE), 'win-hvc-end': (WIN1 + 0x18, le(2, 4), G.E_VALUE),
+    # The survey (version 3), each rule of the check alone: the words from spi_lines to spi_second, from ppi_prio to flags.
+    'sv-flags': (SV0 + 0x48, le(0x20, 4), G.E_VALUE),
+    'sv-spi-unflagged': (SV0 + 0x48, le(G.SVF['TIMERS'] | G.SVF['PPI'] | G.SVF['HPPIR'], 4), G.E_VALUE),
+    'sv-timers-unflagged': (SV0, le(1, 8) + le(0, 8) * 3 + le(31, 4) + le(0, 4) * 9 + le(G.SVF['SPI'] | G.SVF['PPI'], 4), G.E_VALUE),
+    'sv-spi-lines': (SV0 + 0x20, le(32, 4), G.E_VALUE),
+    'sv-spi-enabled': (SV0 + 0x20, le(31, 4) + le(993, 4), G.E_VALUE),
+    'sv-spi-both-over-enabled': (SV0 + 0x20, le(31, 4) + le(1, 4) + le(1, 4) + le(2, 4) + le(40, 4) + le(41, 4), G.E_VALUE),
+    'sv-first-without-both': (SV0 + 0x20, le(31, 4) + le(0, 4) * 3 + le(40, 4) + le(0, 4), G.E_VALUE),
+    'sv-second-without-two': (SV0 + 0x20, le(31, 4) + le(1, 4) + le(1, 4) + le(1, 4) + le(40, 4) + le(41, 4), G.E_VALUE),
+    'sv-first-not-below-second': (SV0 + 0x20, le(31, 4) + le(2, 4) + le(2, 4) + le(2, 4) + le(41, 4) + le(40, 4), G.E_VALUE),
+    'sv-first-is-not-an-spi': (SV0 + 0x20, le(31, 4) + le(1, 4) + le(1, 4) + le(1, 4) + le(31, 4) + le(0, 4), G.E_VALUE),
+    'sv-quarantine-holds-the-ppi': (SV0 + 0x38, le(0, 4) + le(1 << 26, 4) + le(0, 4) + le(0, 4) + le(G.SVF['QUAR'] | 31, 4), G.E_VALUE),
+    'sv-hppir': (SV0 + 0x38, le(0, 4) + le(0, 4) + le(0, 4) + le(0x1000000, 4) + le(31, 4), G.E_VALUE)}
 # The same fields at the last value the check lets through.
 LIMITS = {
     'lat-ticks': (IRQ0 + 0x38, le(G.LATENCY_CLAMP, 8)), 'lat-ticks-neg': (IRQ0 + 0x38, le(-G.LATENCY_CLAMP, 8)), 'lat-us': (IRQ0 + 0x40, le(G.LAT_US_CLAMP, 8)),
     'lat-us-neg': (IRQ0 + 0x40, le(-G.LAT_US_CLAMP, 8)), 'timebox': (0x40, le(G.TICKS_LIMIT, 8)), 'slack': (0x48, le(G.TICKS_LIMIT, 8)),
     'cycle-ticks': (0x50, le(G.TICKS_LIMIT, 8)), 'wrote': (0x20, le(0x3FFFF, 4)), 'entries': (WIN0 + 0x10, le(0xFFFF, 4)), 'cycle': (0x34, le(4, 4)),
-    'hppir': (IRQ0 + 0x28, le(0xFFFFFF, 4)), 'intid-16': (0x6C, le(16, 4)), 'intid-31': (0x6C, le(31, 4)), 'gicr-index': (0x68, le(sb.GICR_MAX, 4))}
+    'hppir': (IRQ0 + 0x28, le(0xFFFFFF, 4)), 'intid-16': (0x6C, le(16, 4)), 'intid-31': (0x6C, le(31, 4)), 'gicr-index': (0x68, le(sb.GICR_MAX, 4)),
+    'sv-spi-most': (SV0 + 0x20, le(31, 4) + le(992, 4) + le(992, 4) + le(992, 4) + le(1022, 4) + le(1023, 4)),
+    'sv-spi-first-32': (SV0 + 0x20, le(1, 4) + le(1, 4) + le(1, 4) + le(1, 4) + le(32, 4) + le(0, 4)),
+    'sv-quarantine-all-but-the-ppi': (SV0 + 0x38, le(0xFFFFFFFF, 4) + le(0xFBFFFFFF, 4) + le(0xFFFFFFFF, 4) + le(0xFFFFFF, 4) + le(31, 4))}
 
 
 def widest(outcome, first, entries, hvc):
@@ -72,6 +91,10 @@ def widest(outcome, first, entries, hvc):
     for w in range(G.WIN_N):
         at = WIN0 + w * G.WIN_SIZE
         patches += [(at, 'ff' * 16), (at + 0x10, le(entries, 4) + le(0xFFFF, 4)), (at + 0x18, le(hvc, 4)), (at + 0x20, 'ff' * 96)]
+    # The survey at its widest: every flag, the timers' words full, the counts at what the registers can hold, the quarantine every bit but the PPI's (this
+    # record's INTID is 31), the INTID of the pre-window check at the width the check allows.
+    patches += [(SV0, ones * 4), (SV0 + 0x20, le(31, 4) + le(992, 4) * 3 + le(1022, 4) + le(1023, 4)),
+                (SV0 + 0x38, 'ff' * 4 + le(0x7FFFFFFF, 4) + 'ff' * 4 + le(0xFFFFFF, 4) + le(31, 4))]
     return patches + [(G.REG_TABLE, 'ff' * (32 * len(G.REGS)))]
 
 
@@ -103,10 +126,11 @@ class Tables(unittest.TestCase):
         outcomes, substages = G.header_enums()
         self.assertEqual((outcomes, substages), (G.OUTCOMES, G.SUBSTAGES))
 
-    def test_the_record_is_172_words_in_its_own_slot_and_every_register_has_a_bit_in_the_written_mask(self):
-        self.assertEqual((G.REC_BYTES, G.REC_AT, G.REC_SLOT, G.MONITOR_WINDOW), (1376, 0x11000, 0x1000, 0x10000))
-        self.assertEqual((len(G.REGS), G.REG_TABLE + 32 * len(G.REGS)), (18, G.REC_BYTES))
+    def test_the_record_is_182_words_in_its_own_slot_and_every_register_has_a_bit_in_the_written_mask(self):
+        self.assertEqual((G.REC_BYTES, G.REC_AT, G.REC_SLOT, G.MONITOR_WINDOW), (1456, 0x11000, 0x1000, 0x10000))
+        self.assertEqual((len(G.REGS), G.REG_TABLE + 32 * len(G.REGS), G.SV_AT + 0x50), (18, G.SV_AT, G.REC_BYTES))
         self.assertEqual((G.IRQ_AT + G.IRQ_N * G.IRQ_SIZE, G.WIN_AT + G.WIN_N * G.WIN_SIZE), (G.WIN_AT, G.REG_TABLE))
+        self.assertEqual(max(off + abs(width) for _, off, width in G.SV_FIELDS), 0x50, 'the survey is ten words')
         self.assertLessEqual(G.REC_AT + G.REC_SLOT, sb.REPORT_BYTES)
         self.assertEqual(G.REC_AT, sb.REPORT_OUT + 0x10000, 'the first extension slot starts where the monitor window ends')
 
@@ -159,7 +183,7 @@ class Widths(Base):
                 self.assertEqual(self.reads_clean(run), 0)
                 longest = max(line.length for line in run.rep.lines)
                 self.assertLessEqual(longest, sb.LINE_MAX)
-                self.assertLessEqual(len(run.rep.lines), 9 + 23, 'the dry run reporter prints at most 9 lines and the record at most 23 more')
+                self.assertLessEqual(len(run.rep.lines), 9 + 28, 'the dry run reporter prints at most 9 lines and the record at most 28 more, 37 of its 40')
                 self.assertGreaterEqual(longest, 95, 'the widest record must reach the widest lines: this test is vacuous if it does not')
 
     def reads_clean(self, run):

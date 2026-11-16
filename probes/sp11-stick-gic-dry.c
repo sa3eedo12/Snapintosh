@@ -34,6 +34,11 @@ __attribute__((noinline)) void sp11hw_write_cnthp_cval_el2(uint64_t value) { SP1
 __attribute__((noinline)) void sp11hw_write_hcr_el2(uint64_t value) { SP11HW_MSR_ISB(hcr_el2, value); }
 __attribute__((noinline)) void sp11hw_write_vbar_el1(uint64_t value) { SP11HW_MSR_ISB(vbar_el1, value); }
 __attribute__((noinline)) void sp11hw_write_sctlr_el1(uint64_t value) { SP11HW_MSR_ISB(sctlr_el1, value); }
+/* The EL1 timers, each read once by the survey: one MRS and nothing else (the monitor entry's arm half does not have them). */
+__attribute__((noinline)) uint64_t sp11hw_read_cntv_ctl_el0(void) { return SP11HW_MRS(cntv_ctl_el0); }
+__attribute__((noinline)) uint64_t sp11hw_read_cntv_cval_el0(void) { return SP11HW_MRS(cntv_cval_el0); }
+__attribute__((noinline)) uint64_t sp11hw_read_cntp_ctl_el0(void) { return SP11HW_MRS(cntp_ctl_el0); }
+__attribute__((noinline)) uint64_t sp11hw_read_cntp_cval_el0(void) { return SP11HW_MRS(cntp_cval_el0); }
 #endif
 
 /* ---- Reads that decide the EL1 window, before any store ---- */
@@ -56,7 +61,9 @@ static unsigned gic_dry_precheck(struct sw_gic *g)
 
 /* ---- The announcements ---- */
 
-/* What the stores put in place, shown before the EL2 window opens: a freeze or a reset inside it leaves this line as the last. */
+/* What the stores put in place, shown before the EL2 window opens: a freeze or a reset inside it leaves this line as the last. ISEN is what the
+ * quarantine and the PPI's own enable left (read back after the stores), HPPIR what the CPU interface would hand out next with IRQ still masked. The
+ * line is at most 100 characters (the interface's LINE_MAX) for any values the keys can print. */
 static void gic_say_next_window(struct sw_gic *g)
 {
     struct pl_line l;
@@ -69,8 +76,8 @@ static void gic_say_next_window(struct sw_gic *g)
     sg_key_h32(g->c->a, &l, " ISEN=", r->reg[SG_R_ISENABLER0].rb);
     sg_key_h8(g->c->a, &l, " PRIO=", r->reg[SG_R_IPRIORITYR].rb);
     sg_key_h8(g->c->a, &l, " PMR=", r->reg[SG_R_ICC_PMR].rb);
-    sg_key_h8(g->c->a, &l, " IGRPEN1=", r->reg[SG_R_ICC_IGRPEN1].rb);
-    sg_key_h8(g->c->a, &l, " CTL=", r->reg[SG_R_CNTHP_CTL].rb);
+    sg_key_bit(&l, " IGRPEN1=", r->reg[SG_R_ICC_IGRPEN1].rb, 0);
+    sc_key_dec(&l, " HPPIR=", r->sv.hppir_pre & 0xFFFFFF);
     sw_emit(g->c, &l, 1);
 }
 

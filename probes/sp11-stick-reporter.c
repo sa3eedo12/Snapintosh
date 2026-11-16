@@ -192,9 +192,7 @@ SC_INLINE void rp_gic_line(const struct q1n1_payload_args *a, const uint8_t *rec
 SC_INLINE void rp_gic(const struct q1n1_payload_args *a, const uint8_t *report, uint32_t *lines)
 {
 #if !SNAP_SP11_STICK_MONITOR
-    static const uint8_t order[] = {SG_L_VERDICT, SG_L_FRAMES, SG_L_GICD, SG_L_GICR, SG_L_CPU, SG_L_OLD, SG_L_NEW, SG_L_TIMER, SG_L_IRQ,
-                                    SG_L_CYC0, SG_L_CYC1, SG_L_CYC2, SG_L_CYC3, SG_L_DIAG, SG_L_EXC, SG_L_EL1, SG_L_CYC4, SG_L_DIAG1,
-                                    SG_L_HVC, SG_L_EXC1, SG_L_HCR, SG_L_VBAR1, SG_L_SCTLR1, SG_L_FINAL, SG_L_RESTORE};
+    static const uint8_t order[] = SG_REPORTER_ORDER;
     uint32_t i;
 #endif
     const uint8_t *rec = report + SG_REC_AT;

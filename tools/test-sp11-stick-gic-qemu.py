@@ -13,7 +13,9 @@ own harness. Cases: (1) the happy path: the wrapper reads the GIC, announces its
 physical timer, unmasks IRQ in window 1 and takes PPI 26 four times at EL2 through the wrapper's own vector table (three acknowledged cycles,
 each re-armed 10 ms ahead, then a deadline taken with no acknowledge), announces the excursion and waits eight more seconds, writes VBAR_EL1,
 SCTLR_EL1 and HCR_EL2, ERETs to the stub at EL1 and takes PPI 26 from EL1 at the lower-EL vector (+0x480), puts everything back and reports
-IRQ_OK; the reporter prints the record; (2) a redistributor the firmware left asleep is refused GICR_ASLEEP; (3) a bundle that does not
+IRQ_OK; the reporter prints the record, with the survey lines and the quarantine's (pass 5: QEMU's firmware leaves ISENABLER0 clear, so the quarantine
+has nothing to disable here and only the host model exercises its writes; the check of ICC_HPPIR1_EL1 before the window is read as 1023 for real); (2) a
+redistributor the firmware left asleep is refused GICR_ASLEEP; (3) a bundle that does not
 authorise the gic class is refused STORE_NOT_AUTH by the same wrapper.
 
 What this proves: the SEQUENCE and the assembly at a real EL2 under QEMU's GICv3 model: the exception entry, the acknowledge, the end of
@@ -113,7 +115,10 @@ class GicQemu(base.WrapperQemu):
         """Three boots of the same real wrapper. QEMU's firmware leaves this CPU's redistributor asleep (GICR_WAKER 0x6, OBSERVED here), and the
         stage, which refuses to write what it was not authorised to, refuses: that is the `asleep` boot. The `gic` boot is the same stick with the
         shell waking the redistributor first (`mm`, a firmware command, before the runner starts: the machine's preparation, not the stage's
-        store), which is the state the unit was found in by the GIC survey (12 of 12 awake)."""
+        store), which is the state the unit was found in by the GIC survey (12 of 12 awake). QEMU's wrapper reads ISENABLER0 clear (OBSERVED here, also when
+        the shell was asked to set bits before the runner started: the cause is not established, INFERRED to be EDK2's ExitBootServices handler disabling every
+        interrupt), and the bundle has no slot for a payload that would set it first (SP11SB_FILES is 5), so the quarantine's write has nothing to disable
+        here: only the host model exercises it, and QEMU shows the survey, the check of ICC_HPPIR1_EL1 and the put-back of an enable the stage set itself."""
         wake = f'mm {int(QEMU_GIC["SNAP_GICR_FIRST"], 16) + 0x14:X} 0 -w 4 -mmio -n\n'
         stick = lambda b: cls.stick([(n, (b.dir / n).read_bytes()) for n in base.FILES])        # noqa: E731
         boots = [cls.qemu.Boot('gic', stick(cls.bundles['gic']), cls.qemu.script(before=wake), marker=base.DONE, pinned=True, timeout=600),
@@ -123,6 +128,26 @@ class GicQemu(base.WrapperQemu):
             return {b.name: b for b in pool.map(lambda b: cls.qemu.run_boot(b, cls.runner, cls.firmware), boots)}
 
     # -- the cases -------------------------------------------------------------------------------------------------------------
+    def check_survey_and_quarantine(self, mon, rep, found=None):
+        """Pass 5. The survey lines of the reporter, and the quarantine against the enable register as the reads found it (`found`, when the boot set it): every
+        bit found enabled but PPI 26's was disabled by one write and read back, the window opened with PPI 26 alone enabled, and the register ends as found.
+        What QEMU's firmware leaves enabled is whatever it is; QEMU proves the sequence (the writes, the RWP wait, the read-back, the put-back), never the unit's GIC."""
+        for pattern in (r'GIC SPI LINES=\d+ EN=\d+ PEND=\d+ BOTH=\d+ FIRST=\d+ SECOND=\d+', r'GIC PPIP P23=0X[0-9A-F]+ P25=0X[0-9A-F]+ P27=0X[0-9A-F]+ P30=0X[0-9A-F]+',
+                        r'GIC TIMERS VCTL=0X[0-7] VCVAL=0X[0-9A-F]+ PCTL=0X[0-7] PCVAL=0X[0-9A-F]+'):
+            self.assertTrue(any(re.fullmatch(f'SNAPREP {pattern}', line) for line in rep), (pattern, rep))
+        gicr = re.fullmatch(r'SNAPREP GIC GICR IDX=0 TYPER=0X[0-9A-F]+ WAKER=0X0 ISEN=0X([0-9A-F]+) PEND=0 ACT=0', next(line for line in rep if line.startswith('SNAPREP GIC GICR ')))
+        quar = re.fullmatch(r'SNAPREP GIC QUAR MASK=(?:NONE|0X([0-9A-F]+) DONE=0X([0-9A-F]+)) HPPIR=1023', next(line for line in rep if line.startswith('SNAPREP GIC QUAR ')))
+        self.assertTrue(gicr and quar, 'the GICR line, and the QUAR line with ICC_HPPIR1_EL1 read as 1023 before the window')
+        seen = int(gicr.group(1), 16)
+        if found is not None:
+            self.assertEqual(seen, found, 'the reads found the enables the shell set')
+        self.assertEqual(int(quar.group(1) or '0', 16), seen & ~(1 << 26), 'the quarantine disabled every bit found enabled but PPI 26\'s, and nothing else')
+        if quar.group(1):
+            self.assertEqual(int(quar.group(2), 16), seen & (1 << 26), 'ISENABLER0 read back right after the quarantine is PPI 26 as found')
+        self.assertRegex(next(line for line in mon if line.startswith('SNAPMON NEXT GIC WINDOW')), r' ISEN=0X4000000 .* HPPIR=1023$')
+        self.assertIn(f' ISEN=0X{seen:X} ', next(line for line in rep if line.startswith('SNAPREP GIC FINAL ')), 'ISENABLER0 is as the firmware left it after the put-back')
+        return seen
+
     def test_the_interrupt_arrives_at_el2_and_from_el1_through_the_wrappers_vector_tables_and_everything_is_put_back(self):
         self.assert_runner_ran_both('gic')
         mon, rep, f = self.lines('gic', 'SNAPMON'), self.lines('gic', 'SNAPREP'), self.facts
@@ -150,6 +175,8 @@ class GicQemu(base.WrapperQemu):
         self.assertTrue(any(re.fullmatch(r'SNAPREP GIC IRQ INTID=26 LAT_US=-?\d+/-?\d+/-?\d+/-?\d+ OK=1111 FINAL=CLEAR', line) for line in rep), rep)
         self.assertTrue(any(re.fullmatch(r'SNAPREP GIC OLD PRIO=0X[0-9A-F]+ ICFGR1=0X[0-9A-F]+ IGROUPR0=0X[0-9A-F]+ ISPEND=0X0 ISACT=0X0', line) for line in rep),
                         'the reporter shows the whole of ISPENDR0 and ISACTIVER0 as found')
+        # Pass 5: the survey lines, and the quarantine against the enable register as the reads found it.
+        self.check_survey_and_quarantine(mon, rep)
         cycles = [re.fullmatch(r'SNAPREP GIC CYC([0-4]) IAR=(\d+) HPPIR=(\d+) POST=(\d+) F=([01]{3}) TICKS=(-?\d+) US=(-?\d+)', line) for line in rep]
         cycles = {int(m.group(1)): m.groups()[1:] for m in cycles if m}
         self.assertEqual(sorted(cycles), [0, 1, 2, 3, 4], rep)

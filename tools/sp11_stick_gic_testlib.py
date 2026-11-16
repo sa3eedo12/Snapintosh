@@ -24,7 +24,7 @@ GIC_SOURCES = (*T.WRAPPER_SOURCES, 'probes/sp11-stick-gic.c', 'probes/sp11-stick
 FONT = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :-./=?()_')
 BOX_S, SLACK_US, CYCLE_US, WAIT_S = 2, 1000, 10000, 8      # the stage's defaults (probes/sp11-stick-gic.h)
 CYCLES, MONITOR_WINDOW, REC_SLOT = 3, 0x10000, 0x1000     # acknowledged interrupts of window 1; what the monitor may write; the record's slot
-REC_AT, REC_BYTES = sb.REPORT_OUT + MONITOR_WINDOW, 1376
+REC_AT, REC_BYTES = sb.REPORT_OUT + MONITOR_WINDOW, 1456
 GIC_REFUSAL = 'GIC_NOT_READY'
 EL1_HCR, EL1_SCTLR = 0x80000010, 0x30500800               # q1n1's el1trap values, HCR_EL2 with IMO
 FAKE_EL1_VECTORS = 0xCE0E0800                              # the model's EL1 table: inside the model's stack region, mapped and identity-mapped
@@ -45,13 +45,21 @@ WIN_FIELDS = (('t_arm', 0, 8), ('deadline', 8, 8), ('irq_entries', 0x10, 4), ('o
               ('dg_hppir1', 0x50, 8), ('dg_ispendr0', 0x58, 4), ('dg_isenabler0', 0x5C, 4), ('dg_gicd_ctlr', 0x60, 4), ('dg_daif', 0x64, 4),
               ('dg_rpr', 0x68, 8), ('dg_pmr', 0x70, 8), ('dg_hcr', 0x78, 8), ('dg_spsr', 0x80, 8))
 FIELDS = HEADER
+SV_AT = 0x560                                              # version 3: the survey and the quarantine, after the register table (section 5)
+SV_FIELDS = (('cntv_ctl', 0, 8), ('cntv_cval', 8, 8), ('cntp_ctl', 0x10, 8), ('cntp_cval', 0x18, 8), ('spi_lines', 0x20, 4), ('spi_enabled', 0x24, 4),
+             ('spi_pending', 0x28, 4), ('spi_both', 0x2C, 4), ('spi_first', 0x30, 4), ('spi_second', 0x34, 4), ('ppi_prio', 0x38, 4),
+             ('quarantined', 0x3C, 4), ('quar_rb', 0x40, 4), ('hppir_pre', 0x44, 4), ('flags', 0x48, 4), ('reserved', 0x4C, 4))
+SVF = dict(TIMERS=1, SPI=2, PPI=4, QUAR=8, HPPIR=16)       # the survey flags: set when the word was read or written
+SPI_LINES_MAX = 31
+PPI_SURVEY = (23, 25, 27, 30)                              # the PPIs whose priorities the survey reads, in the order of the record's bytes
 REGS = ('GICD_CTLR', 'IGROUPR0', 'ISENABLER0', 'ISPENDR0', 'ISACTIVER0', 'IPRIORITYR', 'ICFGR1', 'ICC_PMR', 'ICC_BPR1', 'ICC_IGRPEN1',
         'CNTHP_CTL', 'CNTHP_CVAL', 'VBAR_EL2', 'DAIF', 'ICC_RPR', 'HCR_EL2', 'VBAR_EL1', 'SCTLR_EL1')
 REG_TABLE = 0x320
 OUTCOMES = {0: 'NONE', 1: 'NOT_EL2', 2: 'SPSEL_NOT_1', 3: 'DAIF_NOT_MASKED', 4: 'IMO_CLEAR', 5: 'PIN_GIC', 6: 'COUNTER', 7: 'GICD_VIEW',
             8: 'GICR_NOT_FOUND', 9: 'GICR_ASLEEP', 10: 'PPI_OWNED', 11: 'SRE_CLEAR', 12: 'TIMER_OWNED', 13: 'WINDOW_UNWRITABLE',
             14: 'EL1_PCT_TRAPPED', 15: 'EL1_IMAGE', 16: 'G_NOT_HELD', 17: 'R_NOT_HELD', 18: 'C_NOT_HELD', 19: 'T_NOT_HELD',
-            20: 'PRIO_NOT_BELOW_PMR', 21: 'EL1_NOT_HELD', 32: 'IRQ_OK', 33: 'NO_IRQ', 34: 'WRONG_INTID', 35: 'EXCEPTION', 36: 'STORM',
+            20: 'PRIO_NOT_BELOW_PMR', 21: 'EL1_NOT_HELD', 22: 'Q_NOT_HELD', 23: 'FOREIGN_PENDING', 32: 'IRQ_OK', 33: 'NO_IRQ', 34: 'WRONG_INTID',
+            35: 'EXCEPTION', 36: 'STORM',
             37: 'CYCLE_LOST', 38: 'HPPIR_NOT_26', 39: 'NO_ISTATUS', 40: 'NOT_CLEAN', 41: 'FINAL_PENDING', 42: 'NO_IRQ_FROM_EL1',
             43: 'EL1_WRONG_INTID', 44: 'EL1_EXCEPTION', 48: 'NOT_RESTORED'}
 OUT = type('OUT', (), {name: code for code, name in OUTCOMES.items()})
@@ -77,12 +85,13 @@ class Row:
 
 @dataclasses.dataclass
 class Rec:
-    """The record's fields, interrupts, windows and register rows, decoded from its bytes."""
+    """The record's fields, interrupts, windows, register rows and survey, decoded from its bytes."""
     raw: bytes
     f: dict
     regs: dict
     irq: list
     win: list
+    sv: object
 
     def __getattr__(self, name):
         try:
@@ -102,7 +111,7 @@ def decode(raw):
     regs = {name: dict(zip(('old', 'new', 'rb', 'fin'), struct.unpack_from('<4Q', raw, REG_TABLE + 32 * i))) for i, name in enumerate(REGS)}
     irq = [Row(raw, IRQ_AT + IRQ_SIZE * i, IRQ_FIELDS) for i in range(IRQ_N)]
     win = [Row(raw, WIN_AT + WIN_SIZE * i, WIN_FIELDS) for i in range(WIN_N)]
-    return Rec(raw, f, regs, irq, win)
+    return Rec(raw, f, regs, irq, win, Row(raw, SV_AT, SV_FIELDS))
 
 
 def classes(mask):
@@ -113,24 +122,45 @@ E_MAGIC, E_VERSION, E_SIZE, E_RESERVED, E_VALUE = 1, 2, 3, 4, 5
 LATENCY_CLAMP, TICKS_LIMIT, INTID_LIMIT = 1 << 40, 10 ** 12, 0xFFFFFF
 
 
+def survey_bad(r):
+    """The survey's rules from the document (section 5): a word whose flag is clear is zero, the counts are what the registers can hold, the two INTIDs
+    agree with the count of INTIDs that are enabled and pending, and the PPI's own bit is never in the quarantine."""
+    s, flags = r.sv, r.sv.flags
+    most = 32 * SPI_LINES_MAX
+    if flags & ~31:
+        return True
+    unflagged = ((SVF['TIMERS'], ('cntv_ctl', 'cntv_cval', 'cntp_ctl', 'cntp_cval')),
+                 (SVF['SPI'], ('spi_lines', 'spi_enabled', 'spi_pending', 'spi_both', 'spi_first', 'spi_second')), (SVF['PPI'], ('ppi_prio',)),
+                 (SVF['QUAR'], ('quarantined', 'quar_rb')), (SVF['HPPIR'], ('hppir_pre',)))
+    if any(not flags & bit and any(getattr(s, name) for name in names) for bit, names in unflagged):
+        return True
+    if s.spi_lines > SPI_LINES_MAX or s.spi_enabled > most or s.spi_pending > most or s.spi_both > min(s.spi_enabled, s.spi_pending):
+        return True
+    if (s.spi_both == 0) != (s.spi_first == 0) or (s.spi_both < 2) != (s.spi_second == 0) or (s.spi_second and s.spi_first >= s.spi_second):
+        return True
+    if (s.spi_first and not 32 <= s.spi_first <= 1023) or (s.spi_second and s.spi_second > 1023):
+        return True
+    return s.hppir_pre > INTID_LIMIT or bool(r.intid < 32 and (s.quarantined >> r.intid) & 1)
+
+
 def check(raw):
     """What the reporter makes of a record, from the document's section 5: 0, or the first failing class (magic, version, size, reserved,
     values) in that order."""
     r = decode(raw)
     if raw[:8] != b'SNAPGIC1':
         return E_MAGIC
-    if r.version != 2:
+    if r.version != 3:
         return E_VERSION
     if r.size != REC_BYTES:
         return E_SIZE
-    if r.reserved0 or r.gicr_index > sb.GICR_MAX or any(w.reserved for w in r.win):
+    if r.reserved0 or r.gicr_index > sb.GICR_MAX or any(w.reserved for w in r.win) or r.sv.reserved:
         return E_RESERVED
     bad = (r.outcome not in OUTCOMES or r.first_outcome not in OUTCOMES or r.substage >= len(SUBSTAGES) or r.planned & ~0x3F or r.begun & ~0x3F
            or any(v & ~0x3FFFF for v in (r.wrote, r.restore_failed, r.restore_retried)) or r.done > 1 or r.cycle > CYCLES + 1
            or not 16 <= r.intid <= 31 or r.timebox_ticks > TICKS_LIMIT or r.slack_ticks > TICKS_LIMIT or r.cycle_ticks > TICKS_LIMIT
            or any(q.flags & ~0x3F or q.hppir_vec > INTID_LIMIT or q.hppir_post > INTID_LIMIT or abs(q.lat_ticks) > LATENCY_CLAMP
                   or abs(q.lat_us) > LAT_US_CLAMP for q in r.irq)
-           or any(w.irq_entries > 0xFFFF or w.other_entries > 0xFFFF or w.hvc_end > 1 for w in r.win))
+           or any(w.irq_entries > 0xFFFF or w.other_entries > 0xFFFF or w.hvc_end > 1 for w in r.win) or survey_bad(r))
     return E_VALUE if bad else 0
 
 
@@ -241,12 +271,30 @@ def render(r, which):
         f = lambda n: regs[n]['fin']                                              # noqa: E731
         return (f'GIC FINAL GICD={h32(f("GICD_CTLR"))} ISEN={h32(f("ISENABLER0"))} PRIO={h8(f("IPRIORITYR"))} PMR={h8(f("ICC_PMR"))} '
                 f'IGRPEN1={bit(f("ICC_IGRPEN1"), 0)} RPR={h8(f("ICC_RPR"))} DAIF={h32(f("DAIF") & 0x3C0)}')
+    s, sf = r.sv, r.sv.flags
+    if which == 'TIMERS':
+        if not sf & SVF['TIMERS']:
+            return None
+        return f'GIC TIMERS VCTL={h8(s.cntv_ctl & 7)} VCVAL={h(s.cntv_cval)} PCTL={h8(s.cntp_ctl & 7)} PCVAL={h(s.cntp_cval)}'
+    if which == 'SPI':
+        if not sf & SVF['SPI']:
+            return None
+        return (f'GIC SPI LINES={s.spi_lines} EN={s.spi_enabled} PEND={s.spi_pending} BOTH={s.spi_both} FIRST={s.spi_first} SECOND={s.spi_second}')
+    if which == 'PPIP':
+        if not sf & SVF['PPI']:
+            return None
+        return 'GIC PPIP ' + ' '.join(f'P{intid}={h8(s.ppi_prio >> (8 * k))}' for k, intid in enumerate(PPI_SURVEY))
+    if which == 'QUAR':
+        if not sf & (SVF['QUAR'] | SVF['HPPIR']):
+            return None
+        mask = f'MASK={h32(s.quarantined)} DONE={h32(s.quar_rb)}' if sf & SVF['QUAR'] else 'MASK=NONE'
+        return f'GIC QUAR {mask} HPPIR={s.hppir_pre if sf & SVF["HPPIR"] else "-"}'
     raise AssertionError(which)
 
 
 WRAPPER_ORDER = ('GICD', 'GICR', 'CPU', 'IRQ', 'DIAG', 'EL1', 'DIAG1', 'RESTORE', 'VERDICT')
-REPORTER_ORDER = ('VERDICT', 'FRAMES', 'GICD', 'GICR', 'CPU', 'OLD', 'NEW', 'TIMER', 'IRQ', 'CYC0', 'CYC1', 'CYC2', 'CYC3', 'DIAG', 'EXC', 'EL1',
-                  'CYC4', 'DIAG1', 'HVC', 'EXC1', 'HCR', 'VBAR1', 'SCTLR1', 'FINAL', 'RESTORE')
+REPORTER_ORDER = ('VERDICT', 'FRAMES', 'GICD', 'GICR', 'CPU', 'OLD', 'SPI', 'PPIP', 'TIMERS', 'QUAR', 'NEW', 'TIMER', 'IRQ', 'CYC0', 'CYC1', 'CYC2', 'CYC3',
+                  'DIAG', 'EXC', 'EL1', 'CYC4', 'DIAG1', 'HVC', 'EXC1', 'HCR', 'VBAR1', 'SCTLR1', 'FINAL', 'RESTORE')
 
 
 def expected(r, order):
@@ -260,8 +308,8 @@ def next_stores_line(r):
 def next_window_line(r):
     g = r.regs
     return (f'NEXT GIC WINDOW {BOX_S} S GICD={h(g["GICD_CTLR"]["rb"] & 0xFFFFFFFF)} ISEN={h(g["ISENABLER0"]["rb"] & 0xFFFFFFFF)} '
-            f'PRIO={h(g["IPRIORITYR"]["rb"] & 0xFF)} PMR={h(g["ICC_PMR"]["rb"] & 0xFF)} IGRPEN1={h(g["ICC_IGRPEN1"]["rb"] & 0xFF)} '
-            f'CTL={h(g["CNTHP_CTL"]["rb"] & 0xFF)}')
+            f'PRIO={h(g["IPRIORITYR"]["rb"] & 0xFF)} PMR={h(g["ICC_PMR"]["rb"] & 0xFF)} IGRPEN1={(g["ICC_IGRPEN1"]["rb"] >> 0) & 1} '
+            f'HPPIR={r.sv.hppir_pre & 0xFFFFFF}')
 
 
 def next_el1_line(r):
@@ -455,7 +503,7 @@ class Checks:
     def restored(g):
         """Every register of the model is as it was found, the PPI is idle and the timer is off."""
         found = [f'{k} is {v[1]:#x}, found {v[0]:#x}' for k, v in g.state.items() if isinstance(v, tuple) and v[0] != v[1]]
-        found += ['the interrupt was left active'] if g.state.get('active') else []
+        found += ['the interrupt was left active'] if g.state.get('active') or g.state.get('fact') else []
         return found
 
     @staticmethod
@@ -489,16 +537,69 @@ class Checks:
         return ['the timer was never armed']
 
     @staticmethod
-    def enable_untouched(g, found, bit=1 << 26):
-        """The redistributor's enable register is left as the firmware had it: PPI 26 is written only when it was found disabled (a set, and later
-        a clear, of its own bit and nothing else), and no other bit is ever set or cleared."""
+    def quarantine(g, found, bit=1 << 26):
+        """The document's rule for the redistributor's enable register (section 4): the bits found enabled but PPI 26's (`q`) are disabled by ONE write of
+        ICENABLER0 with exactly them and enabled again by ONE write of ISENABLER0 with exactly them; PPI 26's own bit is written only when it was found
+        disabled (a set, and a clear after the windows) and is never cleared when it was found enabled; no other bit is ever written."""
+        q = found & ~bit
         sets = [v for k, n, v, *_ in g.log if k == 'W' and n == 'GICR_ISENABLER0']
         clears = [v for k, n, v, *_ in g.log if k == 'W' and n == 'GICR_ICENABLER0']
-        bad = [f'ISENABLER0 was written ({v:#x}) although PPI 26 was found enabled' for v in sets if found & bit]
-        bad += [f'ICENABLER0 was written ({v:#x}) although PPI 26 was found enabled' for v in clears if found & bit]
-        bad += [f'ISENABLER0 was written with {v:#x}: a bit but the PPI\'s' for v in sets if v & ~bit]
-        bad += [f'ICENABLER0 was written with {v:#x}: a bit but the PPI\'s was cleared' for v in clears if v & ~bit]
+        own = [] if found & bit else [bit]
+        bad = []
+        if clears != ([q] if q else []) + own:
+            bad.append(f'ICENABLER0 was written with {[hex(v) for v in clears]}, expected {[hex(v) for v in ([q] if q else []) + own]}')
+        if sets != own + ([q] if q else []):
+            bad.append(f'ISENABLER0 was written with {[hex(v) for v in sets]}, expected {[hex(v) for v in own + ([q] if q else [])]}')
         return bad + [f'ISENABLER0 ends {v[1]:#x}, found {v[0]:#x}' for k, v in g.state.items() if k == 'isenabler0' and v[0] != v[1]]
+
+    @staticmethod
+    def bit26_kept(g, found, bit=1 << 26):
+        """PPI 26's own enable is never cleared while the stage uses it: no write of ICENABLER0 holds its bit unless the stage set it (found disabled)."""
+        return [f'ICENABLER0 was written with {v:#x}, which holds PPI 26\'s bit, although it was found enabled' for k, n, v, *_ in g.log
+                if k == 'W' and n == 'GICR_ICENABLER0' and v & bit and found & bit]
+
+    @staticmethod
+    def quarantine_first(g, found, bit=1 << 26):
+        """The quarantine is the first store of the stage: nothing foreign may be signalled once group 1 is enabled."""
+        first = g.first_write()
+        q = found & ~bit
+        if not q:
+            return []
+        return [] if first and first[1] == 'GICR_ICENABLER0' and first[2] == q else [f'the first store was {first[1:3] if first else None}, not ICENABLER0 {q:#x}']
+
+    @staticmethod
+    def quarantine_last(g, found, bit=1 << 26):
+        """The enables the quarantine cleared go back last, after the CPU interface and the distributor are: the last write of the whole run is ISENABLER0 with exactly
+        those bits."""
+        q = found & ~bit
+        writes = g.writes()
+        if not q:
+            return []
+        return [] if writes and writes[-1] == ('GICR_ISENABLER0', q) else [f'the last write was {writes[-1] if writes else None}, not ISENABLER0 {q:#x}']
+
+    @staticmethod
+    def foreign_quiet_in_windows(g, found, bit=1 << 26):
+        """While a window is open (IRQ unmasked at EL2 or at EL1) no enable bit but PPI 26's is set: replays the writes of both enable registers from what was
+        found."""
+        state, found_bad = found, []
+        for kind, name, value, *_ in g.log:
+            if kind == 'W' and name == 'GICR_ISENABLER0':
+                state |= value
+            elif kind == 'W' and name == 'GICR_ICENABLER0':
+                state &= ~value
+            elif kind == 'E' and name in ('WINDOW_OPEN', 'EXC_OPEN') and state & ~bit:
+                found_bad.append(f'{name}: ISENABLER0 is {state:#x}, a bit but PPI 26\'s is enabled')
+        return found_bad
+
+    @staticmethod
+    def pending_untouched(g, bit=1 << 26):
+        """The pending state of another interrupt is never written: ICPENDR0 is written, if at all, with PPI 26's bit only."""
+        return [f'ICPENDR0 was written with {v:#x}' for k, n, v, *_ in g.log if k == 'W' and n == 'GICR_ICPENDR0' and v & ~bit]
+
+    @staticmethod
+    def no_window_with_foreign_pending(g):
+        """No window is opened, and nothing unmasks IRQ, after the arm left a foreign interrupt as the next one: a run whose arm was refused has no window."""
+        return [f'{name} after the arm left INTID {g.r().sv.hppir_pre} next' for kind, name, *_ in g.log if kind == 'E' and name in ('WINDOW_OPEN', 'EXC_OPEN')]
 
     @staticmethod
     def eoi(g):

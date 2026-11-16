@@ -27,7 +27,9 @@ OLD_HCR, OLD_SCTLR1, OLD_VBAR1 = 0x88000010, 0x30D00980, 0x7B000000      # the m
 SEEDS = {'no-save': 'NO_SAVE', 'stray-store': 'STRAY_STORE', 'no-eoi': 'NO_EOI', 'timer-on': 'TIMER_ON', 'no-irq-mask': 'NO_IRQ_MASK',
          'store-first': 'STORE_FIRST', 'no-next': 'NO_NEXT', 'no-restore': 'NO_RESTORE', 'final-ack': 'FINAL_ACK', 'no-rearm': 'NO_REARM',
          'no-imo': 'NO_IMO', 'no-el1-restore': 'NO_EL1_RESTORE', 'no-next-el1': 'NO_NEXT_EL1', 'unbounded-el1': 'UNBOUNDED_EL1', 'no-settle': 'NO_SETTLE',
-         'clear-others': 'CLEAR_OTHERS', 'keep-foreign': 'KEEP_FOREIGN_DEADLINE', 'restore-ctl-first': 'RESTORE_CTL_FIRST'}
+         'keep-foreign': 'KEEP_FOREIGN_DEADLINE', 'restore-ctl-first': 'RESTORE_CTL_FIRST',
+         'no-quarantine': 'NO_QUARANTINE', 'quarantine-no-putback': 'QUARANTINE_NO_PUTBACK', 'quarantine-bit26': 'QUARANTINE_BIT26',
+         'quarantine-stray-write': 'QUARANTINE_STRAY_WRITE', 'no-hppir-check': 'NO_HPPIR_CHECK', 'quarantine-after-g': 'QUARANTINE_AFTER_G'}
 PIN = {n: o for n, o, _, _ in sb.PIN_LAYOUT}
 RECORD_AT = T.World.REPORT + G.REC_AT
 WINDOW_AT = T.World.REPORT + sb.REPORT_OUT
@@ -87,12 +89,40 @@ def batch(cases, variant='base', runs=('snapmon', 'snaprep')):
 # default deadline 0 reads 0x5 (enabled, unmasked, asserting), a CTL of 3 reads 0x7 and a CTL of 1 with a far deadline reads 0x1. An asserting timer
 # also shows as PPI 26 pending, and the PPI check comes first; HIDE_PEND is the non-secure view that cannot see that bit (an interrupt that is Secure).
 FUTURE_CVAL = 0xFFFFFFFFFFFF
-UNIT = ['TYPER 0xF87F051E', 'IIDR 0x4010438', 'RTYPER 0xD0000E7', 'ISENABLER0 0x4E800001', 'PRIO 0xA0']
-UNIT_LINES = ('SNAPMON GIC GICD CTLR=0X10 ARE=1 DS=0 G1A=0 NEED_G=1 TYPER=0XF87F051E IIDR=0X4010438',
+UNIT = ['TYPER 0xF87F051E', 'IIDR 0x401043B', 'RTYPER 0xD0000E7', 'ISENABLER0 0x4E800001', 'PRIO 0xA0']
+UNIT_LINES = ('SNAPMON GIC GICD CTLR=0X10 ARE=1 DS=0 G1A=0 NEED_G=1 TYPER=0XF87F051E IIDR=0X401043B',
               'SNAPMON GIC GICR IDX=0 TYPER=0XD0000E7 WAKER=0X0 ISEN=0X4E800001 PEND=0 ACT=0')
+# Boot 13 (OBSERVED, one unit, one boot, from a video of the page): the same GIC with INTID 27 (the EL1 virtual timer's PPI) pending, enabled and below PMR
+# before any store, ICC_CTLR_EL1.EOImode 1, PMR 0xF8, BPR1 3, IGRPEN1 0, CNTHP_CTL 0x2, and GICD_CTLR written 0x13 reading back 0x12 (the non-secure view
+# of bit 0 does not stick). PMR read 0xF8 before and after the stage wrote 0xF0: the model ignores that write (that the unit ignores it is INFERRED, the
+# page only shows the same value twice). The priority of INTID 27 was not read: 0xA0 here, anything below PMR gives the same page.
+UNIT13 = [*UNIT, 'ISPENDR0 0x8000000', 'ICCCTLR 2', 'PMR 0xF8', 'BPR1 3', 'IGRPEN1 0', 'CTL 2', 'GICD_WMASK 0x92', 'IGNORE ICC_PMR_EL1']
+# The lines of the unit's page, verbatim from the coordinator's reading (docs/SP11-STICK-GIC.md section 12), as the reporter prints them. The latencies are
+# the counter's: the model steps its counter by a fixed amount per read where the unit took about 381 us between arming the timer and the vector, so
+# LAT_US=, TICKS= and US= are compared by sign and size and not digit for digit.
+UNIT13_LINES = ('GIC GICD CTLR=0X10 ARE=1 DS=0 G1A=0 NEED_G=1 TYPER=0XF87F051E IIDR=0X401043B',
+                'GIC GICR IDX=0 TYPER=0XD0000E7 WAKER=0X0 ISEN=0X4E800001 PEND=0 ACT=0',
+                'GIC CPU SRE=0XF EOIMODE=1 PMR=0XF8 BPR1=0X3 IGRPEN1=0 PRIO=0XA0 CFG=0X0 GRP=0 CTL=0X2',
+                'GIC OLD PRIO=0XA0 ICFGR1=0X0 IGROUPR0=0X0 ISPEND=0X8000000 ISACT=0X0',
+                'GIC NEW GICD=0X13 RB=0X12 ISEN=0X4E800001 PRIO=0X80 PMR=0XF8 IGRPEN1=1',
+                'GIC TIMER BOX_TICKS=38400000 CYCLE_TICKS=192000 SLACK=19200',
+                'GIC IRQ INTID=27 LAT_US=<LAT>/-/-/- OK=0--- FINAL=NONE',
+                'GIC CYC0 IAR=27 HPPIR=27 POST=27 F=000 TICKS=<LAT> US=<LAT>',
+                'GIC FINAL GICD=0X10 ISEN=0X4E800001 PRIO=0XA0 PMR=0XF8 IGRPEN1=0 RPR=0XFF DAIF=0X3C0',
+                'GIC VERDICT=WRONG_INTID OUTCOME=0X22 SUB=DONE',
+                'GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRCTV VBAR=OK EL1=NONE')
 CASES = {
     'happy': {},
     'unit-boot12': dict(gic=UNIT),
+    'unit-boot13': dict(gic=UNIT13),
+    'foreign-spi': dict(gic=[*UNIT13, 'SPI_EN 1 0x100', 'SPI_PEND 1 0x100']),
+    'quarantine-ignored': dict(gic=[*UNIT13, 'IGNORE GICR_ICENABLER0']),
+    'quarantine-putback-ignored': dict(gic=[*UNIT13, 'NOHOLD GICR_ISENABLER0']),
+    'survey-none': dict(gic=['TYPER 0x0']),
+    'survey-bound': dict(gic=['TYPER 0x1F', 'SPI_EN 31 0x1', 'SPI_PEND 31 0x2']),
+    'survey-spis': dict(gic=['TYPER 0x1F', 'SPI_PRIO 0xFF', 'SPI_EN 1 0x30000', 'SPI_PEND 1 0x30000', 'SPI_EN 2 0x1', 'SPI_PEND 2 0x1', 'SPI_PEND 3 0x10']),
+    'survey-ppi-prio': dict(gic=['FPRIO 23 0x11', 'FPRIO 25 0x22', 'FPRIO 27 0x33', 'FPRIO 30 0x44']),
+    'timers-read': dict(gic=['CNTV_CTL 5', 'CNTV_CVAL 0x1122334455667788', 'CNTP_CTL 3', 'CNTP_CVAL 0xAABBCCDD']),
     'happy-enabled': dict(gic=['ISENABLER0 0x4000000']),
     'happy-other-enabled': dict(gic=['ISENABLER0 0x40000000']),
     'happy-ds1': dict(gic=['CTLR 0x50']),
@@ -240,7 +270,7 @@ class Held:
     @staticmethod
     def common(run):
         return (WC.fault(run.mon) + G.Checks.stray_writes(run.g) + Held.page_text(run) + Held.report(run) + G.Checks.one_interrupt(run.g) +
-                G.Checks.timer_quiet(run.g))
+                G.Checks.timer_quiet(run.g) + G.Checks.pending_untouched(run.g))
 
     @staticmethod
     def bounded(run):
@@ -261,14 +291,35 @@ def el2_ok(r):
     return all(G.entered(r.irq[k]) and r.irq[k].flags & G.IRQF['OK'] for k in range(4))
 
 
+def cvals(r):
+    """The deadlines the record names: the arm, the three re-arms and window 2's arm."""
+    return [r.irq[k].cval for k in range(G.IRQ_N)]
+
+
+def after_last_window(g, wname):
+    """The writes of `wname` after the last window closed: the put-backs, whichever window was the last."""
+    close = max(i for i, e in enumerate(g.log) if e[1] in ('WINDOW_CLOSE', 'EXC_CLOSE'))
+    return [e for e in g.log[close:] if e[0] == 'W' and e[1] == wname]
+
+
+# The seeded-bad stages of the quarantine and the check before the window: tools/test-sp11-stick-gic-quarantine.py holds their detectors, the others' are
+# tools/test-sp11-stick-gic.py's, and each file builds only its own.
+QUARANTINE_SEEDS = ('no-quarantine', 'quarantine-no-putback', 'quarantine-bit26', 'quarantine-stray-write', 'no-hppir-check', 'quarantine-after-g')
+
+
 def expected_writes(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, isen=0, eoimode=0, pmr=0xFF, bpr1=0, igrpen1=0, cval0=0, ctl0=0, cvals, intid=26):
     """The stores of a clean run, in the document's order (docs/SP11-STICK-GIC.md section 4): G, R, C, T and window 1 (three acknowledged
     interrupts, each with the re-arm before its end, and the deadline taken without an acknowledge), the writes of class E, window 2, and the
     put-backs. `cvals` are the deadlines the record names: the arm, the three re-arms and window 2's arm. `isen` is ISENABLER0 as found: the
-    PPI's enable is written, and cleared again, only when its bit was clear. `cval0` and `ctl0` are the EL2 timer as found: the arm overwrites
-    the deadline, and the put-back writes the deadline, and then the enable bits when it had any, over the timer that is disabled."""
+    PPI's enable is written, and cleared again, only when its bit was clear; every other bit found enabled (`quar`) is disabled by ONE write of
+    ICENABLER0 before any other store, and enabled again by ONE write of ISENABLER0 as the very last write of the run. `cval0` and `ctl0` are the
+    EL2 timer as found: the arm overwrites the deadline, and the put-back writes the deadline, and then the enable bits when it had any, over the
+    timer that is disabled."""
     bit, ds, edge, w = 1 << intid, ctlr >> 6 & 1, 2 << (2 * (intid - 16)), []
+    quar = isen & ~bit & 0xFFFFFFFF
     end = [('ICC_EOIR1_EL1', intid)] + ([('ICC_DIR_EL1', intid)] if eoimode else [])
+    if quar:
+        w.append(('GICR_ICENABLER0', quar))
     if not ctlr & 2:
         w.append(('GICD_CTLR', ctlr | 2 | (0 if ds else 1)))
     if ds and not igroupr0 & bit:
@@ -307,13 +358,15 @@ def expected_writes(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, isen=0, eoimode=0,
         w.append(('GICR_IGROUPR0', igroupr0))
     if not ctlr & 2:
         w.append(('GICD_CTLR', ctlr))
+    if quar:
+        w.append(('GICR_ISENABLER0', quar))
     return w
 
 
 def expected_wrote(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, isen=0, **_):
     """The registers a clean run marks as written in the record: the stores of expected_writes and the windows' VBAR_EL2 and DAIF."""
     names = ['ICC_PMR', 'ICC_BPR1', 'ICC_IGRPEN1', 'CNTHP_CVAL', 'CNTHP_CTL', 'VBAR_EL2', 'DAIF', 'VBAR_EL1', 'SCTLR_EL1', 'HCR_EL2']
-    if not isen >> 26 & 1:
+    if not isen >> 26 & 1 or isen & ~(1 << 26) & 0xFFFFFFFF:
         names.append('ISENABLER0')
     if not ctlr & 2:
         names.append('GICD_CTLR')
@@ -343,6 +396,8 @@ def wrapper_gic_lines(r):
     lines += [G.render(r, item) for item in EARLY_READS.get(out, ('GICD', 'GICR', 'CPU'))]
     if out == OUT.COUNTER or out > OUT.EL1_IMAGE:
         lines.append(G.next_stores_line(r))
+    if r.first_outcome in (OUT.Q_NOT_HELD, OUT.FOREIGN_PENDING):        # the arm says what it left: the INTID, or what the quarantine did not clear
+        lines.append(G.render(r, 'QUAR'))
     if out > OUT.EL1_IMAGE:
         if r.begun & 16:
             lines.append(G.next_window_line(r))

@@ -44,12 +44,16 @@ OWN = ('probes/sp11-stick-monitor.c', 'probes/sp11-stick-monitor.h', 'probes/sp1
        'tools/test-sp11-stick-monitor.py', 'tools/test-sp11-stick-monitor-build.py', 'tools/test-sp11-stick-monitor-record.py',
        'tools/test-sp11-stick-monitor-call.S', 'tools/sp11_stick_monitor_testlib.py', 'docs/SP11-STICK-MONITOR.md')
 SHARED = ('probes/sp11-stick-wrapper.c', 'probes/sp11-stick-wrapper.h', 'probes/sp11-stick-hw.h', 'probes/sp11-stick-reporter.c')   # earlier files that carry this item's gated hooks
+# WI 8 pass 5 moved the GIC dry run's reporter line list into sp11-stick-gic-record.h (SG_REPORTER_ORDER) with one statement of the reporter: a GIC change,
+# not a hook of this item, so the committed reporter is compared with that statement as the working tree has it.
+REPORTER_ORDER = re.compile(r'static const uint8_t order\[\] = [^;]*;')
 # The census of the wrapper binary: what it writes (the GIC arm's class C: nothing else), what it reads, and the system instructions it has.
 WRITES = {'ICC_PMR_EL1': 1, 'ICC_BPR1_EL1': 1, 'ICC_IGRPEN1_EL1': 1}
 READS_BEFORE = {'CurrentEL', 'MIDR_EL1', 'MPIDR_EL1', 'CNTFRQ_EL0', 'CNTPCT_EL0', 'CTR_EL0', 'HCR_EL2', 'SCTLR_EL2', 'TCR_EL2', 'PAR_EL1', 'SPSel', 'DAIF',
                 'ICC_SRE_EL2', 'ICC_CTLR_EL1', 'ICC_PMR_EL1', 'ICC_BPR1_EL1', 'ICC_IGRPEN1_EL1', 'ICC_RPR_EL1'}    # the dry-run and GIC wrapper's
 READS_NEW = {'VBAR_EL2', 'TPIDR_EL2', 'CNTHCTL_EL2', 'CNTHP_CTL_EL2', 'MDCR_EL2', 'VTTBR_EL2', 'VTCR_EL2', 'VMPIDR_EL2', 'ID_AA64MMFR2_EL1',
              'ID_AA64MMFR4_EL1', 'REVIDR_EL1', 'ID_AA64ISAR1_EL1', 'ID_AA64ISAR2_EL1'}                              # this stage's
+READS_ARM = {'ICC_HPPIR1_EL1'}      # WI 8 pass 5: the GIC arm's one read after its stores, with IRQ masked (refuses FOREIGN_PENDING); no side effect, unlike IAR1
 SYSTEM = {('dc', 'cvac'), ('dc', 'civac'), ('at', 's1e2r'), ('at', 's1e2w'), ('ic', 'ialluis'), ('dsb', 'sy'), ('dsb', 'ish'), ('isb', '')}
 FORBIDDEN = {'eret', 'hvc', 'smc', 'svc', 'tlbi', 'wfe', 'wfi', 'sev', 'sevl', 'sys', 'sysl', 'br', 'braa', 'brab', 'brk', 'hlt', 'dcps1', 'dcps2', 'dcps3'}
 
@@ -325,7 +329,10 @@ class GateOff(Base):
                 shown = subprocess.run(['git', '-C', str(ROOT), 'show', f'HEAD:{rel}'], capture_output=True)
                 if shown.returncode:
                     self.skipTest(f'git cannot show HEAD:{rel}')
-                (root / rel).write_bytes(shown.stdout)
+                text = shown.stdout
+                if rel == 'probes/sp11-stick-reporter.c':
+                    text = REPORTER_ORDER.sub(lambda _: REPORTER_ORDER.search((ROOT / rel).read_text()).group(0), text.decode()).encode()
+                (root / rel).write_bytes(text)
             else:
                 shutil.copy(ROOT / rel, root / rel)
         return root
@@ -383,8 +390,8 @@ class Census(Base):
 
     def test_the_reads(self):
         reads = {o.split(',')[-1].strip() for _, _, m, o in self.instructions() if m == 'mrs'}
-        self.assertEqual(reads - READS_BEFORE, READS_NEW, 'the new reads are the thirteen of the stage')
-        self.assertFalse(reads - READS_BEFORE - READS_NEW)
+        self.assertEqual(reads - READS_BEFORE, READS_NEW | READS_ARM, 'the new reads are the thirteen of the stage and the GIC arm\'s ICC_HPPIR1_EL1')
+        self.assertFalse(reads - READS_BEFORE - READS_NEW - READS_ARM)
 
     def test_the_system_instructions(self):
         found, forbidden = set(), []

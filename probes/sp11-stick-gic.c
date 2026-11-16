@@ -8,19 +8,26 @@
  *   reads    the distributor (CTLR, TYPER, IIDR) and a bounded scan of the pinned redistributor frames for this CPU's affinity
  *            (GICR_TYPER, read-only); its WAKER and the PPI's state; ICC_SRE_EL2 and, only if SRE is set, the rest of the CPU
  *            interface. Each phase prints its line as soon as it is read, so a read that hangs is named by the last line. Any
- *            precondition that fails refuses with a named outcome and without a store.
+ *            precondition that fails refuses with a named outcome and without a store. Then the survey, reads only and reporter-only:
+ *            the SPIs' enable and pending registers of the distributor, the priorities of the other enabled PPIs and, in the dry run's
+ *            build, the EL1 timers.
  *   announce one line, NEXT GIC STORES AFTER 8 S, and eight seconds on the counter, then the first store. A hang or a reset at a store
  *            leaves a page that was already filmed.
- *   stores   G the distributor's group 1 enable, only when the decode says it is clear; R this CPU's redistributor, PPI 26 only (its enable
- *            only when found disabled; every other bit of ISENABLER0 is as the firmware left it); C the CPU
- *            interface. The class is marked begun in the record, and the record stored to REPORT.DAT, before its first store, and every
- *            register is read before it is changed and read back after: a store that does not hold is a named failure. PREPARED is
- *            written when all of them held, not before.
+ *   stores   Q the quarantine, first: every enabled bit of this CPU's ISENABLER0 but PPI 26's is disabled by one write of ICENABLER0, so that
+ *            no foreign interrupt can be signalled while the stage owns the CPU interface (boot 13, OBSERVED: INTID 27 was pending and enabled
+ *            and ended the first window); G the distributor's group 1 enable, only when the decode says it is clear; R this CPU's
+ *            redistributor, PPI 26 only (its enable only when found disabled); C the CPU interface. The class is marked begun in the
+ *            record, and the record stored to REPORT.DAT, before its first store, and every register is read before it is changed and
+ *            read back after: a store that does not hold is a named failure. Last, ICC_HPPIR1_EL1 is read with IRQ still masked: nothing
+ *            but INTID 1023 or 26 may be next (FOREIGN_PENDING, an SPI is the case the quarantine does not cover). PREPARED is written
+ *            when all of that held, not before.
  *   put back classes C, R and G in the reverse order, every register back to what was read, each verified; one more write for a
- *            register that did not hold and then a loud NOT_RESTORED.
+ *            register that did not hold and then a loud NOT_RESTORED; the quarantined enables last, after the CPU interface and the
+ *            distributor are back, so that nothing foreign can be signalled in between.
  * Every wait is bounded by the counter, and but for the window's by a read count too (the eight seconds, which watches the counter
- * run; the RWP polls). No heap, no writable global, no libc, no recursion. Nothing here touches the ITS, another PPI or SPI, another
- * CPU's redistributor beyond its read-only TYPER, the SMMU, PCIe, USB or the framebuffer, and nothing here touches CNTHP, VBAR_EL2,
+ * run; the RWP polls). No heap, no writable global, no libc, no recursion. Nothing here touches the ITS, another PPI's configuration, an SPI, another
+ * CPU's redistributor beyond its read-only TYPER, the SMMU, PCIe, USB or the framebuffer (the quarantine disables, and later enables again, the other
+ * PPIs of this CPU's redistributor and writes nothing else of theirs), and nothing here touches CNTHP, VBAR_EL2,
  * HCR_EL2 or an EL1 register unless the file is built with SW_GIC_DRY_REGS=1, the dry run's build. */
 #include "sp11-stick-hw.h"
 
@@ -149,10 +156,11 @@ static uint64_t gic_mask(const struct sw_gic *g, unsigned id)
     }
 }
 
-/* One write of a put-back: the register goes back to `old`. A bit that was set by a write of one (ISENABLER0) goes back by the clear register, and
- * only the PPI's own bit: the stage writes the enable only when PPI 26 was found disabled, so that bit is the only one it can have set, and every
- * other bit is as the firmware left it and is never written. */
-static void gic_restore_write(struct sw_gic *g, unsigned id, uint64_t old, uint64_t cur)
+/* One write of a put-back: the register goes back to `old`. ISENABLER0 goes back in two steps (`final` says which): PPI 26's own enable first, by the clear
+ * register and only its bit (the stage writes the enable only when PPI 26 was found disabled, so that bit is the only one it can have set), ahead of the
+ * configuration registers; and last the bits the quarantine cleared, by the set register and only those. Every other bit is as the firmware left it and is
+ * never written. */
+static void gic_restore_write(struct sw_gic *g, unsigned id, uint64_t old, uint64_t cur, int final)
 {
     switch (id) {
     case SG_R_GICD_CTLR:
@@ -161,11 +169,20 @@ static void gic_restore_write(struct sw_gic *g, unsigned id, uint64_t old, uint6
         (void)gic_wait_clear32(g, g->gicd + SG_GICD_CTLR, SG_GICD_CTLR_RWP);
         break;
     case SG_R_IGROUPR0: sp11hw_mmio_write32(g->sgi + SG_IGROUPR0, (uint32_t)old); break;
-    case SG_R_ISENABLER0:
-        sp11hw_mmio_write32(g->sgi + SG_ICENABLER0, (uint32_t)(cur & g->bit & ~old));
-        sw_gic_sync();
-        (void)gic_wait_clear32(g, g->rd + SG_GICR_CTLR, SG_GICR_CTLR_RWP);
+    case SG_R_ISENABLER0: {
+        uint32_t own = final ? 0 : (uint32_t)(cur & g->bit & ~old), back = final ? (uint32_t)(g->rec.r.sv.quarantined & old & ~cur) : 0;
+        if (own) {
+            sp11hw_mmio_write32(g->sgi + SG_ICENABLER0, own);
+            sw_gic_sync();
+            (void)gic_wait_clear32(g, g->rd + SG_GICR_CTLR, SG_GICR_CTLR_RWP);
+        }
+        if (back) {
+            sp11hw_mmio_write32(g->sgi + SG_ISENABLER0, back);
+            sw_gic_sync();
+            (void)gic_wait_clear32(g, g->rd + SG_GICR_CTLR, SG_GICR_CTLR_RWP);
+        }
         break;
+    }
     case SG_R_ISPENDR0: sp11hw_mmio_write32(g->sgi + SG_ICPENDR0, (uint32_t)(cur & g->bit & ~old)); break;
     case SG_R_IPRIORITYR: sp11hw_mmio_write8(g->sgi + SG_IPRIORITYR + g->intid, (uint8_t)old); break;
     case SG_R_ICFGR1: {
@@ -190,25 +207,30 @@ static void gic_restore_write(struct sw_gic *g, unsigned id, uint64_t old, uint6
     sw_gic_sync();
 }
 
-/* Puts one register back: if it is not as found and the stage wrote it, one write, a read-back, and one more write if that did not hold.
- * A register the stage never wrote is only read, so that an unrelated change shows as NOT_RESTORED and is not overwritten. */
-void sw_gic_put_back_reg(struct sw_gic *g, unsigned id)
+/* Puts the bits of `mask` of one register back: if they are not as found and the stage wrote the register, one write, a read-back, and one more write if
+ * that did not hold. Only the last put-back of a register (`final`) records the value it ends with and a failure; an earlier one, PPI 26's own enable ahead
+ * of the configuration registers, can only need its retry noted. A register the stage never wrote is only read, so that an unrelated change shows as
+ * NOT_RESTORED and is not overwritten. */
+static void gic_put_back_bits(struct sw_gic *g, unsigned id, uint64_t mask, int final)
 {
     struct sw_gic_rec *r = &g->rec.r;
     struct sg_reg *e = &r->reg[id];
-    uint64_t mask = gic_mask(g, id), cur = sw_gic_current(g, id);
+    uint64_t cur = sw_gic_current(g, id);
     if ((cur & mask) != (e->old & mask) && (r->wrote >> id & 1)) {
-        gic_restore_write(g, id, e->old, cur);
+        gic_restore_write(g, id, e->old, cur, final);
         cur = sw_gic_current(g, id);
         if ((cur & mask) != (e->old & mask)) {
             r->restore_retried |= 1u << id;
-            gic_restore_write(g, id, e->old, cur);
+            gic_restore_write(g, id, e->old, cur, final);
             cur = sw_gic_current(g, id);
         }
     }
+    if (!final) return;
     e->fin = cur;
     if ((cur & mask) != (e->old & mask)) r->restore_failed |= 1u << id;
 }
+
+void sw_gic_put_back_reg(struct sw_gic *g, unsigned id) { gic_put_back_bits(g, id, gic_mask(g, id), 1); }
 
 /* ---- Reads and the decision ---- */
 
@@ -316,9 +338,10 @@ static unsigned gic_read_redistributor(struct sw_gic *g)
     sw_gic_say(g, SG_L_GICR, 0);
     if (r->gicr_waker & (SG_GICR_WAKER_SLEEP | SG_GICR_WAKER_CHILDREN_ASLEEP)) return SG_OUT_GICR_ASLEEP;
     /* Only PPI 26 itself pending or active is refused: someone else's interrupt is in flight on the line the windows use. Other PPIs enabled in
-     * ISENABLER0, and PPI 26 itself enabled, are accepted and left exactly as found (boot 12, OBSERVED, one unit: the firmware leaves SGI 0 and
-     * PPIs 23, 25, 26, 27 and 30 enabled). Another interrupt can be signalled while IRQ is open: the windows end on any INTID but 26 and name it
-     * (WRONG_INTID, HPPIR_NOT_26, NOT_CLEAN, FINAL_PENDING), and the reporter's GIC OLD line shows ISPENDR0 and ISACTIVER0 whole. */
+     * ISENABLER0 are accepted here and quarantined by the first store (gic_store_q), and PPI 26 itself enabled is accepted and left exactly as found (boot 12,
+     * OBSERVED, one unit: the firmware leaves SGI 0 and PPIs 23, 25, 26, 27 and 30 enabled; boot 13: INTID 27, one of them, was pending). What the quarantine
+     * does not cover (an enabled SPI) is refused after the stores by gic_check_pending, and the windows still end on any INTID but 26 and name it (WRONG_INTID,
+     * HPPIR_NOT_26, NOT_CLEAN, FINAL_PENDING); the reporter's GIC OLD line shows ISPENDR0 and ISACTIVER0 whole. */
     if ((r->reg[SG_R_ISPENDR0].old | r->reg[SG_R_ISACTIVER0].old) & g->bit) return SG_OUT_PPI_OWNED;
     return 0;
 }
@@ -361,14 +384,59 @@ unsigned sw_gic_arm_begin(struct sw_gic *g, struct sw_ctx *c)
     return gic_check_cpu(g);
 }
 
+static uint32_t gic_popcount(uint32_t v)
+{
+    uint32_t n = 0;
+    for (; v; v &= v - 1) n++;          /* at most 32 turns */
+    return n;
+}
+
+/* The survey, after every read that a decision rests on and before any store; it decides nothing, and the reporter alone prints it. The SPIs: GICD_ISENABLER[n]
+ * and GICD_ISPENDR[n] for n = 1 to the ITLinesNumber of GICD_TYPER, a field of five bits, so that the loop is at most 31 turns and never reads past offset
+ * 0x17C and 0x27C of a frame the PIN.DAT sizes at 64 KiB; register 0 is banked in each redistributor under affinity routing and is not read here. The
+ * counts are of INTIDs; the first two that are enabled and pending are named, in INTID order. The other PPIs: the priority byte of each INTID the firmware
+ * left enabled besides PPI 26 (boot 12, OBSERVED), in this CPU's own frame. The EL1 timers, in the dry run's build only (the monitor entry's arm half is built
+ * with SW_GIC_DRY_REGS=0 and must not gain a system register read): the register behind INTID 27 is INFERRED to be CNTV_CTL_EL0 until these are read. */
+static void gic_read_survey(struct sw_gic *g)
+{
+    struct sg_survey *s = &g->rec.r.sv;
+    uint32_t lines = g->rec.r.gicd_typer & SG_GICD_TYPER_ITLINES, n, i;
+    s->spi_lines = lines;
+    for (n = 1; n <= lines; n++) {
+        uint32_t en = sp11hw_mmio_read32(g->gicd + SG_GICD_ISENABLER + 4u * n), pend = sp11hw_mmio_read32(g->gicd + SG_GICD_ISPENDR + 4u * n), both = en & pend;
+        s->spi_enabled += gic_popcount(en);
+        s->spi_pending += gic_popcount(pend);
+        s->spi_both += gic_popcount(both);
+        for (i = 0; both && i < 32; i++) {
+            if (!(both >> i & 1)) continue;
+            if (!s->spi_first) s->spi_first = 32u * n + i;
+            else if (!s->spi_second) s->spi_second = 32u * n + i;
+        }
+    }
+    s->flags |= SG_SV_SPI;
+#define SG_PPI_PRIO(intid) ((uint32_t)sp11hw_mmio_read8(g->sgi + SG_IPRIORITYR + (intid)))
+    s->ppi_prio = SG_PPI_PRIO(SG_SURVEY_PPI0) | SG_PPI_PRIO(SG_SURVEY_PPI1) << 8 | SG_PPI_PRIO(SG_SURVEY_PPI2) << 16 | SG_PPI_PRIO(SG_SURVEY_PPI3) << 24;
+#undef SG_PPI_PRIO
+    s->flags |= SG_SV_PPI;
+#if SW_GIC_DRY_REGS
+    s->cntv_ctl = sp11hw_read_cntv_ctl_el0();
+    s->cntv_cval = sp11hw_read_cntv_cval_el0();
+    s->cntp_ctl = sp11hw_read_cntp_ctl_el0();
+    s->cntp_cval = sp11hw_read_cntp_cval_el0();
+    s->flags |= SG_SV_TIMERS;
+#endif
+}
+
 unsigned sw_gic_arm_reads(struct sw_gic *g)
 {
     unsigned out;
     if ((out = gic_read_distributor(g)) != 0 || (out = gic_read_redistributor(g)) != 0 || (out = gic_read_cpu_and_timer(g)) != 0) {
         g->rec.r.outcome = g->rec.r.first_outcome = out;
         sw_gic_flush(g);
+        return out;
     }
-    return out;
+    gic_read_survey(g);
+    return 0;
 }
 
 /* ---- Stores. The class is marked begun, and the record stored, before its first store: a hang names the class in RAM. ---- */
@@ -399,6 +467,39 @@ static unsigned gic_store_g(struct sw_gic *g)
     return (e->rb & (SG_GICD_CTLR_ARE | SG_GICD_CTLR_G1A)) == (SG_GICD_CTLR_ARE | SG_GICD_CTLR_G1A) ? 0 : SG_OUT_G_NOT_HELD;
 }
 
+/* Q, the first store, a member of class R: this CPU's other enabled interrupts are disabled, and stay so until the put-back's last step. Boot 13 (OBSERVED, one
+ * unit, one boot): INTID 27 was pending and enabled before any store and, with group 1 enabled at the distributor and the CPU interface, was the first interrupt
+ * of window 1; the monitor stops on any interrupt that is not PPI 26 (probes/xnuboot/async.c), so the same one would end its run at the first IRQ unmask.
+ * ICENABLER0 takes the mask of the bits to disable: every bit the reads found enabled but PPI 26's (SGI 0 and PPIs 23, 25, 27 and 30 on the unit), in one write,
+ * then the RWP wait and a read of ISENABLER0 that must show exactly PPI 26's bit as found. The pending state of those interrupts is never written: a source that
+ * stays asserting stays pending and is simply not forwarded. With nothing to disable there is no store, and nothing begun. */
+static unsigned gic_store_q(struct sw_gic *g)
+{
+    struct sw_gic_rec *r = &g->rec.r;
+    struct sg_survey *s = &r->sv;
+    uint32_t mask = (uint32_t)r->reg[SG_R_ISENABLER0].old & ~g->bit;
+    int rwp;
+#ifdef SP11_STICK_GIC_SEED_QUARANTINE_BIT26
+    mask = (uint32_t)r->reg[SG_R_ISENABLER0].old;       /* a quarantine that takes PPI 26's own enable with the rest */
+#endif
+#ifdef SP11_STICK_GIC_SEED_NO_QUARANTINE
+    mask = 0;                           /* the stage that ran in boot 13 */
+#endif
+    if (!mask) return 0;
+    sw_gic_begin_class(g, SG_CLASS_R);
+    s->quarantined = mask;
+    r->wrote |= 1u << SG_R_ISENABLER0;
+    sp11hw_mmio_write32(g->sgi + SG_ICENABLER0, mask);
+#ifdef SP11_STICK_GIC_SEED_QUARANTINE_STRAY_WRITE
+    sp11hw_mmio_write32(g->rd + SP11SB_PIN_U64(g->c->pin, gicr_stride) + SG_SGI_FRAME + SG_ICENABLER0, mask);       /* the next CPU's redistributor frame */
+#endif
+    sw_gic_sync();
+    rwp = gic_wait_clear32(g, g->rd + SG_GICR_CTLR, SG_GICR_CTLR_RWP);
+    s->quar_rb = (uint32_t)sw_gic_current(g, SG_R_ISENABLER0);
+    s->flags |= SG_SV_QUAR;
+    return rwp && s->quar_rb == ((uint32_t)r->reg[SG_R_ISENABLER0].old & g->bit) ? 0 : SG_OUT_Q_NOT_HELD;
+}
+
 /* R: this CPU's PPI. The group is writable only in the single security state's view (DS = 1); with two security states EL3's firmware
  * owns it and a non-secure write is ignored, so none is made and the enable's read-back says whether the PPI is the OS's to enable. */
 static unsigned gic_store_r(struct sw_gic *g)
@@ -423,10 +524,7 @@ static unsigned gic_store_r(struct sw_gic *g)
         r->wrote |= 1u << SG_R_ICFGR1;
         sp11hw_mmio_write32(g->sgi + SG_ICFGR1, (uint32_t)cfg->new);
     }
-#ifdef SP11_STICK_GIC_SEED_CLEAR_OTHERS
-    sp11hw_mmio_write32(g->sgi + SG_ICENABLER0, (uint32_t)(en->old & ~g->bit));     /* a stage that tidies the register: the other PPIs' enables are lost */
-#endif
-    if (!(en->old & g->bit)) {          /* the enable is written only when PPI 26 was found disabled; the other bits are never written */
+    if (!(en->old & g->bit)) {          /* PPI 26's enable is written only when it was found disabled, and no other bit of ISENABLER0 is ever set by the stage */
         en->new = g->bit;
         r->wrote |= 1u << SG_R_ISENABLER0;
         sp11hw_mmio_write32(g->sgi + SG_ISENABLER0, (uint32_t)en->new);
@@ -437,7 +535,11 @@ static unsigned gic_store_r(struct sw_gic *g)
     pri->rb = sw_gic_current(g, SG_R_IPRIORITYR);
     cfg->rb = sw_gic_current(g, SG_R_ICFGR1);
     grp->rb = sw_gic_current(g, SG_R_IGROUPR0);
-    if (!rwp || !(en->rb & g->bit) || (cfg->rb & edge) || (g->ds && !(grp->rb & g->bit))) return SG_OUT_R_NOT_HELD;
+    /* PPI 26's bit is set, and the register is exactly what the quarantine and this store leave: PPI 26's bit as found or written, and nothing else
+     * that the quarantine disabled. */
+    if (!rwp || !(en->rb & g->bit) || (uint32_t)en->rb != (((uint32_t)en->old & ~r->sv.quarantined) | g->bit) || (cfg->rb & edge) ||
+        (g->ds && !(grp->rb & g->bit)))
+        return SG_OUT_R_NOT_HELD;
     return 0;
 }
 
@@ -461,6 +563,27 @@ static unsigned gic_store_c(struct sw_gic *g)
     return (r->reg[SG_R_IPRIORITYR].rb & 0xFF) < (r->reg[SG_R_ICC_PMR].rb & 0xFF) ? 0 : SG_OUT_PRIO_NOT_BELOW_PMR;
 }
 
+/* The last check of the arm, with IRQ still masked and so without a side effect (ICC_HPPIR1_EL1, unlike ICC_IAR1_EL1, acknowledges nothing): what the CPU
+ * interface would hand out next is nothing (1023) or PPI 26, which the timer has not armed yet. Anything else is a foreign interrupt that the quarantine does
+ * not cover (an SPI, or a PPI that did not disable), and a window or a monitor would take it first. Inside the arm so that the monitor entry refuses here
+ * too, and does not call a monitor that would stop at its first IRQ unmask. */
+static unsigned gic_check_pending(struct sw_gic *g)
+{
+    struct sg_survey *s = &g->rec.r.sv;
+    uint32_t id;
+#ifdef SP11_STICK_GIC_SEED_NO_QUARANTINE
+    return 0;                           /* the stage that ran in boot 13 had no such check */
+#endif
+#ifdef SP11_STICK_GIC_SEED_NO_HPPIR_CHECK
+    return 0;
+#endif
+    sw_gic_sync();
+    id = (uint32_t)(sp11hw_read_icc_hppir1_el1() & 0xFFFFFF);
+    s->hppir_pre = id;
+    s->flags |= SG_SV_HPPIR;
+    return id == SG_INTID_NONE || id == g->intid ? 0 : SG_OUT_FOREIGN_PENDING;
+}
+
 unsigned sw_gic_arm_stores(struct sw_gic *g, uint32_t extra)
 {
     unsigned out = 0;
@@ -482,11 +605,19 @@ unsigned sw_gic_arm_stores(struct sw_gic *g, uint32_t extra)
     (void)sw_gic_wait_seconds;
 #endif
     g->rec.r.substage = SG_SUB_STORING;
-    if (g->rec.r.planned & SG_CLASS_G) out = gic_store_g(g);
+#ifndef SP11_STICK_GIC_SEED_QUARANTINE_AFTER_G
+    out = gic_store_q(g);               /* first: nothing foreign may be signalled once group 1 is enabled */
+#endif
+    if (!out && (g->rec.r.planned & SG_CLASS_G)) out = gic_store_g(g);
+#ifdef SP11_STICK_GIC_SEED_QUARANTINE_AFTER_G
+    if (!out) out = gic_store_q(g);
+#endif
     if (!out) out = gic_store_r(g);
     if (!out) out = gic_store_c(g);
+    if (!out) out = gic_check_pending(g);
     if (out) {
         g->rec.r.first_outcome = out;
+        if (out == SG_OUT_Q_NOT_HELD || out == SG_OUT_FOREIGN_PENDING) sw_gic_say(g, SG_L_QUAR, 1);     /* the INTID, or what the quarantine left, is on the page */
         return out;
     }
     g->rec.r.substage = SG_SUB_ARMED;
@@ -507,7 +638,7 @@ unsigned sw_gic_arm(struct sw_gic *g, struct sw_ctx *c, uint32_t extra)
     return sw_gic_arm_stores(g, extra);
 }
 
-/* ---- The put-back of classes C, R and G ---- */
+/* ---- The put-back of classes C, R and G, and the quarantine's last ---- */
 
 unsigned sw_gic_put_back(struct sw_gic *g)
 {
@@ -521,7 +652,7 @@ unsigned sw_gic_put_back(struct sw_gic *g)
     }
     if (r->begun & SG_CLASS_R) {
         if (sw_gic_current(g, SG_R_ISPENDR0) & g->bit & ~r->reg[SG_R_ISPENDR0].old) r->wrote |= 1u << SG_R_ISPENDR0;
-        sw_gic_put_back_reg(g, SG_R_ISENABLER0);
+        gic_put_back_bits(g, SG_R_ISENABLER0, g->bit, 0);       /* PPI 26's own enable first, ahead of the configuration registers (a configuration is not changed under an enabled interrupt) */
         sw_gic_put_back_reg(g, SG_R_ISPENDR0);
         sw_gic_put_back_reg(g, SG_R_IPRIORITYR);
         sw_gic_put_back_reg(g, SG_R_ICFGR1);
@@ -532,6 +663,11 @@ unsigned sw_gic_put_back(struct sw_gic *g)
     if (r->begun & SG_CLASS_G) sw_gic_put_back_reg(g, SG_R_GICD_CTLR);
 #endif
     if (r->begun) sw_gic_put_back_reg(g, SG_R_ICC_RPR);
+#ifndef SP11_STICK_GIC_SEED_QUARANTINE_NO_PUTBACK
+    /* Last: the enables the quarantine cleared go back after the CPU interface and the distributor are, so that nothing foreign can be signalled in between,
+     * and ISENABLER0 is verified whole against what the reads found. */
+    if (r->begun & SG_CLASS_R) sw_gic_put_back_reg(g, SG_R_ISENABLER0);
+#endif
     return r->restore_failed ? SG_OUT_NOT_RESTORED : 0;
 }
 #endif /* SNAP_SP11_STICK_GIC */

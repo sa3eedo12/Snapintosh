@@ -6,15 +6,18 @@
  * -DSNAP_SP11_STICK=1: with it at 0 this header is empty and the dry-run wrapper keeps the bytes that ran on the unit.
  *
  * What the stage is for. The A16 monitor stops its guest with the EL2 physical timer, a level-triggered PPI (INTID 26) routed to EL2
- * by HCR_EL2.IMO and taken from the guest at EL1. On the Surface Pro 11 that has never been tried (U3, docs/SP11-MONITOR-PORT.md): no
- * register of the GIC has been written there, GICD_CTLR reads 0x10 and no interrupt has ever been enabled. The stage tests the
- * mechanism and nothing else: it reads, decides, announces its first store and waits eight seconds, arms the GIC, then runs two
+ * by HCR_EL2.IMO and taken from the guest at EL1. On the Surface Pro 11 that is unanswered (U3, docs/SP11-MONITOR-PORT.md): boot 13 (OBSERVED, one unit)
+ * showed that an enabled and pending PPI is delivered to EL2 once group 1 and the CPU interface are on, but the interrupt was INTID 27, which the
+ * firmware had left enabled, and it ended the first window before the CNTHP deadline. The stage tests the
+ * mechanism and nothing else: it reads, decides, announces its first store and waits eight seconds, quarantines the other enabled interrupts, arms the
+ * GIC, then runs two
  * bounded windows, one at EL2 (three acknowledged interrupts, each re-armed a short time ahead, and a final deadline taken without
  * an acknowledge, as the monitor's stop path takes it) and one that takes the interrupt from EL1 at the lower-EL vector, puts
  * everything back and reports. It never calls a monitor.
  *
- * Two halves, one source of truth. sp11-stick-gic.c is the arm and the put-back: the reads and decisions, the stores of classes G, R
- * and C with their read-back, PREPARED, and the exact put-back of the same classes. It has no window, no timer and no write of
+ * Two halves, one source of truth. sp11-stick-gic.c is the arm and the put-back: the reads and decisions, the quarantine of the firmware's other
+ * enabled interrupts, the stores of classes G, R and C with their read-back, PREPARED, and the exact put-back of the same classes. It has no
+ * window, no timer and no write of
  * VBAR_EL2, HCR_EL2 or any EL1 register: the monitor entry (work item 4b) calls sw_gic_arm, then the monitor, then sw_gic_put_back,
  * and builds the file with SW_GIC_DRY_REGS=0, which removes the dry run's own registers from the table (tools/test-sp11-stick-gic-build.py
  * proves that object has none of their writes). sp11-stick-gic-dry.c is the dry run's own: classes T, V and E, the windows, the
@@ -59,6 +62,9 @@ _Static_assert(SP11_STICK_GIC_CYCLE_US >= 1000u && SP11_STICK_GIC_CYCLE_US <= 10
 #define SG_GICD_CTLR 0x000u             /* distributor */
 #define SG_GICD_TYPER 0x004u
 #define SG_GICD_IIDR 0x008u
+#define SG_GICD_ISENABLER 0x100u        /* one bit per INTID, 32 to a register; register 0 (INTIDs 0 to 31) is banked in each redistributor under affinity routing: not read here */
+#define SG_GICD_ISPENDR 0x200u
+#define SG_GICD_TYPER_ITLINES 0x1Fu     /* GICD_TYPER[4:0], ITLinesNumber: the SPI registers are 1 to this value, so at most 31 and never past offset 0x17C and 0x27C */
 #define SG_GICD_CTLR_G1 (1u << 0)       /* non-secure view (DS = 0): EnableGrp1; single security state (DS = 1): EnableGrp0 */
 #define SG_GICD_CTLR_G1A (1u << 1)      /* non-secure view with ARE_NS = 1: EnableGrp1A; DS = 1: EnableGrp1. The bit the A16 monitor requires */
 #define SG_GICD_CTLR_ARE (1u << 4)      /* ARE_NS in the non-secure view, ARE when DS = 1 */
@@ -123,8 +129,10 @@ _Static_assert(SP11_STICK_GIC_CYCLE_US >= 1000u && SP11_STICK_GIC_CYCLE_US <= 10
      defined(SP11_STICK_GIC_SEED_NO_NEXT) || defined(SP11_STICK_GIC_SEED_NO_RESTORE) || defined(SP11_STICK_GIC_SEED_FINAL_ACK) || \
      defined(SP11_STICK_GIC_SEED_NO_REARM) || defined(SP11_STICK_GIC_SEED_NO_IMO) || defined(SP11_STICK_GIC_SEED_NO_EL1_RESTORE) || \
      defined(SP11_STICK_GIC_SEED_NO_NEXT_EL1) || defined(SP11_STICK_GIC_SEED_UNBOUNDED_EL1) || defined(SP11_STICK_GIC_SEED_NO_SETTLE) || \
-     defined(SP11_STICK_GIC_SEED_CLEAR_OTHERS) || defined(SP11_STICK_GIC_SEED_KEEP_FOREIGN_DEADLINE) || \
-     defined(SP11_STICK_GIC_SEED_RESTORE_CTL_FIRST)) && !defined(SP11_STICK_HOST_TEST)
+     defined(SP11_STICK_GIC_SEED_KEEP_FOREIGN_DEADLINE) || defined(SP11_STICK_GIC_SEED_RESTORE_CTL_FIRST) || \
+     defined(SP11_STICK_GIC_SEED_NO_QUARANTINE) || defined(SP11_STICK_GIC_SEED_QUARANTINE_NO_PUTBACK) || defined(SP11_STICK_GIC_SEED_QUARANTINE_BIT26) || \
+     defined(SP11_STICK_GIC_SEED_QUARANTINE_STRAY_WRITE) || defined(SP11_STICK_GIC_SEED_NO_HPPIR_CHECK) || defined(SP11_STICK_GIC_SEED_QUARANTINE_AFTER_G)) && \
+    !defined(SP11_STICK_HOST_TEST)
 #error "the seeded faults are part of the host test build only"
 #endif
 
@@ -142,19 +150,30 @@ struct sw_gic {
 };
 _Static_assert(sizeof(struct sw_gic) < 2048, "the stage's state is a small part of the wrapper's 32 KiB of stack");
 
+#if SW_GIC_DRY_REGS
+/* The EL1 timers' registers, read at EL2 by the survey of the dry run's build only (the monitor entry's arm half, built with SW_GIC_DRY_REGS=0, has none
+ * of them): one MRS each, defined out of line in sp11-stick-gic-dry.c on the unit and by the harness's model in the host test. */
+uint64_t sp11hw_read_cntv_ctl_el0(void);
+uint64_t sp11hw_read_cntv_cval_el0(void);
+uint64_t sp11hw_read_cntp_ctl_el0(void);
+uint64_t sp11hw_read_cntp_cval_el0(void);
+#endif
+
 /* ---- sp11-stick-gic.c: the arm and the put-back. ---- */
-/* sw_gic_arm: reads, decisions, the NEXT line and the wait, then the stores of classes G, R and C with their read-back, and PREPARED. Returns
+/* sw_gic_arm: reads, decisions and the survey, the NEXT line and the wait, then the stores (the quarantine of the other enabled interrupts, then classes
+ * G, R and C) with their read-back, the check that no foreign interrupt is next (ICC_HPPIR1_EL1, IRQ masked: FOREIGN_PENDING), and PREPARED. Returns
  * 0 (armed: the record's sub-stage is ARMED) or an SG_OUT_* refusal or failure, with the record's outcome and first_outcome set and nothing
- * printed but the read lines and the NEXT line. `extra` is the classes the caller will add (the dry run's T, V and E): the NEXT line names
- * them and the record plans them. After any non-zero return the caller calls sw_gic_put_back (a no-op when no class began) and then
- * refuses with GIC_NOT_READY and the outcome as refusal_detail. The three steps are public so that the dry run can put its own read-only
- * checks between the first and the second; a client that has none calls sw_gic_arm. */
+ * printed but the read lines, the NEXT line and, for Q_NOT_HELD and FOREIGN_PENDING, the GIC QUAR line. `extra` is the classes the caller will add (the dry
+ * run's T, V and E): the NEXT line names them and the record plans them. After any non-zero return the caller calls sw_gic_put_back (a no-op when no
+ * class began) and then refuses with GIC_NOT_READY and the outcome as refusal_detail. The three steps are public so that the dry run can put its own
+ * read-only checks between the first and the second; a client that has none calls sw_gic_arm. */
 unsigned sw_gic_arm_begin(struct sw_gic *g, struct sw_ctx *c);
 unsigned sw_gic_arm_reads(struct sw_gic *g);
 unsigned sw_gic_arm_stores(struct sw_gic *g, uint32_t extra);
 unsigned sw_gic_arm(struct sw_gic *g, struct sw_ctx *c, uint32_t extra);
 /* sw_gic_put_back: classes C, R and G exactly (each register written only if the stage wrote it, read back, one retry, then NOT_RESTORED in
- * restore_failed), then ICC_RPR_EL1 and the PPI's active state as checks. Returns 0, or SG_OUT_NOT_RESTORED. */
+ * restore_failed), then ICC_RPR_EL1 and the PPI's active state as checks, and last the enables the quarantine cleared (ISENABLER0 is verified whole
+ * against what the reads found). Returns 0, or SG_OUT_NOT_RESTORED. */
 unsigned sw_gic_put_back(struct sw_gic *g);
 /* The helpers the dry run shares with it, so that the record, the page and the put-back have one implementation. */
 void sw_gic_flush(struct sw_gic *g);

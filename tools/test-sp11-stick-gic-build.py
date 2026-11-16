@@ -54,13 +54,16 @@ WHERE = {'ICC_PMR_EL1': {'sp11hw_write_icc_pmr_el1'}, 'ICC_BPR1_EL1': {'sp11hw_w
 # How many of each write there are: 26 MSR instructions of 15 registers (the dry run's pass 1 had 15 of 12).
 COUNTS = {'VBAR_EL2': 5, 'DAIFSet': 2, 'DAIFClr': 1, 'ICC_PMR_EL1': 1, 'ICC_BPR1_EL1': 1, 'ICC_IGRPEN1_EL1': 1, 'ICC_EOIR1_EL1': 1, 'ICC_DIR_EL1': 1,
           'CNTHP_CVAL_EL2': 1, 'CNTHP_CTL_EL2': 1, 'SPSR_EL2': 4, 'ELR_EL2': 4, 'HCR_EL2': 1, 'VBAR_EL1': 1, 'SCTLR_EL1': 1}
+# The survey's four reads of the EL1 timers at EL2 (pass 5): MRS only, in the dry run's build only, one function each (defined in sp11-stick-gic-dry.c).
+SURVEY_TIMERS = {'CNTV_CTL_EL0', 'CNTV_CVAL_EL0', 'CNTP_CTL_EL0', 'CNTP_CVAL_EL0'}
 READS = {'CurrentEL', 'MIDR_EL1', 'MPIDR_EL1', 'CNTFRQ_EL0', 'CNTPCT_EL0', 'CTR_EL0', 'HCR_EL2', 'SCTLR_EL2', 'TCR_EL2', 'PAR_EL1', 'SPSel', 'DAIF',
          'VBAR_EL2', 'ICC_SRE_EL2', 'ICC_CTLR_EL1', 'ICC_PMR_EL1', 'ICC_BPR1_EL1', 'ICC_IGRPEN1_EL1', 'ICC_HPPIR1_EL1', 'ICC_RPR_EL1', 'ICC_IAR1_EL1',
          'CNTHP_CTL_EL2', 'CNTHP_CVAL_EL2', 'ESR_EL2', 'FAR_EL2', 'ELR_EL2', 'SPSR_EL2', 'CNTHCTL_EL2', 'VBAR_EL1', 'SCTLR_EL1', 'ESR_EL1', 'ELR_EL1',
-         'FAR_EL1'}
+         'FAR_EL1', *SURVEY_TIMERS}
 # The system register encodings (op0, op1, CRn, CRm, op2), from the Arm ARM as remembered: the check below compares them with the disassembler's names.
 ENCODINGS = {(3, 4, 12, 0, 0): 'VBAR_EL2', (3, 0, 4, 6, 0): 'ICC_PMR_EL1', (3, 0, 12, 12, 3): 'ICC_BPR1_EL1', (3, 0, 12, 12, 7): 'ICC_IGRPEN1_EL1',
              (3, 0, 12, 12, 1): 'ICC_EOIR1_EL1', (3, 0, 12, 11, 1): 'ICC_DIR_EL1', (3, 4, 14, 2, 1): 'CNTHP_CTL_EL2', (3, 4, 14, 2, 2): 'CNTHP_CVAL_EL2',
+             (3, 3, 14, 3, 1): 'CNTV_CTL_EL0', (3, 3, 14, 3, 2): 'CNTV_CVAL_EL0', (3, 3, 14, 2, 1): 'CNTP_CTL_EL0', (3, 3, 14, 2, 2): 'CNTP_CVAL_EL0',
              (3, 4, 4, 0, 0): 'SPSR_EL2', (3, 4, 4, 0, 1): 'ELR_EL2', (3, 0, 12, 12, 0): 'ICC_IAR1_EL1', (3, 0, 12, 12, 2): 'ICC_HPPIR1_EL1',
              (3, 0, 12, 11, 3): 'ICC_RPR_EL1', (3, 0, 12, 12, 4): 'ICC_CTLR_EL1', (3, 4, 12, 9, 5): 'ICC_SRE_EL2', (3, 4, 5, 2, 0): 'ESR_EL2',
              (3, 4, 6, 0, 0): 'FAR_EL2', (3, 0, 4, 2, 0): 'SPSel', (3, 3, 4, 2, 1): 'DAIF', (3, 0, 4, 2, 2): 'CurrentEL', (3, 0, 0, 0, 0): 'MIDR_EL1',
@@ -246,6 +249,8 @@ class Binary(unittest.TestCase):
         found, where = census(self.funcs['snapmon-gic'])
         self.assertLessEqual(set(found['mrs']), READS)
         self.assertEqual(where[('mrs', 'ICC_IAR1_EL1')], {'sp11hw_read_icc_iar1_el1'})
+        for name in SURVEY_TIMERS:
+            self.assertEqual((found['mrs'][name], where[('mrs', name)]), (1, {f'sp11hw_read_{name.lower()}'}), 'the survey reads each EL1 timer register once, in a function of its own')
         self.assertEqual(T.callers_of(self.funcs['snapmon-gic'], 'sp11hw_read_icc_iar1_el1'), {'sw_gic_vec_irq': 1, 'sw_gic_vec_irq_el1': 1},
                          'window 1 acknowledges three interrupts in one place and never at the deadline; window 2 its one')
 
@@ -303,7 +308,8 @@ class Binary(unittest.TestCase):
         for name, store in (('sp11hw_mmio_write8', 'strb'), ('sp11hw_mmio_write32', 'str')):
             self.assertEqual([(m, o) for _, m, o in funcs[name]], [(store, 'w1, [x0]'), ('ret', '')], name)
         calls = {name: T.callers_of(funcs, name) for name in ('sp11hw_mmio_write8', 'sp11hw_mmio_write32')}
-        self.assertEqual({n: sum(c.values()) for n, c in calls.items()}, {'sp11hw_mmio_write8': 2, 'sp11hw_mmio_write32': 9}, 'the GICD_CTLR store and put-back, and the redistributor stores')
+        self.assertEqual({n: sum(c.values()) for n, c in calls.items()}, {'sp11hw_mmio_write8': 2, 'sp11hw_mmio_write32': 11},
+                         'the GICD_CTLR store and put-back, the redistributor stores, and (pass 5) the quarantine\'s ICENABLER0 and the put-back\'s ISENABLER0')
         for name, callers in calls.items():
             self.assertTrue(all(c.startswith(('gic_', 'sw_gic_')) for c in callers), f'{name} is called from {sorted(callers)}: only the stage may')
         report_and_copy = {'sw_copy_all', 'sw_head_flush', 'sw_head_init', 'sw_refuse', 'sw_set_stage'}
@@ -422,7 +428,8 @@ class Gate(unittest.TestCase):
 
     def test_a_seeded_fault_is_a_host_test_option_and_does_not_compile_into_a_unit_build(self):
         for seed in ('NO_SAVE', 'STRAY_STORE', 'NO_EOI', 'TIMER_ON', 'NO_IRQ_MASK', 'STORE_FIRST', 'NO_NEXT', 'NO_RESTORE', 'FINAL_ACK', 'NO_REARM', 'NO_IMO',
-                     'NO_EL1_RESTORE', 'NO_NEXT_EL1', 'UNBOUNDED_EL1', 'NO_SETTLE', 'CLEAR_OTHERS', 'KEEP_FOREIGN_DEADLINE', 'RESTORE_CTL_FIRST'):
+                     'NO_EL1_RESTORE', 'NO_NEXT_EL1', 'UNBOUNDED_EL1', 'NO_SETTLE', 'KEEP_FOREIGN_DEADLINE', 'RESTORE_CTL_FIRST', 'NO_QUARANTINE',
+                     'QUARANTINE_NO_PUTBACK', 'QUARANTINE_BIT26', 'QUARANTINE_STRAY_WRITE', 'NO_HPPIR_CHECK', 'QUARANTINE_AFTER_G'):
             code, err, _ = self.cc('sp11-stick-gic.c', [*self.on, *self.macros, '-DSNAP_SP11_STICK_GIC=1', f'-DSP11_STICK_GIC_SEED_{seed}'])
             with self.subTest(seed=seed):
                 self.assertEqual(code, 1)
@@ -446,8 +453,14 @@ class Gate(unittest.TestCase):
         for mnemonic in ('eret', 'hvc', 'ic', 'smc', 'svc', 'tlbi', 'wfi', 'wfe', 'br', 'sys'):
             self.assertEqual(dict(found[mnemonic]), {}, mnemonic)
         self.assertFalse({'CNTHP_CTL_EL2', 'CNTHP_CVAL_EL2', 'VBAR_EL2', 'HCR_EL2', 'VBAR_EL1', 'SCTLR_EL1', 'CNTHCTL_EL2'} & set(found['mrs']), 'nor read')
+        self.assertEqual((found['mrs']['ICC_HPPIR1_EL1'], SURVEY_TIMERS & set(found['mrs'])), (1, set()),
+                         'it reads ICC_HPPIR1_EL1 once, the check before the window, and none of the survey\'s EL1 timers')
         self.assertEqual((set(found['dc']), undefined & dry_writers), ({'cvac'}, set()), 'it does not even call a writer of the dry run')
+        self.assertFalse(undefined & {f'sp11hw_read_{n.lower()}' for n in SURVEY_TIMERS}, 'nor a reader of the survey\'s timers')
         found, undefined = self.census_of_the_core([])
+        self.assertEqual({f'sp11hw_read_{n.lower()}' for n in SURVEY_TIMERS} & undefined, {f'sp11hw_read_{n.lower()}' for n in SURVEY_TIMERS},
+                         'built for the dry run it calls the four readers, each defined once in sp11-stick-gic-dry.c, with no MRS of them of its own')
+        self.assertFalse(SURVEY_TIMERS & set(found['mrs']))
         self.assertLessEqual({'VBAR_EL2', 'DAIFSet'}, set(found['msr']), 'built for the dry run its table also puts back VBAR_EL2 and DAIF')
         self.assertEqual((undefined & dry_writers, set(found['msr']) & {'HCR_EL2', 'VBAR_EL1', 'SCTLR_EL1', 'CNTHP_CTL_EL2', 'CNTHP_CVAL_EL2'}), (dry_writers, set()),
                          'and calls the dry run\'s five writers, each defined once in sp11-stick-gic-dry.c, with no MSR of them of its own')
@@ -465,7 +478,7 @@ class Hygiene(unittest.TestCase):
         names = {p.name for p in own_files()}
         for wanted in ('sp11-stick-gic.c', 'sp11-stick-gic-dry.c', 'sp11-stick-gic.h', 'sp11-stick-gic-record.h', 'sp11-stick-gic-vec.c', 'sp11_stick_gic_testlib.py',
                        'sp11_stick_gic_checks.py', 'test-sp11-stick-gic.c', 'test-sp11-stick-gic.py', 'test-sp11-stick-gic-record.py', 'test-sp11-stick-gic-build.py',
-                       'test-sp11-stick-gic-qemu.py', 'SP11-STICK-GIC.md'):
+                       'test-sp11-stick-gic-qemu.py', 'test-sp11-stick-gic-quarantine.py', 'SP11-STICK-GIC.md'):
             self.assertIn(wanted, names)
 
     def test_every_source_file_starts_with_an_spdx_mit_line(self):
@@ -474,7 +487,7 @@ class Hygiene(unittest.TestCase):
                 with self.subTest(path.name):
                     self.assertIn('SPDX-License-Identifier: MIT', '\n'.join(path.read_text().splitlines()[:3]))
 
-    def test_every_c_and_python_file_stays_under_1500_lines_and_50_kib_and_the_note_under_33000_bytes(self):
+    def test_every_c_and_python_file_stays_under_1500_lines_and_50_kib_and_the_note_under_48000_bytes(self):
         for path in own_files():
             with self.subTest(path.name):
                 text = path.read_text()
@@ -482,7 +495,7 @@ class Hygiene(unittest.TestCase):
                     self.assertLess(len(text.splitlines()), 1500)
                     self.assertLess(len(text.encode()), 50 * 1024)
                 else:
-                    self.assertLessEqual(len(path.read_bytes()), 33000)     # raised from 30,000 in pass 3: the committed text was at its cap
+                    self.assertLessEqual(len(path.read_bytes()), 48000)     # raised from 33,000 in pass 5 (30,000 before pass 3): the committed text was at its cap
                     self.assertTrue(text.isascii())
 
     def test_no_file_names_the_build_host_a_person_a_network_a_key_or_an_unfinished_marker(self):
@@ -534,7 +547,7 @@ class Document(unittest.TestCase):
         cls.flat = cls.text.replace('\n', ' ')
 
     def test_the_note_is_ascii_and_within_its_size_budget(self):
-        self.assertLessEqual(len(self.data), 33000)         # raised from 30,000 in pass 3: the committed text was at its cap
+        self.assertLessEqual(len(self.data), 48000)         # raised from 33,000 in pass 5 (the committed text was at its cap; 30,000 before pass 3)
 
     def test_it_says_hardware_not_run_uses_the_labels_and_claims_no_hardware_result(self):
         for needle in ('Hardware NOT RUN', 'EXPERIMENTAL', 'VERIFIED', 'OBSERVED', 'INFERRED', 'UNIMPLEMENTED', 'UNKNOWN'):
@@ -562,29 +575,44 @@ class Document(unittest.TestCase):
 
     def test_the_numbers_it_states_are_the_codes(self):
         header = (ROOT / 'probes/sp11-stick-gic.h').read_text() + (ROOT / 'probes/sp11-stick-gic-record.h').read_text()
-        self.assertEqual((G.REC_BYTES, int(re.search(r'SP11_STICK_GIC_TIME_BOX_S (\d+)u', header).group(1)), int(re.search(r'SW_GIC_WAIT_S (\d+)u', header).group(1))), (1376, 2, 8))
-        for fragment in ('1376 bytes', 'magic `SNAPGIC1`', 'REPORT.DAT offset 0x11000', '`SP11_STICK_GIC_TIME_BOX_S` 2 (1 to 5)', 'the wait 8 s', 'priority 0x80, PMR 0xF0, BPR1 0',
-                         '`0x1000 + 82` (GIC_NOT_READY)', '29 of the 30 allowed', 'at most 23 lines of its 40', '11 call sites', 'eighteen seeded-bad stages'):
+        self.assertEqual((G.REC_BYTES, int(re.search(r'SP11_STICK_GIC_TIME_BOX_S (\d+)u', header).group(1)), int(re.search(r'SW_GIC_WAIT_S (\d+)u', header).group(1))), (1456, 2, 8))
+        for fragment in ('1456 bytes', 'magic `SNAPGIC1`', 'REPORT.DAT offset 0x11000', '`SP11_STICK_GIC_TIME_BOX_S` 2 (1 to 5)', 'the wait 8 s', 'priority 0x80, PMR 0xF0, BPR1 0',
+                         '`0x1000 + 82` (GIC_NOT_READY)', '29 of the 30 allowed', 'at most 28 lines of its 40', '13 call sites', 'seventeen seeded-bad stages', 'twenty-three in all',
+                         '182 words', 'version 3', 'the survey from 0x560', 'Q_NOT_HELD 22 and FOREIGN_PENDING 23'):
             self.assertIn(fragment, self.flat)
         self.assertEqual((G.sb.WRAPPER_LINES, G.sb.REPORTER_LINES, G.sb.RET_REFUSED, G.sb.REPORT_OUT), (30, 40, 0x1000, 0x1000))
         for name in ('NEXT GIC STORES AFTER 8 S', 'NEXT GIC WINDOW 2 S', 'NEXT GIC EL1 EXCURSION AFTER 8 S', 'GIC NO RECORD: THE STAGE DID NOT RUN', 'GIC RECORD DAMAGED CODE='):
             self.assertIn(name, self.text)
 
     def test_the_extension_record_rule_and_the_study_findings_are_written_down(self):
-        self.assertEqual((G.REC_AT, G.REC_BYTES), (0x11000, 1376))
+        self.assertEqual((G.REC_AT, G.REC_BYTES), (0x11000, 1456))
         self.assertLessEqual(G.REC_AT + G.REC_BYTES, 528384, 'inside REPORT.DAT')
         for needle in ('extension record', '8-byte ASCII tag', 'only the wrapper', 'the reporter', 'the monitor never does', 'zero tag', 'out + 0x10000',
                        'C4', 'C6', 'sw_gic_arm', 'sw_gic_put_back', '-DSW_GIC_DRY_REGS=0', 'must not arm CNTHP', 'PSTATE.I', 'xnuboot.S:158', 'Total window time'):
             self.assertIn(needle, self.flat.replace('Only the wrapper', 'only the wrapper'))
 
     def test_the_rule_for_the_enable_register_and_boot_12_are_written_down_and_no_text_says_the_whole_register_must_be_clear(self):
-        for needle in ('PPI 26 itself pending or active', 'ISENABLER0 only when bit 26 is clear', 'Boot 12 (OBSERVED', 'ISENABLER0 0x4E800001', '`unit-boot12`',
+        for needle in ('PPI 26 itself pending or active', 'ISENABLER0 to enable PPI 26 only when bit 26 is clear', 'Boot 12 (OBSERVED', 'ISENABLER0 0x4E800001', '`unit-boot12`',
                        'GIC OLD PRIO= ICFGR1= IGROUPR0= ISPEND= ISACT='):
             self.assertIn(needle, self.flat)
-        for stale in ('something is enabled in ISENABLER0', 'the whole of ISENABLER0 must be clear', 'and no interrupt has been enabled'):
+        for stale in ('something is enabled in ISENABLER0', 'the whole of ISENABLER0 must be clear', 'and no interrupt has been enabled',
+                      'ISENABLER0 only when bit 26 is clear and clears only that bit', 'are accepted and left as found', 'clearing the other enabled bits', 'IIDR 0x4010438'):
             self.assertNotIn(stale, self.flat)
         for path in ('probes/sp11-stick-gic.c', 'probes/sp11-stick-gic.h', 'probes/sp11-stick-gic-dry.c'):
             self.assertNotIn('must be clear, not only', (ROOT / path).read_text(), path)
+
+    def test_boot_13_and_the_quarantine_are_written_down_with_their_labels_and_the_unit_is_not_said_to_have_answered_u3(self):
+        for needle in ('Boot 13 (OBSERVED, one unit, one boot', '`unit-boot13`', 'IIDR 0x401043B', 'INTID 27', 'ISPENDR0 0x08000000 before any store',
+                       'INFERRED, until the survey reads CNTV_CTL_EL0', 'P3 an enabled, pending PPI is delivered to EL2', 'Still UNKNOWN: U3 proper',
+                       'one write of ICENABLER0 with every bit of the found ISENABLER0 but bit 26', '0x4A800001', 'as the last write of the run, one ISENABLER0 write with exactly the bits the quarantine cleared',
+                       'the pending state of those interrupts is never written', 'FOREIGN_PENDING carrying the INTID', 'the seeded stage `no-quarantine`',
+                       'the quarantine\'s own writes (ICENABLER0 with the mask, the last ISENABLER0) are NOT exercised under QEMU', 'EXPERIMENTAL (the quarantine)'):
+            self.assertIn(needle, self.flat)
+        table = self.text.split('## 10.')[1].split('## 11.')[0]
+        for row in ('| Q_NOT_HELD (22) |', '| FOREIGN_PENDING (23) |'):
+            self.assertIn(row, table)
+        self.assertEqual((G.OUTCOMES[22], G.OUTCOMES[23]), ('Q_NOT_HELD', 'FOREIGN_PENDING'))
+        self.assertIn('still UNKNOWN after boot 13', self.flat, 'U3 is not answered by a run that ended on INTID 27')
 
     def test_timer_owned_is_only_a_timer_asserting_now_and_the_put_back_order_is_written_down(self):
         for needle in ('IMASK clear (0X5): the timer is asserting right now', 'Other states are accepted, overwritten at the arm (CVAL, then CTL) and put back',
@@ -596,7 +624,7 @@ class Document(unittest.TestCase):
             self.assertNotIn('the monitor sets its own', (ROOT / path).read_text(), path)
 
     def test_the_tests_it_names_are_the_ones_that_exist(self):
-        for name in ('test-sp11-stick-gic.py', 'test-sp11-stick-gic-record.py', 'test-sp11-stick-gic-build.py', 'test-sp11-stick-gic-qemu.py'):
+        for name in ('test-sp11-stick-gic.py', 'test-sp11-stick-gic-quarantine.py', 'test-sp11-stick-gic-record.py', 'test-sp11-stick-gic-build.py', 'test-sp11-stick-gic-qemu.py'):
             self.assertIn(f'`tools/{name}`', self.text)
             self.assertTrue((ROOT / 'tools' / name).is_file())
 

@@ -35,7 +35,7 @@ STAGE = sb.STAGE
 FIX, RUNS = {}, {}
 PIN = {n: o for n, o, _, _ in sb.PIN_LAYOUT}
 # The GIC as the unit showed it once, in the read phase of the dry run (OBSERVED, one unit, from a photograph; docs/SP11-STICK-MONITOR.md section 8).
-OBSERVED_GIC = ['CTLR 0x10', 'TYPER 0xF87F051E', 'IIDR 0x4010438', 'ISENABLER0 0x4E800001', 'PRIO 0xA0', 'CFG1 0', 'WAKER 0', 'IGROUPR0 0']
+OBSERVED_GIC = ['CTLR 0x10', 'TYPER 0xF87F051E', 'IIDR 0x401043B', 'ISENABLER0 0x4E800001', 'PRIO 0xA0', 'CFG1 0', 'WAKER 0', 'IGROUPR0 0']
 WRAPPER_WRITES = {'GICD_CTLR', 'GICR_IGROUPR0', 'GICR_IPRIORITYR', 'GICR_ICFGR1', 'GICR_ISENABLER0', 'GICR_ICENABLER0', 'GICR_ICPENDR0', 'ICC_PMR_EL1',
                   'ICC_BPR1_EL1', 'ICC_IGRPEN1_EL1'}             # classes G, R and C and their put-back: nothing else, whoever the register belongs to
 BAD_STATUS = 0xFFFFFFFFFFFFFFA6                                   # a prepare failure: negative (the step is in the word; probes/xnuboot.S OUT_STATUS)
@@ -508,7 +508,13 @@ class Contract(Base):
         if h['refusal']:
             self.assertEqual((h['refusal'], h['refusal_detail']), (E.GIC_NOT_READY, G.OUT.PPI_OWNED), 'the strict precondition names itself')
         else:
-            self.assertFalse([e for e in r.g.log if e[0] == 'W' and e[1] == 'GICR_ISENABLER0'], 'PPI 26 was enabled already: ISENABLER0 is not written')
+            # WI 8 pass 5: PPI 26 was enabled already, so its bit is never written; the firmware's other enabled bits are quarantined by one ICENABLER0
+            # write before any other store and enabled again by one ISENABLER0 write, the last write of the run (docs/SP11-STICK-GIC.md section 4).
+            writes = [(e[1], e[2]) for e in r.g.log if e[0] == 'W']
+            enables = [w for w in writes if w[0] in ('GICR_ISENABLER0', 'GICR_ICENABLER0')]
+            self.assertEqual(enables, [('GICR_ICENABLER0', 0x4A800001), ('GICR_ISENABLER0', 0x4A800001)])
+            self.assertEqual((writes[0], writes[-1]), (enables[0], enables[1]), 'the quarantine is the first GIC write and its restore the last')
+            self.assertEqual(r.g.state['isenabler0'][0], r.g.state['isenabler0'][1], 'ISENABLER0 is back as found')
 
 
 class GicRecord(Base):

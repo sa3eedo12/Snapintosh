@@ -16,6 +16,11 @@
  *   CFG1 v | SRE v | ICCCTLR v | PMR v | BPR1 v | IGRPEN1 v | RPR v | CTL v | CVAL v | DAIF v | SPSEL v | VBAR v | CURRENTEL_LATE v |
  *   NO_FIRE | NO_DELIVER | INTID v | SYNC_AT ticks | STORM | STORM_ONCE | STORM_AFTER ticks | FINAL_STUCK | DROP_AFTER n | HPPIR v | NO_ISTATUS | DELAY ticks | NS_PPI 0|1 |
  *   HIDE_PEND (the non-secure view of ISPENDR0 never shows the timer's level, as for an interrupt that is Secure: INFERRED) |
+ *   GICD_WMASK v (the bits of GICD_CTLR a non-secure write changes) | FPRIO intid v (IPRIORITYR byte of another PPI) | FGROUP 0|1 (another interrupt is group 1 in
+ *   the non-secure view) | SPI_EN n v | SPI_PEND n v (GICD_ISENABLER[n], GICD_ISPENDR[n], n = 1 to 31) | SPI_PRIO v | CNTV_CTL v | CNTV_CVAL v | CNTP_CTL v | CNTP_CVAL v |
+ * Another interrupt is asserting when its bit is set in ISPENDR0 (this CPU's PPIs: a level source that nothing the stage writes can clear) or in an SPI_PEND
+ * register; it is signalled when it is also enabled, in group 1, below PMR and the running priority and the CPU interface is on, and the lowest priority value
+ * wins (ties to the lowest INTID), exactly as for PPI 26. |
  *   IGNORE reg | NOHOLD reg [windows] | RWP gicd|gicr | MAXITER n | CNTHCTL v | HCR_INIT v | VBAR1 v | SCTLR1 v | HCR_IGNORE_IMO |
  *   EL1_LOST | EL1_VECTOR n | EL1_SYNC esr | EL1_INTID v | SPSR_KEPT v | MUTATE offset hexbytes (between two RUNs: bytes of the record)
  * At END the harness prints GICREC (the record in REPORT.DAT), GICLOG (every write, every system register read and every window event, with
@@ -50,13 +55,14 @@ enum gic_reg {
     GR_GICD_CTLR, GR_GICD_TYPER, GR_GICD_IIDR, GR_GICR_CTLR, GR_GICR_TYPER, GR_GICR_WAKER, GR_IGROUPR0, GR_ISENABLER0, GR_ICENABLER0, GR_ISPENDR0,
     GR_ICPENDR0, GR_ISACTIVER0, GR_IPRIORITYR, GR_ICFGR1, GR_ICC_SRE, GR_ICC_CTLR, GR_ICC_PMR, GR_ICC_BPR1, GR_ICC_IGRPEN1, GR_ICC_RPR,
     GR_ICC_HPPIR, GR_ICC_IAR, GR_ICC_EOIR, GR_ICC_DIR, GR_CNTHP_CTL, GR_CNTHP_CVAL, GR_VBAR, GR_DAIF, GR_SPSEL, GR_HCR, GR_VBAR1, GR_SCTLR1,
-    GR_CNTHCTL, GR_ESR1, GR_ELR1, GR_FAR1, GR_COUNT
+    GR_CNTHCTL, GR_ESR1, GR_ELR1, GR_FAR1, GR_CNTV_CTL, GR_CNTV_CVAL, GR_CNTP_CTL, GR_CNTP_CVAL, GR_GICD_ISENABLER, GR_GICD_ISPENDR, GR_COUNT
 };
 static const char *const gr_names[GR_COUNT] = {
     "GICD_CTLR", "GICD_TYPER", "GICD_IIDR", "GICR_CTLR", "GICR_TYPER", "GICR_WAKER", "GICR_IGROUPR0", "GICR_ISENABLER0", "GICR_ICENABLER0",
     "GICR_ISPENDR0", "GICR_ICPENDR0", "GICR_ISACTIVER0", "GICR_IPRIORITYR", "GICR_ICFGR1", "ICC_SRE_EL2", "ICC_CTLR_EL1", "ICC_PMR_EL1",
     "ICC_BPR1_EL1", "ICC_IGRPEN1_EL1", "ICC_RPR_EL1", "ICC_HPPIR1_EL1", "ICC_IAR1_EL1", "ICC_EOIR1_EL1", "ICC_DIR_EL1", "CNTHP_CTL_EL2",
-    "CNTHP_CVAL_EL2", "VBAR_EL2", "DAIF", "SPSEL", "HCR_EL2", "VBAR_EL1", "SCTLR_EL1", "CNTHCTL_EL2", "ESR_EL1", "ELR_EL1", "FAR_EL1"};
+    "CNTHP_CVAL_EL2", "VBAR_EL2", "DAIF", "SPSEL", "HCR_EL2", "VBAR_EL1", "SCTLR_EL1", "CNTHCTL_EL2", "ESR_EL1", "ELR_EL1", "FAR_EL1",
+    "CNTV_CTL_EL0", "CNTV_CVAL_EL0", "CNTP_CTL_EL0", "CNTP_CVAL_EL0", "GICD_ISENABLER", "GICD_ISPENDR"};
 enum { EV_W = 'W', EV_R = 'R', EV_E = 'E', EV_V = 'V' };
 enum { E_WINDOW_OPEN, E_WINDOW_CLOSE, E_IRQ, E_SYNC, E_ACK, E_EXC_OPEN, E_EXC_CLOSE, E_IRQ_EL1, E_SYNC_EL1, E_VISIBLE, E_NAMES };
 static const char *const event_names[E_NAMES] = {"WINDOW_OPEN", "WINDOW_CLOSE", "IRQ_TAKEN", "SYNC_TAKEN", "ACK", "EXC_OPEN", "EXC_CLOSE", "IRQ_EL1",
@@ -80,6 +86,9 @@ static struct {
     uint64_t aff[GIC_MAX_FRAMES];
     uint64_t sre, icc_ctlr, pmr0, bpr1_0, igrpen1_0, rpr0, ctl0, cval0, daif0, spsel, vbar0, currentel_late;
     uint64_t cnthctl0, vbar1_0, sctlr1_0, hcr0, spsr_kept;
+    uint64_t cntv_ctl, cntv_cval, cntp_ctl, cntp_cval;
+    uint32_t gicd_wmask, spi_en[32], spi_pend[32], spi_prio, fprio[32];
+    int fgroup_ok;
     int have_currentel_late, no_fire, no_deliver, storm, storm_once, ns_ppi, have_intid, have_sync, final_stuck, have_storm_after, hcr_ignore_imo;
     int el1_lost, have_el1_vector, have_el1_sync, have_el1_intid, have_drop, have_hppir, no_istatus, hide_pend;
     unsigned drop_after;
@@ -92,6 +101,7 @@ static struct {
     uint32_t gicd_ctlr, waker, igroupr0, isenabler0, icfgr1, prio, rwp_left_gicd, rwp_left_gicr;
     uint64_t pmr, bpr1, igrpen1, rpr, ctl, cval, vbar, daif, hcr, vbar1, sctlr1;
     int active, ack_other, eoi_seen, ctl_off_after_eoi, i_masked, phase, hang, deliveries, currentel_reads, hcr_init, in_el1, final_off, visible_ok;
+    unsigned f_active;                  /* 0, or the INTID plus one of another interrupt that has been acknowledged and not yet deactivated */
     unsigned acks, excursions;
     uint64_t t_arm, fake_vectors, fake_el1_vectors, first_eoi_tick, visible_start, visible_bytes, resume_spsr_seen, hcr_first;
     /* the logs */
@@ -119,6 +129,10 @@ static void gic_reset(void)
     G.spsel = 1;
     G.vbar0 = 0xCE879000;
     G.ns_ppi = 1;
+    G.gicd_wmask = SG_GICD_CTLR_G1 | SG_GICD_CTLR_G1A | SG_GICD_CTLR_ARE | SG_GICD_CTLR_E1NWF;
+    G.fgroup_ok = 1;
+    G.spi_prio = 0xA0;
+    for (i = 0; i < 32; i++) G.fprio[i] = 0xA0;
     G.maxiter = 5000000;
     G.fake_vectors = 0xFEED0800;
     G.fake_el1_vectors = 0xCE0E0800;    /* inside the model's stack region: mapped and identity-mapped, 2 KiB aligned, room for the table and the stub */
@@ -211,13 +225,65 @@ static int timer_asserted(void)
 }
 static unsigned prio_bit(void) { return 1u << SNAP_TIMER_INTID; }
 static int group_ok(void) { return (G.gicd_ctlr & SG_GICD_CTLR_DS) ? (G.igroupr0 & prio_bit()) != 0 : G.ns_ppi; }
-/* Whether PPI 26 is the highest priority pending interrupt that the CPU interface would signal, mask and running priority aside. */
+/* PPI 26 itself: asserting, enabled, in group 1 and not active, with the distributor and the CPU interface on. */
 static int eligible(void)
 {
     return timer_asserted() && !G.active && (G.isenabler0 & prio_bit()) && group_ok() && (G.gicd_ctlr & SG_GICD_CTLR_ARE) &&
            (G.gicd_ctlr & SG_GICD_CTLR_G1A) && (G.igrpen1 & 1) && !G.no_deliver && !(G.have_drop && G.acks >= G.drop_after);
 }
-static int signalled(void) { return eligible() && (G.prio & 0xFF) < (G.pmr & 0xFF) && (G.prio & 0xFF) < (G.rpr & 0xFF); }
+/* The other interrupts: the same switches. This CPU's PPIs assert while their bit is set in ISPENDR0 (a level source: nothing the stage writes
+ * clears it), the SPIs while it is set in SPI_PEND. */
+static int others_ready(void)
+{
+    return G.fgroup_ok && (G.gicd_ctlr & SG_GICD_CTLR_ARE) && (G.gicd_ctlr & SG_GICD_CTLR_G1A) && (G.igrpen1 & 1);
+}
+/* The interrupt the CPU interface would hand out next, mask aside: the lowest priority value, ties to the lowest INTID. 1023 and priority 0x100 when none. */
+static unsigned best_pending(unsigned *prio)
+{
+    unsigned id = 1023, best = 0x100, i, n;
+    if (eligible()) {
+        id = SNAP_TIMER_INTID;
+        best = G.prio & 0xFF;
+    }
+    if (others_ready()) {
+        for (i = 0; i < 32; i++) {
+            if (i == SNAP_TIMER_INTID || !(G.ispendr0_0 >> i & 1) || !(G.isenabler0 >> i & 1) || G.f_active == i + 1) continue;
+            if (G.fprio[i] < best || (G.fprio[i] == best && i < id)) {
+                id = i;
+                best = G.fprio[i];
+            }
+        }
+        for (n = 1; n < 32; n++) {
+            uint32_t both = G.spi_pend[n] & G.spi_en[n];
+            for (i = 0; i < 32 && both; i++) {
+                unsigned intid = 32 * n + i;
+                if (!(both >> i & 1) || G.f_active == intid + 1) continue;
+                if (G.spi_prio < best || (G.spi_prio == best && intid < id)) {
+                    id = intid;
+                    best = G.spi_prio;
+                }
+            }
+        }
+    }
+    *prio = best;
+    return id;
+}
+static int signalled(void)
+{
+    unsigned prio, id = best_pending(&prio);
+    return id != 1023 && prio < (G.pmr & 0xFF) && prio < (G.rpr & 0xFF);
+}
+static uint64_t hppir1_value(void)
+{
+    unsigned prio, id = best_pending(&prio);
+    if (id == 1023 || prio >= (G.pmr & 0xFF)) return 1023;
+    return id == SNAP_TIMER_INTID && G.have_hppir ? G.hppir_override : id;
+}
+static void deactivate(uint64_t intid)
+{
+    if (G.f_active && intid == (uint64_t)G.f_active - 1) G.f_active = 0;
+    else G.active = 0;
+}
 
 /* ---- the memory-mapped registers ---- */
 static int mine(unsigned frame) { return G.aff[frame] == 0; }
@@ -255,6 +321,16 @@ static uint64_t mmio_read(uint64_t pa, unsigned size)
         }
         if (off == SG_GICD_TYPER) return G.gicd_typer;
         if (off == SG_GICD_IIDR) return G.gicd_iidr;
+        if ((off >= SG_GICD_ISENABLER && off < SG_GICD_ISENABLER + 0x80) || (off >= SG_GICD_ISPENDR && off < SG_GICD_ISPENDR + 0x80)) {
+            int pend = off >= SG_GICD_ISPENDR;
+            unsigned n = (unsigned)((off - (pend ? SG_GICD_ISPENDR : SG_GICD_ISENABLER)) / 4);
+            if ((off & 3) || !n) {              /* register 0 is banked in each redistributor under affinity routing: the stage must not read the distributor's */
+                violation(pend ? "GICD_ISPENDR[0] or an unaligned read" : "GICD_ISENABLER[0] or an unaligned read", pa);
+                return 0;
+            }
+            log_ev(EV_R, pend ? GR_GICD_ISPENDR : GR_GICD_ISENABLER, n);
+            return pend ? G.spi_pend[n] : G.spi_en[n];
+        }
         violation("distributor read", pa);
         return 0;
     }
@@ -274,9 +350,9 @@ static uint64_t mmio_read(uint64_t pa, unsigned size)
         if (off == SG_IGROUPR0) return G.igroupr0;
         if (off == SG_ISENABLER0) return G.isenabler0;
         if (off == SG_ISPENDR0) return ((timer_asserted() && !G.hide_pend) ? prio_bit() : 0) | G.ispendr0_0;
-        if (off == SG_ISACTIVER0) return (G.active ? prio_bit() : 0) | G.isactiver0_0;
+        if (off == SG_ISACTIVER0) return (G.active ? prio_bit() : 0) | (G.f_active && G.f_active <= 32 ? 1u << (G.f_active - 1) : 0) | G.isactiver0_0;
         if (off == SG_ICFGR1) return G.icfgr1;
-        if (off >= SG_IPRIORITYR && off < SG_IPRIORITYR + 32) return off - SG_IPRIORITYR == SNAP_TIMER_INTID ? G.prio : 0;
+        if (off >= SG_IPRIORITYR && off < SG_IPRIORITYR + 32) return off - SG_IPRIORITYR == SNAP_TIMER_INTID ? G.prio : G.fprio[off - SG_IPRIORITYR];
     }
     violation("read of an unmodelled redistributor register", pa);
     return 0;
@@ -301,8 +377,8 @@ static void mmio_write(uint64_t pa, uint64_t value, unsigned size)
         }
         log_ev(EV_W, GR_GICD_CTLR, value);
         if (!write_ignored(GR_GICD_CTLR)) {
-            /* DS and RWP are read only; the enables, ARE and E1NWF are the writable bits of either view. */
-            G.gicd_ctlr = (G.gicd_ctlr & (SG_GICD_CTLR_DS)) | ((uint32_t)value & (SG_GICD_CTLR_G1 | SG_GICD_CTLR_G1A | SG_GICD_CTLR_ARE | SG_GICD_CTLR_E1NWF));
+            /* DS and RWP are read only; the writable bits are G.gicd_wmask (the enables, ARE and E1NWF of either view unless a scenario says otherwise). */
+            G.gicd_ctlr = (G.gicd_ctlr & (SG_GICD_CTLR_DS)) | ((uint32_t)value & G.gicd_wmask);
             G.rwp_left_gicd = G.rwp_gicd;
         }
         return;
@@ -350,7 +426,7 @@ SYSREAD(sp11hw_read_icc_pmr_el1, GR_ICC_PMR, G.pmr)
 SYSREAD(sp11hw_read_icc_bpr1_el1, GR_ICC_BPR1, G.bpr1)
 SYSREAD(sp11hw_read_icc_igrpen1_el1, GR_ICC_IGRPEN1, G.igrpen1)
 SYSREAD(sp11hw_read_icc_rpr_el1, GR_ICC_RPR, G.rpr)
-SYSREAD(sp11hw_read_icc_hppir1_el1, GR_ICC_HPPIR, eligible() && (G.prio & 0xFF) < (G.pmr & 0xFF) ? (G.have_hppir ? G.hppir_override : SNAP_TIMER_INTID) : 1023)
+SYSREAD(sp11hw_read_icc_hppir1_el1, GR_ICC_HPPIR, hppir1_value())
 /* ISTATUS ignores IMASK; a timer that never fires (NO_FIRE) never sets it. */
 static uint64_t istatus(void) { return G.no_istatus ? 0u : ((G.ctl & 1) && !G.no_fire && W.tick >= G.cval) || stuck() ? 4u : 0u; }
 SYSREAD(sp11hw_read_cnthp_ctl_el2, GR_CNTHP_CTL, G.ctl | istatus())
@@ -361,19 +437,33 @@ SYSREAD(sp11hw_read_sctlr_el1, GR_SCTLR1, G.sctlr1)
 SYSREAD(sp11hw_read_esr_el1, GR_ESR1, 0x02000000)
 SYSREAD(sp11hw_read_elr_el1, GR_ELR1, 0xE1E00F00)
 SYSREAD(sp11hw_read_far_el1, GR_FAR1, 0xE1E0FA00)
+SYSREAD(sp11hw_read_cntv_ctl_el0, GR_CNTV_CTL, G.cntv_ctl)
+SYSREAD(sp11hw_read_cntv_cval_el0, GR_CNTV_CVAL, G.cntv_cval)
+SYSREAD(sp11hw_read_cntp_ctl_el0, GR_CNTP_CTL, G.cntp_ctl)
+SYSREAD(sp11hw_read_cntp_cval_el0, GR_CNTP_CVAL, G.cntp_cval)
 
 /* The acknowledge: the highest priority pending interrupt becomes active and the running priority is its priority. */
 uint64_t sp11hw_read_icc_iar1_el1(void)
 {
     uint64_t id = 1023;
+    unsigned best, prio;
     log_ev(EV_R, GR_ICC_IAR, 0);
     if (signalled()) {
-        id = G.in_el1 && G.have_el1_intid ? G.el1_intid : G.have_intid ? G.intid_override : SNAP_TIMER_INTID;
-        G.ack_other = id != SNAP_TIMER_INTID;
-        if (id < 1020) {                /* a spurious INTID acknowledges nothing: there is nothing to end */
-            G.active = 1;
-            G.rpr = G.prio;
+        best = best_pending(&prio);
+        if (best != SNAP_TIMER_INTID) {         /* another interrupt: tracked on its own, so that PPI 26's own state stays what the timer made it */
+            id = best;
+            G.ack_other = 1;
+            G.f_active = best + 1;
+            G.rpr = prio;
             G.acks++;
+        } else {
+            id = G.in_el1 && G.have_el1_intid ? G.el1_intid : G.have_intid ? G.intid_override : SNAP_TIMER_INTID;
+            G.ack_other = id != SNAP_TIMER_INTID;
+            if (id < 1020) {                /* a spurious INTID acknowledges nothing: there is nothing to end */
+                G.active = 1;
+                G.rpr = G.prio;
+                G.acks++;
+            }
         }
     }
     log_ev(EV_E, E_ACK, id);
@@ -402,8 +492,8 @@ void sp11hw_write_cnthp_ctl_el2(uint64_t value)
     G.ctl = value & 3;
 }
 /* The end of interrupt: the running priority drops, and with EOImode clear the interrupt is deactivated; with it set it waits for DIR. */
-SYSWRITE(sp11hw_write_icc_eoir1_el1, GR_ICC_EOIR, { G.rpr = 0xFF; if (!G.eoi_seen) G.first_eoi_tick = W.tick; G.eoi_seen = 1; if (!(G.icc_ctlr & SG_ICC_CTLR_EOIMODE)) G.active = 0; })
-SYSWRITE(sp11hw_write_icc_dir_el1, GR_ICC_DIR, { G.active = 0; (void)0; })
+SYSWRITE(sp11hw_write_icc_eoir1_el1, GR_ICC_EOIR, { G.rpr = 0xFF; if (!G.eoi_seen) G.first_eoi_tick = W.tick; G.eoi_seen = 1; if (!(G.icc_ctlr & SG_ICC_CTLR_EOIMODE)) deactivate(value); })
+SYSWRITE(sp11hw_write_icc_dir_el1, GR_ICC_DIR, { deactivate(value); })
 
 void sp11hw_irq_mask(void)
 {
@@ -617,6 +707,16 @@ static void gic_command(char *line)
         else if (!strcmp(k, "HIDE_PEND")) G.hide_pend = 1;
         else if (!strcmp(k, "DELAY")) G.delay = v;
         else if (!strcmp(k, "NS_PPI")) G.ns_ppi = (int)v;
+        else if (!strcmp(k, "GICD_WMASK")) G.gicd_wmask = (uint32_t)v;
+        else if (!strcmp(k, "FPRIO")) G.fprio[num(tok[2]) % 32] = (uint32_t)num(tok[3]);
+        else if (!strcmp(k, "FGROUP")) G.fgroup_ok = (int)v;
+        else if (!strcmp(k, "SPI_EN")) G.spi_en[num(tok[2]) % 32] = (uint32_t)num(tok[3]);
+        else if (!strcmp(k, "SPI_PEND")) G.spi_pend[num(tok[2]) % 32] = (uint32_t)num(tok[3]);
+        else if (!strcmp(k, "SPI_PRIO")) G.spi_prio = (uint32_t)v;
+        else if (!strcmp(k, "CNTV_CTL")) G.cntv_ctl = v;
+        else if (!strcmp(k, "CNTV_CVAL")) G.cntv_cval = v;
+        else if (!strcmp(k, "CNTP_CTL")) G.cntp_ctl = v;
+        else if (!strcmp(k, "CNTP_CVAL")) G.cntp_cval = v;
         else if (!strcmp(k, "MAXITER")) G.maxiter = v;
         else if (!strcmp(k, "CNTHCTL")) G.cnthctl0 = v;
         else if (!strcmp(k, "HCR_INIT")) G.hcr0 = v;
@@ -663,13 +763,13 @@ static void gic_dump(void)
     }
     for (i = 0; i < 256 && i < G.line_seen; i++) printf("GICLINE %u %llu\n", i, (unsigned long long)G.line_tick[i]);
     printf("GICSTATE gicd_ctlr=%x/%x waker=%x/%x igroupr0=%x/%x isenabler0=%x/%x icfgr1=%x/%x prio=%x/%x pmr=%llx/%llx bpr1=%llx/%llx "
-           "igrpen1=%llx/%llx rpr=%llx/%llx ctl=%llx/%llx cval=%llx/%llx vbar=%llx/%llx masked=%d/%d active=%d eoi=%d hang=%d deliveries=%d phase=%d "
+           "igrpen1=%llx/%llx rpr=%llx/%llx ctl=%llx/%llx cval=%llx/%llx vbar=%llx/%llx masked=%d/%d active=%d fact=%u eoi=%d hang=%d deliveries=%d phase=%d "
            "hcr=%llx/%llx vbar1=%llx/%llx sctlr1=%llx/%llx acks=%u excursions=%u resume=%llx\n",
            G.gicd_ctlr0, G.gicd_ctlr, G.waker0, G.waker, G.igroupr0_0, G.igroupr0, G.isenabler0_0, G.isenabler0, G.icfgr1_0, G.icfgr1, G.prio0,
            G.prio, (unsigned long long)G.pmr0, (unsigned long long)G.pmr, (unsigned long long)G.bpr1_0, (unsigned long long)G.bpr1,
            (unsigned long long)G.igrpen1_0, (unsigned long long)G.igrpen1, (unsigned long long)G.rpr0, (unsigned long long)G.rpr,
            (unsigned long long)(G.ctl0 & 3), (unsigned long long)G.ctl, (unsigned long long)G.cval0, (unsigned long long)G.cval,
-           (unsigned long long)G.vbar0, (unsigned long long)G.vbar, (G.daif0 & 0x80) != 0, G.i_masked, G.active, G.eoi_seen, G.hang, G.deliveries,
+           (unsigned long long)G.vbar0, (unsigned long long)G.vbar, (G.daif0 & 0x80) != 0, G.i_masked, G.active, G.f_active, G.eoi_seen, G.hang, G.deliveries,
            G.phase, (unsigned long long)G.hcr_first, (unsigned long long)G.hcr, (unsigned long long)G.vbar1_0, (unsigned long long)G.vbar1,
            (unsigned long long)G.sctlr1_0, (unsigned long long)G.sctlr1, G.acks, G.excursions, (unsigned long long)G.resume_spsr_seen);
     for (i = 0; i < G.nviol && i < GIC_MAX_VIOL; i++) printf("GICVIOL %s\n", G.viol[i]);
