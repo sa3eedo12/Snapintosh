@@ -73,7 +73,7 @@ EL2 in ABI v1, which passes no RSDP.
 | 0x090 | 32 | `guest_file_sha256` | SHA-256 | whole GUEST.DAT, equal to the runner manifest's digest | EXPERIMENTAL | builder |
 | 0x0B0 | 32 | `guest_index_sha256` | SHA-256 | its chunk table (section 4) | EXPERIMENTAL | builder |
 | 0x0D0 | 8 | `boot_mpidr` | MPIDR_EL1 | 0x80000000, the boot CPU (`docs/SP11-STICK-LOG.md:885`) | OBSERVED (boots 4, 5, 7) | unit |
-| 0x0D8 | 4 | `cntfrq_hz` | Hz | 19,200,000 (`CNTFRQ_EL0` 0x124F800, `docs/SURFACE-PRO-11.md:1005`) | OBSERVED (boots 4, 5, 7, X2 T03) | unit |
+| 0x0D8 | 4 | `cntfrq_hz` | Hz | 19,200,000 (`CNTFRQ_EL0` 0x124F800, `docs/SURFACE-PRO-11.md:1007`) | OBSERVED (boots 4, 5, 7, X2 T03) | unit |
 | 0x0DC | 4 | `midr_count` | - | number of values in `midr` | EXPERIMENTAL | builder |
 | 0x0E0 | 16 | `midr` | MIDR_EL1 | 0x511F0011 (clusters 1 and 2) and 0x512F0011 (cluster 0), ascending (`docs/SP11-STICK-LOG.md:911`) | OBSERVED (boot 7, restart probe step 3) | unit |
 | 0x0F0 | 8 | `gicd_base` | PA | 0x17000000, MADT of the boot 6 dump (audit section 7, `docs/SP11-MONITOR-PORT.md:192`) | OBSERVED (boot 6 dump) | unit |
@@ -83,7 +83,7 @@ EL2 in ABI v1, which passes no RSDP.
 | 0x110 | 8 | `its_base` | PA | 0x17040000, zero when absent | OBSERVED (boot 6 dump) | unit |
 | 0x118 | 4 | `gicr_count` | - | 12 redistributor frames, all read in T05 | OBSERVED (boot 3, T05) | unit |
 | 0x11C | 4 | `timer_intid` | INTID | 26, the non-secure EL2 timer PPI of the GTDT; the monitor's `SNAP_TIMER_INTID` | OBSERVED (boot 6 dump) | unit |
-| 0x120 | 8 | `fb_base` | PA | 0xE4800000, the GOP framebuffer, inside a RESERVED descriptor (`docs/SURFACE-PRO-11.md:952`) | OBSERVED (B1 attempts 1 to 5, operator report) | unit |
+| 0x120 | 8 | `fb_base` | PA | 0xE4800000, the GOP framebuffer, inside a RESERVED descriptor (`docs/SURFACE-PRO-11.md:954`) | OBSERVED (B1 attempts 1 to 5, operator report) | unit |
 | 0x128 | 8 | `fb_bytes` | bytes | 0x1518000 = 2880 x 1920 x 4 | OBSERVED (B1 attempts 1 to 5, operator report) | unit |
 | 0x130 | 4 | `fb_width` | pixels | 2880 | OBSERVED (B1 attempts 1 to 5, operator report) | unit |
 | 0x134 | 4 | `fb_height` | pixels | 1920 | OBSERVED (B1 attempts 1 to 5, operator report) | unit |

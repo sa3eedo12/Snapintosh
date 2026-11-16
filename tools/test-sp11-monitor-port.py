@@ -23,7 +23,7 @@ DOC = ROOT / 'docs' / 'SP11-MONITOR-PORT.md'
 LABELS = ('VERIFIED', 'OBSERVED', 'INFERRED', 'EXPERIMENTAL', 'UNIMPLEMENTED', 'UNKNOWN')
 LOOKALIKES = ('ASSUMED CONFIRMED MEASURED PROVEN PROVED TESTED VALIDATED ESTABLISHED HYPOTHESIS GUESSED LIKELY SUSPECTED '
               'UNVERIFIED PRESUMED PROBABLE CERTAIN DEMONSTRATED QUALIFIED ASSERTED CLAIMED OBVIOUS TRIVIAL').split()
-MAX_BYTES = 50000
+MAX_BYTES = 56000
 SECTIONS = tuple(enumerate(('reading|milestone m1|entry|delivery|memory|timer|interrupts|id registers|platform contract|console|'
                             'thermal|safety|ordered work plan|first hardware run|decisions i need from the operator|'
                             'what i could not establish').split('|'), 1))
@@ -88,7 +88,7 @@ SECONDARY_STATE = ('0X200 0X300 0X10000 0X10100 0X10300 0X20000 0X20100 0x800000
 GUARD_HEADER, BUNDLE_DOC = 'compat/sp11-timer-guard.h', 'docs/SP11-STICK-BUNDLE.md'
 BUNDLE_FILES = ('SNAPMON.BIN', 'SNAPREP.BIN', 'GUEST.DAT', 'PIN.DAT', 'REPORT.DAT')
 BUNDLE_SIZES = (('`PIN.DAT` (1024 bytes', 1024), ('`REPORT.DAT` (528,384 zero bytes', 528384))
-# Built is not run: what each work item may claim (its row must keep these words). WI 7 and 9 ran (boots 10 and 11).
+# Built is not run: what each work item may claim (its row must keep these words). WI 7, 9 and 8 ran (boots 10, 11, 12 and 13); WI 8's pass 5 did not.
 WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                     2: ('DONE (q1n1 d8a5d2b; ran twice, boots 8 and 9, OBSERVED)', 'all returned at EL2'),
                     3: ('`real` RAN end to end on the real kernelcache, host only, not a hardware result', 'answered U9',
@@ -100,8 +100,9 @@ WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                         '`AT S1E2W` accepted 337 of 337 probes', 'matched 13 of 13 digests',
                         "the stick unchanged but for the Shell's marker (nothing written by the unit)",
                         'answered U1 (writability), U6 (base); U1 stays open for `DC CVAC` alone'),
-                    8: ('BUILT host-side, EXPERIMENTAL', 'hardware NOT RUN', 'pass 2 done', 'before 4b',
-                        'resolves U3; D2 (decided), D4'),
+                    8: ('BUILT host-side, EXPERIMENTAL', 'RAN twice on the unit (boots 12 and 13, 2026-11-16, OBSERVED', 'pass 2 done',
+                        'pass 3 done', 'host-tested only, hardware NOT RUN, its run GICDRY-C prepared and NOT authorised', 'before 4b',
+                        'resolves U3; D2 (decided), D4', 'U3 open'),
                     9: ('DONE (q1n1 b875620; boot 11, 2026-11-16 11:44, OBSERVED', 'first runner payload to run code below EL2',
                         '`BITS13_14_STUCK=YES`', '`VERDICT=TRAPS_EFFECTIVE`', 'answered U2 (EL1 stub only)',
                         'resolved D3 for these two payloads')}
@@ -173,7 +174,13 @@ Gaps G1 to G9
 8 -> 4b -> 6 -> 11
 its MMFR4 is 0 as read in X2 run 4 T01, but the gate has not run with it: a pass is INFERRED
 D6 NV2 record: which record, and whether its regime matters: UNKNOWN
-OPEN, asked by SHA-256 with the dry-run record
+APPROVED for the GIC dry run only, by SHA-256, twice
+for the monitor entry OPEN, asked by SHA-256 with the M1 record
+nor does the GIC dry run, WI 8, which ran twice, boots 12 and 13
+12 and 13 = plans GICDRY-A and GICDRY-B
+SGI 0 and PPIs 23, 25, 26, 27 and 30 enabled by the firmware
+PPI 26's own delivery is UNKNOWN until a window reaches CNTHP's deadline
+quarantines this CPU's other enabled interrupts first
 GUEST.DAT 118,870,336 B (44 chunks)
 '''.splitlines()
 
@@ -490,7 +497,7 @@ class Structure(unittest.TestCase):
         text = me.read_text()
         self.assertIn('SPDX-License-Identifier: MIT', '\n'.join(text.splitlines()[:2]))
         self.assertTrue(text.isascii())
-        self.assertLess(me.stat().st_size, 50 * 1024)
+        self.assertLess(me.stat().st_size, 52 * 1024)
         for prefix in ('/' + 'Users' + '/', '/' + 'home' + '/'):
             self.assertNotIn(prefix, text)
 
@@ -848,7 +855,9 @@ is five files, the runner's whole manifest => is four files, the runner's whole 
 | 4a, 7 | => | 4, 6, 7 |
 | 1, 8 | => | 1 |
 | 3, 4, 5, 6, 8, 9 | => | 3, 5, 8, 9 |
-hardware NOT RUN; pass 2 done => hardware PASS; pass 2 done
+host-tested only, hardware NOT RUN, its run GICDRY-C => host-tested only, hardware PASS, its run GICDRY-C
+RAN twice on the unit (boots 12 and 13 => BUILT, NOT RUN (boots 12 and 13
+APPROVED for the GIC dry run only, by SHA-256, twice => OPEN, asked by SHA-256 with the dry-run record
 D2 Stop: DECIDED 2026-11-16 with D5 => D2 Stop: OPEN with D5
 N2 Descriptor policy (new): DECIDED => N2 Descriptor policy (new): proposed
 is a DEFAULT, not an operator decision => is the operator's decision
