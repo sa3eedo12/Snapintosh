@@ -40,6 +40,8 @@ gate off; `tools/monitor_baseline.py` is the byte check.
 | `tools/test-sp11-stick-wrapper-build.py`, `tools/test-sp11-stick-wrapper-qemu.py` | the build, the binaries, the gate, this note; QEMU end to end (sections 9 and 10) |
 | `tools/sp11_stick_wrapper_testlib.py`, `tools/sp11_stick_wrapper_checks.py` | shared test support: the fixtures and the harness driver; the module fixtures and the checks a run is held to |
 
+The opt-in GIC and stop variant (work item 8) is described in [SP11-STICK-GIC.md](SP11-STICK-GIC.md).
+
 ## 2. Build
 
 ```

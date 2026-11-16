@@ -76,7 +76,7 @@ EL2 in ABI v1, which passes no RSDP.
 | 0x0D8 | 4 | `cntfrq_hz` | Hz | 19,200,000 (`CNTFRQ_EL0` 0x124F800, `docs/SURFACE-PRO-11.md:1005`) | OBSERVED (boots 4, 5, 7, X2 T03) | unit |
 | 0x0DC | 4 | `midr_count` | - | number of values in `midr` | EXPERIMENTAL | builder |
 | 0x0E0 | 16 | `midr` | MIDR_EL1 | 0x511F0011 (clusters 1 and 2) and 0x512F0011 (cluster 0), ascending (`docs/SP11-STICK-LOG.md:911`) | OBSERVED (boot 7, restart probe step 3) | unit |
-| 0x0F0 | 8 | `gicd_base` | PA | 0x17000000, MADT of the boot 6 dump (audit section 7, `docs/SP11-MONITOR-PORT.md:211`) | OBSERVED (boot 6 dump) | unit |
+| 0x0F0 | 8 | `gicd_base` | PA | 0x17000000, MADT of the boot 6 dump (audit section 7, `docs/SP11-MONITOR-PORT.md:192`) | OBSERVED (boot 6 dump) | unit |
 | 0x0F8 | 8 | `gicr_first` | PA | 0x17080000 | OBSERVED (boot 6 dump) | unit |
 | 0x100 | 8 | `gicr_limit` | PA | 0x17380000 = first + 12 x stride; the monitor's `SNAP_GICR_LIMIT` | OBSERVED (boot 6 dump) | unit |
 | 0x108 | 8 | `gicr_stride` | bytes | 0x40000 | OBSERVED (boot 6 dump) | unit |
@@ -379,7 +379,7 @@ SNAPREP reads REPORT.DAT in the order REPORT_SIZE (the length), REPORT_MAGIC, RE
 | 75 | `FILE_DIGEST` | BW- | SHA-256 of the file is not `guest_file_sha256` |
 | 80 | `PLACE_UNREADABLE` | -W- | a guarded read of the placement's first or last word aborted (`ops.load32` error 6; U1) |
 | 81 | `COPY_VERIFY` | -W- | a chunk read back from its destination differs from its source |
-| 82 | `GIC_NOT_READY` | -W- | a GIC register did not read back as written (D2, D4) |
+| 82 | `GIC_NOT_READY` | -W- | any refusal or failure of the GIC and stop stage; `refusal_detail` is its outcome (SP11-STICK-GIC.md 5, 10; D2, D4) |
 | 90 | `REPORT_SIZE` | --R | REPORT.DAT is not 528384 bytes or `head_size` is not 296 |
 | 91 | `REPORT_MAGIC` | --R | the magic is not `SNAPBRPT` |
 | 92 | `REPORT_VERSION` | --R | the version is not 1 |
