@@ -4,19 +4,15 @@
 
 Run from the repository root:  python3 -B tools/test-sp11-monitor-port.py
 
-  citation   `path:line` or `path:first-last` (repository root, or `q1n1:` for the sibling q1n1 checkout): the file exists and
-             the lines lie inside it. quotation `fragment`[path:line]: the fragment occurs on the cited lines (a table-cell
-             `\\|` reads as `|`). A bare `dir/file.ext` must exist.
-  labels     VERIFIED, OBSERVED, INFERRED, EXPERIMENTAL, UNIMPLEMENTED, UNKNOWN only, in every `Label` column; an OBSERVED row
-             names its source (a boot, the restart probe or control, an operator report, a test id, a dump); no look-alikes.
+  citation   `path:line[-last]` (repository root, `q1n1:` for the sibling q1n1 checkout): the file exists and the lines lie
+             inside it; `fragment`[path:line]: the fragment occurs on the cited lines; a bare `dir/file.ext` must exist.
+  labels     the six labels only in every `Label` column; an OBSERVED row names its source; no look-alikes.
   tables     every block of `|` lines has a header, an exact separator and rows of the header's width.
-  claims     statements that were wrong once must not come back (a restart time or UPTIME budget read off boot 7's `UPTIME
-             16 S`, a plan that "runs unattended", the runner flow "observed only to UPTIME 10 S", an adapter that "accepts"
-             the unit's tables, a bank of unknown writability, a dry run still "staged"); the restart numbers, the survey
-             (WI 10), the secondaries' EL2 entry state and the ID registers are pinned.
-  state      what the document says about the tree, held against its source: the timer guards' status values, the five bundle
-             files in the interface's order and sizes, the work items' statuses (built is not run; the dry run, boot 10, ran),
-             the dry run's figures, the dead low placement, the unit's MADT and MCFG and the adapter's behaviour on them.
+  claims     statements that were wrong once must not come back (REFUTED); the restart numbers, the survey (WI 10), the
+             secondaries' EL2 entry state and the ID registers are pinned.
+  state      the document's statements about the tree, held against its source: the timer guards' status values, the five
+             bundle files in the interface's order, the work items' statuses (built is not run; boots 10 and 11 ran), the dry
+             run's figures, the dead low placement, the unit's MADT and MCFG.
 
 Skipped, visibly (a skip is never a pass): the q1n1 citations without a checkout (set Q1N1_SP11_TREE to the one the document
 names, commit b875620) and the figures read from the git-ignored unit dumps under downloads/. The last class feeds deliberately
@@ -30,14 +26,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / 'docs' / 'SP11-MONITOR-PORT.md'
 LABELS = ('VERIFIED', 'OBSERVED', 'INFERRED', 'EXPERIMENTAL', 'UNIMPLEMENTED', 'UNKNOWN')
-LOOKALIKES = ('ASSUMED', 'CONFIRMED', 'MEASURED', 'PROVEN', 'PROVED', 'TESTED', 'VALIDATED', 'ESTABLISHED', 'HYPOTHESIS',
-              'GUESSED', 'LIKELY', 'SUSPECTED', 'UNVERIFIED', 'PRESUMED', 'PROBABLE', 'CERTAIN', 'DEMONSTRATED',
-              'QUALIFIED', 'ASSERTED', 'CLAIMED', 'OBVIOUS', 'TRIVIAL')
+LOOKALIKES = ('ASSUMED CONFIRMED MEASURED PROVEN PROVED TESTED VALIDATED ESTABLISHED HYPOTHESIS GUESSED LIKELY SUSPECTED '
+              'UNVERIFIED PRESUMED PROBABLE CERTAIN DEMONSTRATED QUALIFIED ASSERTED CLAIMED OBVIOUS TRIVIAL').split()
 MAX_BYTES = 45000
-SECTIONS = ((1, 'reading'), (2, 'milestone m1'), (3, 'entry'), (4, 'delivery'), (5, 'memory'), (6, 'timer'),
-            (7, 'interrupts'), (8, 'id registers'), (9, 'platform contract'), (10, 'console'), (11, 'thermal'),
-            (12, 'safety'), (13, 'ordered work plan'), (14, 'first hardware run'),
-            (15, 'decisions i need from the operator'), (16, 'what i could not establish'))
+SECTIONS = tuple(enumerate(('reading|milestone m1|entry|delivery|memory|timer|interrupts|id registers|platform contract|console|'
+                            'thermal|safety|ordered work plan|first hardware run|decisions i need from the operator|'
+                            'what i could not establish').split('|'), 1))
 LOCAL_ONLY = ('downloads/', 'build/')
 PATH = r'((?:q1n1:)?[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_.+-]+)+\.[A-Za-z0-9]+)'
 CITE = re.compile(r'`' + PATH + r':(\d+)(?:-(\d+))?`')
@@ -46,9 +40,9 @@ BARE = re.compile(r'`' + PATH + r'`(?!\[)')
 SOURCE_OF_OBSERVED = re.compile(r'\bboots? \d|restart (?:probe|control)|X1 probe|\bsteps? [123]\b|operator report|\bT0\d|\bX2\b'
                                 r'|\bdump\b|\bboot-\d', re.I)
 SEPARATOR = re.compile(r'^\|(\s*:?-{3,}:?\s*\|)+\s*$')
-# Statements that were wrong once: boot 7's `UPTIME 16 S` was the first heartbeat after the cpuon chain, not the restart time;
-# after a self-restart the firmware boots its own order, so no plan runs unattended; the restart control kept the read-only
-# runner flow alive to UPTIME 224 S and 268 S; the dry run (boot 10) ran, the bank is writable.
+# Statements that were wrong once: boot 7's `UPTIME 16 S` is no restart time; no plan runs unattended; the dry run (boot 10) and
+# the timer probes (boot 11) ran; the ECV traps work for an EL1 stub; X2 T02 ran EL1 code before `el1trap`; whether the traps
+# need SCR_EL3.ECVEn is UNKNOWN.
 REFUTED = (
     (r'(?:under|below|within|inside|at most|less than)\s+(?:that\s+|the\s+|about\s+)?(?:16|30)\s*s\b',
      'a 16 s or 30 s UPTIME budget has no basis'),
@@ -61,31 +55,38 @@ REFUTED = (
     (r'(?:unobserved|not observed|observed only|only observed|restarts?)\b[^.|]{0,60}\bUPTIME 10 S',
      'the restart control observed the read-only runner flow alive at UPTIME 224 S and 268 S, not only to UPTIME 10 S'),
     (r'U5 DFR0|values not in my sources|(?:DFR0|ISAR0)[^.|]{0,40}T01 page only|ISAR0 \(RNDR\), FGT and AMU values',
-     'DFR0, ISAR0, FGT, AMU, the OS lock, MDCR_EL2, ICC_SRE_EL2, DFR1 and ISAR2 are all read (X1 probe page, boots 8, 9)'),
+     'the ID registers, the OS lock, MDCR_EL2 and ICC_SRE_EL2 were all read (X1 probe page, boots 8, 9)'),
     (r'writability UNKNOWN|UNKNOWN until the dry run|STAGED on the stick|boot is NOT RUN|hazard reads?[^.|]{0,40}(?:still|to be run)',
      'the dry run ran (boot 10): the bank is writable and the hazard reads returned at EL2 (boots 8, 9)'),
     (r'from_hamoa`? (?:accepts|passes|is no longer blocked|is unblocked)',
      'the adapter still refuses the unit\'s tables at the ECAM rule (D11); only its GICD and redistributor rules are resolved'),
+    (r'traps (?:are|were) inert', 'boot 11: the ECV traps work for an EL1 stub'),
+    (r'(?-i:cnthctl|el1trap|T-HW[12])[^|]{0,80}NOT RUN', 'cnthctl and el1trap ran in boot 11'),
+    (r'U2 [^;.|]{0,30}UNKNOWN|O1 (?:is|was) (?:decided|approved)', 'U2 is answered for an EL1 stub; O1 is only supported'),
+    (r'first code (?:ever )?(?:run )?below EL2|no code (?:has |had |ever )*run below EL2|no code below EL2 (?:has|had) (?:ever )?run',
+     'X2 T02 ran an EL1 stub first: el1trap is only the first runner payload below EL2'),
+    (r'ECVEn`?\s+(?:is|was)\s+set|confirm\w*[^.|;]{0,25}ECVEn',
+     'ECVEn: whether the traps need it is UNKNOWN, the CNTPOFF_EL2 stall cause is INFERRED'),
 )
-# The unit's ID registers (X1 probe page, one photograph, passive reads at EL2) are pinned: the document's hex values and
-# decoded fields must agree, and the monitor's gates are held against them.
+# The unit's ID registers (X1 probe page, passive reads at EL2) are pinned: the document's hex values and decoded fields must
+# agree, and the monitor's gates are held against them.
 DFR0, ISAR0, ISAR1 = 0x000F01F010305719, 0x1221111110212120, 0x0110111101211052
 FIELDS = {'DebugVer': (DFR0, 0), 'BRPs': (DFR0, 12), 'WRPs': (DFR0, 20), 'RNDR': (ISAR0, 60), 'APA': (ISAR1, 4),
           'GPA': (ISAR1, 24)}
 STATED = ('DebugVer', 'BRPs', 'RNDR', 'APA')      # fields the document must state; the others are checked when it does
 COUNT_WORDS = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8}
-# Phrases the restart section and the survey must keep (matched on whitespace-collapsed text).
+# Phrases the restart section and the survey must keep.
 REQUIRED = ('first heartbeat after the chain', 'not at one fixed UPTIME', 'UPTIME 123 S', 'UPTIME 36 S',
             'UPTIME 224 S and 268 S', '2 of 3 cpuon boots', 'creationdate', 'Volume-Down + Power', 'no plan runs unattended',
             'M1 starts no secondary (x4 = 0)', 'INFERRED, strongly', 'correlation over five boots', 'about 11 %',
             'WI 10 is off the path')
-SECONDARY_STATE = ('0X200', '0X300', '0X10000', '0X10100', '0X10300', '0X20000', '0X20100', '0x80000000', '0X100',
-                   '0X10200', '0x1488000038', 'survived its own CPU_OFF and CPU_ON', '0X20200 and 0X20300 UNKNOWN',
-                   'must not assume VBAR_EL2 or HCR_EL2 are reset')
+SECONDARY_STATE = ('0X200 0X300 0X10000 0X10100 0X10300 0X20000 0X20100 0x80000000 0X100 0X10200 0x1488000038'.split() +
+                   ['survived its own CPU_OFF and CPU_ON', '0X20200 and 0X20300 UNKNOWN',
+                    'must not assume VBAR_EL2 or HCR_EL2 are reset'])
 GUARD_HEADER, BUNDLE_DOC = 'compat/sp11-timer-guard.h', 'docs/SP11-STICK-BUNDLE.md'
 BUNDLE_FILES = ('SNAPMON.BIN', 'SNAPREP.BIN', 'GUEST.DAT', 'PIN.DAT', 'REPORT.DAT')
 BUNDLE_SIZES = (('`PIN.DAT` (1024 bytes', 1024), ('`REPORT.DAT` (528,384 zero bytes', 528384))
-# Built is not run: what each work item may claim (its row must keep these words). WI 7 ran once (boot 10).
+# Built is not run: what each work item may claim (its row must keep these words). WI 7 and 9 ran (boots 10 and 11).
 WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                     2: ('DONE (q1n1 d8a5d2b; ran twice, boots 8 and 9, OBSERVED)', 'all returned at EL2'),
                     3: ('BUILT for the synthetic path', '`real` NOT RUN'),
@@ -95,17 +96,24 @@ WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                         '`AT S1E2W` accepted 337 of 337 probes', 'matched 13 of 13 digests',
                         "the stick unchanged but for the Shell's marker (nothing written by the unit)",
                         'answered U1 (writability), U6 (base); U1 stays open for `DC CVAC` alone'),
-                    9: ('BUILT, NOT RUN (q1n1 b875620)', 'first code below EL2')}
-# The tree as the document states it (matched on whitespace-collapsed text); the sources that decide them are read below.
+                    9: ('DONE (q1n1 b875620; boot 11, 2026-11-16 11:44, OBSERVED', 'first runner payload to run code below EL2',
+                        '`BITS13_14_STUCK=YES`', '`VERDICT=TRAPS_EFFECTIVE`', 'answered U2 (EL1 stub only)',
+                        'resolved D3 for these two payloads')}
+# The tree as the document states it (whitespace-collapsed); the sources that decide it are read below.
 STATE_REQUIRED = (
-    'is five files, the runner\'s whole manifest', 'bits that stick and trap nothing pass', 'a pass is UNKNOWN until T-HW2',
-    'Placement A, low, is dead: 446 MiB remain below the 144 MiB file (452 below `GUEST.DAT`)',
+    'is five files, the runner\'s whole manifest', 'bits that stick and trap nothing pass',
+    'T-HW2 saw them trap for an EL1 stub only', 'neither holds the monitor', '11 = plan timers',
+    'SUPPORTED by boot 11, not decided', 'U2 trap effect (answered for an EL1 stub, WI 9)', "after X2 T02's EL1 stub",
+    'ECVEn` clear, is INFERRED (X2 T03) and neither confirmed nor refuted by boot 11',
+    'whether they depend on `SCR_EL3.ECVEn`', 'by SHA-256 for one boot', '(not met: boot 11)',
+    'alive at UPTIME 49 S',
+    'Placement A, low, is dead: 446 MiB remain below the 144 MiB file',
     'passes on 0 of 6 local maps (REFUSED=PLACE_DECLARED', '384 MiB passes 6 of 6 and ran in the dry run',
-    'then showed the bank writable: `AT S1E2W` accepted all 337 probes of the 672 MiB placement',
+    'then showed the bank writable: `AT S1E2W` accepted all 337 probes',
     '13 of 13 data-chunk digests matched on re-read from DRAM after `DC CIVAC`',
     'UNKNOWN: whether `DC CVAC` alone reaches DRAM (CIVAC cleans first)', 'the 138 MiB `GUEST.DAT` at 0xC446E000 (boot 10)',
     'The wrapper took 2.92 s (19.2 MHz ticks)', 'DminLine 4; IDC 1, DIC 1 INFERRED', 'only the happy path ran',
-    "the wrapper's dry run, WI 7, ran once and called none", 'the bank, writable at EL2 (boot 10), is what is left',
+    'the bank, writable at EL2 (boot 10), is what is left',
     'U1 `DC CVAC` alone reaching DRAM (bank writability: answered, WI 7)', "U6 GUEST.DAT's base (answered, WI 7)",
     'showed no restart in its 67.5 s video', 'Time budget: the wrapper 2.92 s as measured', '4b -> 6 -> 8 -> 11',
     'APPROVED, for the dry run only', 'the dry run ran under it (WI 7)', "Not the M1 run's decision",
@@ -114,7 +122,7 @@ STATE_REQUIRED = (
     'RESOLVED in e3844fa', 'a1fb91c (redistributors from the per-CPU GICC bases',
     'then `check_hamoa_platform` refuses at `ecam-mismatch`', 'a descriptor holds at most four ECAM entries',
     'the adapter demands set equality',
-    'the MCFG lists eight allocations, a descriptor holds four, the adapter demands equality', 'an eight-entry descriptor is refused')
+    'the MCFG lists eight allocations, a descriptor holds four', 'an eight-entry descriptor is refused')
 
 
 def q1n1_tree():
@@ -354,9 +362,8 @@ def check_claims(text):
     if not re.search(r'before SMP work.*M1 does not need.*operator in the loop.*DONE.*psci-only.*UPTIME 224 S and 268 S'
                      r'.*\(a\).*cpuon page until it restarts.*\(b\).*ONE core only.*\(c\).*cores running.*2 of 3',
                      survey, re.S):
-        problems.append('work item 10 must say: before SMP work only, operator in the loop, the psci-only control DONE at UPTIME '
-                        '224 S and 268 S, left in order (a) film a cpuon page until it restarts, (b) one core only, (c) cores '
-                        'left running; cpuon at 2 of 3')
+        problems.append('work item 10 must say: before SMP work only, operator in the loop, psci-only control DONE (UPTIME 224 S '
+                        'and 268 S), left (a) film cpuon until it restarts, (b) one core, (c) cores left running; cpuon 2 of 3')
     if re.search(r'\b10\b', rows.get(11, {}).get('Depends', '')):
         problems.append('the M1 run (WI 11) must not wait for the restart survey (WI 10): M1 starts no secondary')
     secondaries = squash(section(text, 7))
@@ -410,7 +417,7 @@ def check_port_state(text):
     if rows.get(11, {}).get('Depends') != '3, 5, 8, 9':
         problems.append('the M1 run (WI 11) depends on 3 (the real path), 5, 8 and 9')
     if rows.get(8, {}).get('Depends') != '4, 6, 7':
-        problems.append('WI 8 (GIC and stop dry run) depends on the monitor entry (4), its record (6) and the dry run (7)')
+        problems.append('WI 8 (GIC and stop dry run) depends on 4 (monitor entry), 6 (record) and 7 (dry run)')
     if 'D11' not in rows.get(3, {}).get('UNKNOWN / decision', '') or '- D11 The ECAM rule' not in text.split('## 15.')[-1]:
         problems.append('WI 3 is gated by D11 and section 15 keeps it: the ECAM rule')
     return problems
@@ -525,8 +532,8 @@ class Arithmetic(unittest.TestCase):
             self.assertIn(needle, TEXT)
 
     def test_the_low_placement_is_dead_and_the_dry_run_figures_agree(self):
-        """The runner's files sit at the top of the 590 MiB low extent (boots 8 to 10), so a 288 MiB guest (576 MiB with reserve
-        and work area) cannot fit below them; the dry run's figures (boot 10) agree with each other."""
+        """A 288 MiB guest (576 MiB with reserve and work area) cannot fit below the runner's files at the top of the 590 MiB
+        low extent (boots 8 to 10); the dry run's figures (boot 10) agree."""
         reserve = lambda guest: max(0x3000000, (((guest << 20) + 0xfffffff) // 0x10000000 + 1) * 0x1000000) >> 20
         low, end, file_at, guest_at, guest_size = 0xA8000000, 0xCCE65000, 0xC3E65000, 0xC446E000, 144665408
         self.assertEqual(file_at + (144 << 20), end)
@@ -590,8 +597,8 @@ class Arithmetic(unittest.TestCase):
         return sorted(rows, key=lambda row: row[1])
 
     def test_the_acpi_tables_of_the_local_dumps(self):
-        """Every local dump: twelve 80-byte GICC entries (GICR 0x17080000 + n x 0x40000), a GICD one byte over ACPI's 24 (extra
-        byte zero) at 0x17000000, the ITS right after it, no GICR-range structure, GTDT GSIV 26, eight MCFG allocations."""
+        """Every local dump: twelve 80-byte GICC entries (GICR 0x17080000 + n x 0x40000), a 25-byte GICD (extra byte zero) at
+        0x17000000, the ITS right after it, no GICR-range structure, GTDT GSIV 26, eight MCFG allocations."""
         import struct
         dumps = self.acpi_dumps()
         if not dumps:
@@ -648,7 +655,7 @@ class Arithmetic(unittest.TestCase):
         self.assertEqual((field(DFR0, 0), field(DFR0, 12), field(DFR0, 20), field(DFR0, 36)), (9, 5, 3, 15))
         self.assertEqual(field(DFR0, 12) + 1, 6)                                   # BRPs 5: six breakpoints
         self.assertEqual((field(ISAR0, 60), field(ISAR1, 4), field(ISAR1, 24)), (1, 5, 1))   # RNDR, APA, GPA
-        # The gates the document says should pass, read from the sources: a changed expression must be re-examined.
+        # The gates the document says should pass: a changed expression must be re-examined.
         gate = 'if(version<6 || version>11 || ((dfr0>>12)&15)<5)return 0;'
         self.assertIn(gate, self.source('compat/native-writer-debug.h'))
         self.assertFalse((DFR0 & 15) < 6 or (DFR0 & 15) > 11 or ((DFR0 >> 12) & 15) < 5)
@@ -667,7 +674,7 @@ class Arithmetic(unittest.TestCase):
             self.assertIn(needle, flat)
 
     def test_the_restart_timing_arithmetic(self):
-        """Restart probe facts (the coordinator's fact file; marker times are local, FAT resolution 2 s) behind section 10."""
+        """Restart probe facts (marker times are local, FAT resolution 2 s) behind section 10."""
         from datetime import datetime
         clock = lambda text: datetime.strptime(text, '%H:%M:%S')
         gap = (clock('21:42:50') - clock('21:41:20')).seconds             # DONE3 minus DONE2
@@ -682,9 +689,8 @@ class Arithmetic(unittest.TestCase):
             self.assertIn(needle, flat)
 
     def test_the_restart_control_numbers(self):
-        """Restart control (2026-11-16): the read-only chain was alive at UPTIME 224 S and 268 S in two boots, cpuon was followed
-        by a restart in 2 of 3; had the runner flow itself restarted 2 of 3 boots, both controls would have survived with
-        probability (1/3)^2."""
+        """Restart control: the read-only chain was alive at UPTIME 224 S and 268 S in two boots, cpuon was followed by a
+        restart in 2 of 3; had the runner flow restarted 2 of 3 boots, both controls would have survived with (1/3)^2."""
         from datetime import datetime, timedelta
         clock = lambda text: datetime.strptime(text, '%H:%M:%S')
         self.assertEqual(round(100 * (1 - 2 / 3) ** 2), 11)
@@ -749,43 +755,45 @@ class SeededBad(unittest.TestCase):
         return bad
 
     BUDGET = 'bounce to end of report well under 20 s of UPTIME as a precaution'
-    # (checker, text of the document, the wrong text that replaces it, substrings every refusal must show)
+    # (text of the document, the wrong text that replaces it, substrings every refusal must show): refused by check_claims
     CLAIM_SEEDS = (
-        (check_claims, "boot 7's UPTIME 16 S was the first heartbeat after the chain", "boot 7's UPTIME 16 S was when it restarted",
+        ("boot 7's UPTIME 16 S was the first heartbeat after the chain", "boot 7's UPTIME 16 S was when it restarted",
          ('a 16 s figure',)),
-        (check_claims, BUDGET, "q1n1's UPTIME at the report at most 16 s", ('refuted', '20 s UPTIME budget')),
-        (check_claims, BUDGET, 'bounce to end of report under about 30 s of UPTIME as a precaution', ('refuted',)),
-        (check_claims, 'So, INFERRED, not at one fixed UPTIME.', 'So, INFERRED, the restart is at about UPTIME 40 to 60 S.',
+        (BUDGET, "q1n1's UPTIME at the report at most 16 s", ('refuted', '20 s UPTIME budget')),
+        (BUDGET, 'bounce to end of report under about 30 s of UPTIME as a precaution', ('refuted',)),
+        ('So, INFERRED, not at one fixed UPTIME.', 'So, INFERRED, the restart is at about UPTIME 40 to 60 S.',
          ('refuted', 'not at one fixed UPTIME')),
-        (check_claims, 'operator in the loop, one boot per sample.',
-         'one unattended plan of four cpuon steps and one plain control step (each self-restart writes the next marker).',
+        ('operator in the loop, one boot per sample.', 'one unattended plan (each self-restart writes the next marker).',
          ('refuted', 'work item 10')),
-        (check_claims, '(c) a variant that leaves cores running', '(a) a variant that leaves cores running', ('work item 10',)),
-        (check_claims, 'must not assume VBAR_EL2 or HCR_EL2 are reset on a restarted core',
+        ('(c) a variant that leaves cores running', '(a) a variant that leaves cores running', ('work item 10',)),
+        ('must not assume VBAR_EL2 or HCR_EL2 are reset on a restarted core',
          'may assume the EL2 state is reset on a restarted core', ('section 7 lacks',)),
-        (check_claims, '0X20200 and 0X20300 UNKNOWN', '0X20200 and 0X20300 as the others', ('section 7 lacks',)),
-        (check_claims, 'was photographed alive at UPTIME 224 S and 268 S in two boots, one crisp photograph each',
-         'was observed only to UPTIME 10 S (boot 5)', ('refuted', 'section 10 must give the restart control')),
-        (check_claims, '| 11 | **M1 run** | 3, 5, 8, 9 |', '| 11 | **M1 run** | 3, 5, 8, 9, 10 |', ('the M1 run (WI 11)',)),
-        (check_claims, 'as a precaution of low weight (earliest plausible restart, in a cpuon run,',
-         'as a bound (earliest plausible restart, in a cpuon run,', ('precaution of low weight',)),
-        (check_claims, 'U5 debug and RNDR behaviour, other cores', 'U5 DFR0, OS lock', ('refuted',)),
-        (check_claims, '(bank writability: answered, WI 7)', '(bank writability UNKNOWN until the dry run)', ('refuted',)),
-        (check_claims, 'DONE, boot 10 (2026-11-16 10:21, plan DRYRUN-A, OBSERVED)',
-         'BUILT and STAGED on the stick, the boot is NOT RUN', ('refuted',)),
-        (check_claims, 'all returned at EL2', 'are the hazard reads, still to be run', ('refuted',)),
-        (check_claims, 'It reads the MADT itself (section 7), not through `from_hamoa`.',
-         'It reads the MADT itself (section 7); `from_hamoa` is no longer blocked.', ('refuted',)),
-        (check_id_registers, 'BRPs 5 (six breakpoints)', 'BRPs 4 (five breakpoints)', ('BRPs 4', 'five breakpoints')),
-        (check_id_registers, 'RNDR 1;', 'RNDR 0;', ('RNDR 0',)),
-        (check_id_registers, '0x000F01F010305719', '0x000F01F010304719', ('ID_AA64DFR0_EL1',)),
+        ('0X20200 and 0X20300 UNKNOWN', '0X20200 and 0X20300 as the others', ('section 7 lacks',)),
+        ('was photographed alive at UPTIME 224 S and 268 S', 'was observed only to UPTIME 10 S (boot 5)',
+         ('refuted', 'section 10 must give the restart control')),
+        ('| 11 | **M1 run** | 3, 5, 8, 9 |', '| 11 | **M1 run** | 3, 5, 8, 9, 10 |', ('the M1 run (WI 11)',)),
+        ('as a precaution of low weight (earliest', 'as a bound (earliest', ('precaution of low weight',)),
+        ('U5 debug and RNDR behaviour, other cores', 'U5 DFR0, OS lock', ('refuted',)),
+        ('(bank writability: answered, WI 7)', '(bank writability UNKNOWN until the dry run)', ('refuted',)),
+        ('DONE, boot 10 (2026-11-16 10:21,', 'BUILT and STAGED on the stick, the boot is NOT RUN', ('refuted',)),
+        ('all returned at EL2', 'are the hazard reads, still to be run', ('refuted',)),
+        ('not through `from_hamoa`.', '`from_hamoa` is no longer blocked.', ('refuted',)),
+        ('`VERDICT=TRAPS_EFFECTIVE`', 'the ECV traps are inert', ('refuted',)),
+        ('DONE (q1n1 b875620; boot 11', 'BUILT, NOT RUN (q1n1 b875620; boot 11', ('refuted',)),
+        ('(answered for an EL1 stub, WI 9)', '(UNKNOWN)', ('refuted',)),
+        ('O1, the A16 recipe', 'O1 is decided, the A16 recipe', ('refuted',)),
+        ('the first runner payload to run code', 'the first code', ('refuted',)),
+        ('neither confirmed nor refuted by boot 11', 'wrong: `SCR_EL3.ECVEn` is set', ('refuted',)),
     )
+    ID_SEEDS = (('BRPs 5 (six breakpoints)', 'BRPs 4 (five breakpoints)', ('BRPs 4', 'five breakpoints')),
+                ('RNDR 1;', 'RNDR 0;', ('RNDR 0',)), ('0x000F01F010305719', '0x000F01F010304719', ('ID_AA64DFR0_EL1',)))
 
-    def test_the_claims_that_were_wrong_once_and_the_dry_run_state_stay_refused(self):
-        for check, old, new, shown in self.CLAIM_SEEDS:
-            problems = check(self.damaged(old, new))
-            for what in shown:
-                self.assertTrue([p for p in problems if what in p], (old[:40], what))
+    def test_the_claims_that_were_wrong_once_stay_refused(self):
+        for check, seeds in ((check_claims, self.CLAIM_SEEDS), (check_id_registers, self.ID_SEEDS)):
+            for old, new, shown in seeds:
+                problems = check(self.damaged(old, new))
+                for what in shown:
+                    self.assertTrue([p for p in problems if what in p], (old[:40], what))
 
     def test_a_table_that_lost_a_newline_or_a_cell_is_refused(self):
         glued = TEXT.replace('| --- | --- | --- |\n| a |', '| --- | --- | --- || a |', 1)
@@ -796,8 +804,7 @@ class SeededBad(unittest.TestCase):
         self.assertTrue([p for p in check_tables(short) if 'cells' in p])
 
     def test_a_wrong_state_of_the_tree_is_refused(self):
-        # each seed contradicts a source or a measurement: the unit's tables, the adapter's refusal, the guards' limits, the
-        # bundle, the work items' statuses, the dry run (boot 10: the bank is writable, the monitor was not called)
+        # each seed contradicts a source or a measurement (tables, adapter, guards, bundle, work items, boots 10 and 11)
         cases = (('then `check_hamoa_platform` refuses at `ecam-mismatch`', 'then `check_hamoa_platform` accepts them'),
                  ('one GICD structure of 25 bytes (ACPI: 24; the extra byte is 0)', 'one GICD structure of 24 bytes'),
                  ('then the ITS structure, no GICR-range structure', 'then the ITS structure and a GICR-range structure'),
@@ -805,7 +812,11 @@ class SeededBad(unittest.TestCase):
                  ('bits that stick and trap nothing pass', 'bits that stick prove the traps work'),
                  ('`real` NOT RUN', '`real` PASS'),
                  ('4a BUILT for the dry run, EXPERIMENTAL, RAN once on the unit', '4a DONE'),
-                 ('first code below EL2', 'first code at EL2'),
+                 ('`el1trap` is the first runner payload to run code below EL2', '`el1trap` is the first code below EL2'),
+                 ('SUPPORTED by boot 11, not decided', 'DECIDED by boot 11'), ("after X2 T02's EL1 stub", 'on the unit'),
+                 ('and neither confirmed nor refuted by boot 11', 'and confirmed by boot 11'),
+                 ('`BITS13_14_STUCK=YES`, `RESTORED=YES`', '`BITS13_14_STUCK=NO`, `RESTORED=YES`'),
+                 ('(not met: boot 11)', '(met)'),
                  ('and calls no monitor', 'and calls the monitor'),
                  ('then showed the bank writable', 'left it open whether the bank is writable'),
                  ('Placement A, low, is dead', 'Placement A, low, works'),

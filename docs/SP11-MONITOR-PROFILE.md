@@ -10,7 +10,7 @@ D9 (the HVC kernel patch) and D10 (the queued lock as an SP11-only opt-in) are c
 ## 1. Reading this note
 
 Labels (AGENTS.md): **VERIFIED** read in this repository or a reproducible host fact (a build, a test), never "ran on the Surface";
-**OBSERVED** measured on the unit (boots 3 to 7 and the probes) or reported by the operator, one unit, one boot each; **INFERRED** reasoned, not
+**OBSERVED** measured on the unit (boots 3 to 7, the timers boot of 2026-11-16 and the probes) or reported by the operator, one unit, one boot each; **INFERRED** reasoned, not
 checked; **EXPERIMENTAL** code exists, unqualified; **UNIMPLEMENTED** no code; **UNKNOWN** not established, a named experiment would
 establish it. Test outcomes are not recorded in this note: they belong to the run that made them. Facts about the unit are the audit's.
 
@@ -104,8 +104,11 @@ authorisation of the monitor payload (audit section 12, WI 6) refers to.
 **The read-back catches "does not stick" and nothing else.** Bits that read back set and trap nothing ("stuck but inert") pass it by
 construction; only an EL1 round trip that reads `CNTVCT_EL0` and the virtual timer under the traps (T-HW2, audit section 6.4) shows that the
 traps work. The host model includes that world as a scenario that is not refused, so the limit is a tested fact and not a hope. A refusal
-at -147 is not "the traps work" turned around: a launch that passes is still UNKNOWN. Whether bits 13 and 14 can be set at EL2 (T-HW1) and
-whether `SCR_EL3.ECVEn` gates them are UNKNOWN; the `CNTPOFF_EL2` stall of boot 4 is INFERRED to be that gate.
+at -147 is not "the traps work" turned around: a launch that passes does not show that the traps work in the guest's regime. T-HW1 and T-HW2
+ran once on the unit (OBSERVED, one boot, 2026-11-16; [SURFACE-PRO-11.md](SURFACE-PRO-11.md) E67): bits 13 and 14 stuck (written `0x6000`, read
+back `0x6000`) and an EL1 stub's reads of `CNTVCT_EL0` and `CNTV_CTL_EL0` trapped to EL2, under `HCR_EL2` `0x80000000` and not the monitor's guest
+regime, so "stuck but inert" did not occur on the boot CPU. Whether bits 13 and 14 depend on `SCR_EL3.ECVEn` is UNKNOWN (Arm ARM not re-read):
+if they do, the traps taking effect would not fit the INFERRED ECVEn-clear explanation of the `CNTPOFF_EL2` stall of boot 4, whose cause stays UNKNOWN.
 
 ### 6.2 Where they sit, and what a refusal leaves
 
@@ -150,7 +153,9 @@ A test that lacks clang, `llvm-objdump` or a q1n1 checkout prints SKIP with the 
 
 ## 9. What is not established
 
-- Whether `CNTHCTL_EL2` bits 13 and 14 can be set at EL2 on the unit, whether they trap, and `SCR_EL3.ECVEn`: UNKNOWN (T-HW1, T-HW2).
+- `CNTHCTL_EL2` bits 13 and 14 on the unit: OBSERVED once (T-HW1, T-HW2, 2026-11-16, E67): they stick and an EL1 stub's counter and virtual-timer reads trap
+  with them set. Still UNKNOWN: the traps in the monitor's own guest regime (`HCR_EL2` with `VM` and `TVM`), on a secondary CPU and with the conversion; `SCR_EL3.ECVEn`
+  (never read; whether the two bits depend on it is UNKNOWN too).
 - Which NV2 record to embed, and whether any record measured at E2H = 1 describes the E2H = 0 regime the monitor runs in: UNKNOWN (D6).
 - Whether the NV2 gate passes on the unit's boot CPU, which needs a record that equals its live MIDR, REVIDR and ID registers: UNKNOWN.
 - Whether M1 starts: the audit's expected first failures still stand. Hardware: NOT RUN.
