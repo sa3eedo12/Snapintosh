@@ -28,8 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sp11_stick_gic_checks as C  # noqa: E402
 import sp11_stick_gic_testlib as G  # noqa: E402
-from sp11_stick_gic_checks import (CASES, EDGE26, FAKE_VECTORS, HZ, OLD_HCR, OLD_VBAR, OUT, RECORD_AT, RUNS, SEEDS, STAGE, Base, Held,  # noqa: E402
-                                   batch, el2_ok, expected_wrote, expected_writes)
+from sp11_stick_gic_checks import (CASES, EDGE26, FAKE_VECTORS, FUTURE_CVAL, HZ, OLD_HCR, OLD_VBAR, OUT, RECORD_AT, RUNS, SEEDS, STAGE, UNIT_LINES,  # noqa: E402
+                                   Base, Held, batch, el2_ok, expected_wrote, expected_writes)
 from sp11_stick_wrapper_checks import Checks as WC, expected_reporter_lines  # noqa: E402
 from sp11_stick_wrapper_testlib import E, sb  # noqa: E402
 
@@ -60,7 +60,10 @@ def after_last_window(g, wname):
 class Happy(Base):
     VARIANTS = {'happy': {}, 'happy-ds1': dict(ctlr=0x50), 'happy-g-on': dict(ctlr=0x13), 'happy-edge': dict(cfg1=EDGE26),
                 'happy-eoimode': dict(eoimode=1), 'happy-prio': dict(prio=0x80, pmr=0xF0, bpr1=2, igrpen1=1), 'happy-frame3': {},
-                'happy-other-pend': {}, 'happy-delay': {}, 'happy-late': {}, 'happy-kept': {}}
+                'happy-other-pend': {}, 'happy-delay': {}, 'happy-late': {}, 'happy-kept': {},
+                'happy-enabled': dict(isen=1 << 26), 'happy-other-enabled': dict(isen=1 << 30), 'unit-boot12': dict(prio=0xA0, isen=0x4E800001),
+                'happy-timer-masked': dict(ctl0=3), 'happy-timer-future': dict(ctl0=1, cval0=FUTURE_CVAL),
+                'happy-timer-off': dict(ctl0=0, cval0=0x123456789)}
 
     def each(self, check):
         for name, kw in self.VARIANTS.items():
@@ -89,11 +92,16 @@ class Happy(Base):
 
     def test_the_record_holds_what_was_found_what_was_written_and_read_back(self):
         def check(run, kw):
-            r, d = run.rec, {'ctlr': 0x10, 'prio': 0, 'cfg1': 0, 'igroupr0': 0, 'pmr': 0xFF, 'bpr1': 0, 'igrpen1': 0, **kw}
+            r, d = run.rec, {'ctlr': 0x10, 'prio': 0, 'cfg1': 0, 'igroupr0': 0, 'pmr': 0xFF, 'bpr1': 0, 'igrpen1': 0, 'isen': 0, 'ctl0': 0, 'cval0': 0, **kw}
+            istatus = 4 if d['ctl0'] & 1 and d['cval0'] == 0 else 0       # the model derives ISTATUS from the deadline: CVAL 0 is long past
             self.assertEqual(G.Checks.saved(run.g, {'GICD_CTLR': d['ctlr'], 'IPRIORITYR': d['prio'], 'ICFGR1': d['cfg1'], 'IGROUPR0': d['igroupr0'],
-                                                    'ICC_PMR': d['pmr'], 'ICC_BPR1': d['bpr1'], 'ICC_IGRPEN1': d['igrpen1'], 'ISENABLER0': 0,
-                                                    'HCR_EL2': OLD_HCR, 'SCTLR_EL1': C.OLD_SCTLR1, 'VBAR_EL1': C.OLD_VBAR1}), [])
+                                                    'ICC_PMR': d['pmr'], 'ICC_BPR1': d['bpr1'], 'ICC_IGRPEN1': d['igrpen1'], 'ISENABLER0': d['isen'],
+                                                    'HCR_EL2': OLD_HCR, 'SCTLR_EL1': C.OLD_SCTLR1, 'VBAR_EL1': C.OLD_VBAR1,
+                                                    'CNTHP_CTL': d['ctl0'] | istatus, 'CNTHP_CVAL': d['cval0']}), [])
+            self.assertEqual((r.reg('CNTHP_CTL', 'fin') & 3, r.reg('CNTHP_CVAL', 'fin')), (d['ctl0'] & 3, d['cval0']), 'the timer ends as it was found')
             self.assertEqual(r.reg('ISENABLER0', 'rb') & 1 << 26, 1 << 26)
+            self.assertEqual((r.reg('ISENABLER0', 'new'), r.reg('ISENABLER0', 'fin')), (0 if d['isen'] >> 26 & 1 else 1 << 26, d['isen']),
+                             'the enable is written only when the PPI was found disabled, and the register ends as it was found')
             self.assertEqual((r.reg('IPRIORITYR', 'rb'), r.reg('ICC_PMR', 'rb'), r.reg('ICC_IGRPEN1', 'rb') & 1, r.reg('CNTHP_CTL', 'rb') & 1), (0x80, 0xF0, 1, 1))
             self.assertEqual((r.reg('VBAR_EL2', 'old'), r.reg('VBAR_EL2', 'new'), r.reg('VBAR_EL2', 'fin')), (OLD_VBAR, FAKE_VECTORS, OLD_VBAR))
             self.assertEqual([(r.reg(n, 'new'), r.reg(n, 'rb'), r.reg(n, 'fin')) for n in ('HCR_EL2', 'SCTLR_EL1', 'VBAR_EL1')],
@@ -136,6 +144,106 @@ class Happy(Base):
             self.assertIn((RECORD_AT, 1), [(e.a, e.extra) for e in run_of(name).mon.of('AT')], name)
             self.assertEqual(Held.report(run_of(name)), [], name)
         self.assertEqual(RECORD_AT, run_of('happy').w.REPORT + 0x11000, 'REPORT.DAT + 0x11000: after the 64 KiB the monitor may write from its x0')
+
+
+# ---- The state boot 12 found: the firmware had enabled other PPIs, and PPI 26 itself ------------------------------------------------------------
+class UnitState(Base):
+    """OBSERVED once, on the unit (boot 12, from a photo of the page): ISENABLER0 0x4E800001 (SGI 0 and PPIs 23, 25, 26, 27 and 30), IPRIORITYR[26] 0xA0, every
+    PPI level, PPI 26 neither pending nor active, GICD_CTLR 0x10. The first stage refused PPI_OWNED because the whole register was not clear and stored
+    nothing. Now only PPI 26 pending or active is refused; every other enabled bit, and PPI 26 enabled, is left exactly as found."""
+
+    def test_the_model_prints_the_two_lines_the_unit_printed_and_the_reporter_shows_what_was_found(self):
+        run = run_of('unit-boot12')
+        for line in UNIT_LINES:
+            self.assertEqual(run.mon.texts().count(line), 1, line)
+        self.assertIn('SNAPREP GIC OLD PRIO=0XA0 ICFGR1=0X0 IGROUPR0=0X0 ISPEND=0X0 ISACT=0X0', run.rep.texts())
+        self.assertEqual(run.rep.texts().count(UNIT_LINES[1].replace('SNAPMON', 'SNAPREP')), 1)
+
+    def test_that_state_reaches_irq_ok_with_a_clean_put_back_in_the_documented_order(self):
+        run = run_of('unit-boot12')
+        self.verdict(run, OUT.IRQ_OK)
+        self.assertEqual((run.mon.ret, run.mon.faulted, run.rec.restore_failed, run.rec.restore_retried), (0, False, 0, 0))
+        self.holds(run, G.Checks.eoi(run.g), G.Checks.timer_off(run.g), G.Checks.restored(run.g), G.Checks.acks(run.g, 4))
+        self.assertEqual(run.g.writes(), expected_writes(cvals=cvals(run.rec), prio=0xA0, isen=0x4E800001))
+        self.pages(run)
+
+    def test_the_enable_register_is_never_written_when_ppi_26_is_already_enabled_and_ends_as_found(self):
+        for name, found in (('unit-boot12', 0x4E800001), ('happy-enabled', 1 << 26)):
+            run = run_of(name)
+            with self.subTest(scenario=name):
+                written = {e[1] for e in run.g.log if e[0] == 'W'}
+                self.assertFalse({'GICR_ISENABLER0', 'GICR_ICENABLER0'} & written)
+                self.assertEqual((run.g.state['isenabler0'], run.rec.reg('ISENABLER0', 'old'), run.rec.reg('ISENABLER0', 'fin')), ((found, found), found, found))
+                self.assertEqual(run.rec.wrote & G.REG_BIT['ISENABLER0'], 0, 'the record does not claim a write that was not made')
+                self.assertEqual(G.Checks.enable_untouched(run.g, found), [])
+
+    def test_other_enabled_bits_alone_do_not_refuse_and_the_stage_sets_and_clears_only_its_own(self):
+        run = run_of('happy-other-enabled')
+        self.verdict(run, OUT.IRQ_OK)
+        self.assertEqual(([v for n, v in run.g.writes() if n == 'GICR_ISENABLER0'], [v for n, v in run.g.writes() if n == 'GICR_ICENABLER0']),
+                         ([1 << 26], [1 << 26]))
+        self.assertEqual(run.g.state['isenabler0'], (1 << 30, 1 << 30))
+        self.assertEqual(G.Checks.enable_untouched(run.g, 1 << 30), [])
+
+    def test_ppi_26_pending_or_active_is_still_refused_before_any_store_and_the_reporter_shows_the_whole_masks(self):
+        for name, pend, act in (('unit-pending', 0x4000000, 0), ('unit-active', 0, 0x4000000), ('owned-pending', 0x4000000, 0), ('owned-active', 0, 0x4000000)):
+            run = run_of(name)
+            with self.subTest(scenario=name):
+                self.refused(run, OUT.PPI_OWNED, 'COPIED')
+                self.assertEqual(run.g.writes(), [])
+                self.assertEqual(run.rec.begun, 0)
+                prio = '0XA0' if name.startswith('unit') else '0X0'
+                self.assertIn(f'SNAPREP GIC OLD PRIO={prio} ICFGR1=0X0 IGROUPR0=0X0 ISPEND={G.h(pend)} ISACT={G.h(act)}', run.rep.texts())
+
+    def test_the_cpu_interface_and_the_timer_are_not_read_by_a_refusal_in_the_redistributor_read(self):
+        reads = {e[1] for e in run_of('unit-pending').g.log if e[0] == 'R'}
+        self.assertFalse({n for n in reads if n.startswith('ICC_') or n.startswith('CNTHP_')}, 'as on the unit in boot 12: the zeros of the CPU line are unfilled')
+
+
+# ---- The EL2 timer as it may have been left: only one that is asserting right now is refused -----------------------------------------------------
+class ForeignTimer(Base):
+    """CNTHP_CTL has never been read on the unit, and a firmware that left PPIs enabled probably had a hypervisor once. Nothing is left to own that timer (no
+    code runs at EL2 but the stage, IRQ is masked), so only a timer asserting right now (ENABLE and ISTATUS set, IMASK clear: an interrupt is firing) is refused;
+    enabled and masked, enabled with its deadline ahead, and disabled are read, overwritten at the arm and put back exactly, the deadline first."""
+    FOUND = {'happy': (0x0, 0), 'happy-timer-masked': (0x7, 0), 'happy-timer-future': (0x1, FUTURE_CVAL), 'happy-timer-off': (0x0, 0x123456789)}
+
+    def test_a_timer_that_is_asserting_now_is_refused_before_any_store(self):
+        run = run_of('timer-asserted')
+        self.refused(run, OUT.TIMER_OWNED, 'COPIED')
+        self.assertEqual((run.g.writes(), run.rec.begun, run.rec.wrote, run.rec.reg('CNTHP_CTL', 'old')), ([], 0, 0, 0x5))
+        self.assertIn('CTL=0X5', G.render(run.rec, 'CPU'))
+        self.pages(run)
+        pend = run_of('timer-asserted-pending')
+        self.refused(pend, OUT.PPI_OWNED, 'COPIED')
+        self.assertEqual((pend.g.writes(), pend.rec.reg('CNTHP_CTL', 'old')), ([], 0), 'the line is normally seen as PPI 26 pending first: the timer is not read then')
+
+    def test_every_other_state_of_the_timer_reaches_irq_ok_and_ends_as_it_was_found(self):
+        for name, (read, cval0) in self.FOUND.items():
+            run = run_of(name)
+            with self.subTest(scenario=name):
+                r, g = run.rec, run.g
+                self.verdict(run, OUT.IRQ_OK)
+                self.assertEqual((r.reg('CNTHP_CTL', 'old'), r.reg('CNTHP_CVAL', 'old')), (read, cval0))
+                self.assertEqual((r.reg('CNTHP_CTL', 'fin') & 3, r.reg('CNTHP_CVAL', 'fin'), r.restore_failed, r.restore_retried), (read & 3, cval0, 0, 0))
+                self.assertEqual((g.state['ctl'], g.state['cval']), ((read & 3, read & 3), (cval0, cval0)))
+                self.holds(run, G.Checks.timer_off(g), G.Checks.restored(g), G.Checks.acks(g, 4), G.Checks.arm_overwrites_deadline(g))
+                self.pages(run)
+
+    def test_the_arm_overwrites_the_deadline_it_found_and_the_put_back_writes_the_deadline_before_the_enable(self):
+        for name in ('happy-timer-masked', 'happy-timer-future'):
+            run = run_of(name)
+            with self.subTest(scenario=name):
+                timer = [w for w in run.g.writes() if w[0] in ('CNTHP_CVAL_EL2', 'CNTHP_CTL_EL2')]
+                found, cval0 = run.g.state['ctl'][0], run.g.state['cval'][0]
+                self.assertEqual(timer[:2], [('CNTHP_CVAL_EL2', run.rec.irq[0].cval), ('CNTHP_CTL_EL2', 1)], 'the arm: the deadline, then the enable')
+                self.assertEqual(timer[-3:], [('CNTHP_CTL_EL2', 0), ('CNTHP_CVAL_EL2', cval0), ('CNTHP_CTL_EL2', found)], 'the put-back: off, the deadline, the enable bits')
+
+    def test_a_foreign_deadline_that_passes_during_the_run_asserts_the_line_when_it_is_put_back_and_the_verdict_says_so(self):
+        run = run_of('timer-expires')
+        r = run.rec
+        self.assertEqual((G.OUTCOMES[r.first_outcome], G.OUTCOMES[r.outcome], r.restore_failed), ('IRQ_OK', 'NOT_RESTORED', G.REG_BIT['ISPENDR0']))
+        self.assertNotEqual(G.Checks.timer_quiet(run.g), [], 'the one timer state the stage cannot make quiet: its own saved deadline is past by then')
+        self.assertEqual((run.g.state['ctl'], run.g.state['cval']), ((1, 1), (19201000, 19201000)), 'the timer itself is as it was found')
 
 
 # ---- C4: three acknowledged interrupts, each re-armed, and the final deadline without an acknowledge -------------------------------------
@@ -319,9 +427,9 @@ class El1Window(Base):
 REFUSALS = {'el4': OUT.NOT_EL2, 'spsel0': OUT.SPSEL_NOT_1, 'daif-i': OUT.DAIF_NOT_MASKED, 'daif-f': OUT.DAIF_NOT_MASKED, 'imo': OUT.IMO_CLEAR,
             'pin-gicd': OUT.PIN_GIC, 'pin-first': OUT.PIN_GIC, 'pin-limit': OUT.PIN_GIC, 'pin-stride': OUT.PIN_GIC, 'pin-intid': OUT.PIN_GIC,
             'pin-count0': OUT.PIN_GIC, 'ctlr-0': OUT.GICD_VIEW, 'ctlr-bit8': OUT.GICD_VIEW, 'ctlr-bit5': OUT.GICD_VIEW, 'ctlr-rwp': OUT.GICD_VIEW,
-            'no-frame': OUT.GICR_NOT_FOUND, 'asleep': OUT.GICR_ASLEEP, 'children-asleep': OUT.GICR_ASLEEP, 'owned-enabled': OUT.PPI_OWNED,
-            'owned-other': OUT.PPI_OWNED, 'owned-pending': OUT.PPI_OWNED, 'owned-active': OUT.PPI_OWNED, 'sre-clear': OUT.SRE_CLEAR,
-            'timer-masked': OUT.TIMER_OWNED, 'timer-future': OUT.TIMER_OWNED, 'counter': OUT.COUNTER, 'window': OUT.WINDOW_UNWRITABLE,
+            'no-frame': OUT.GICR_NOT_FOUND, 'asleep': OUT.GICR_ASLEEP, 'children-asleep': OUT.GICR_ASLEEP, 'owned-pending': OUT.PPI_OWNED,
+            'owned-active': OUT.PPI_OWNED, 'unit-pending': OUT.PPI_OWNED, 'unit-active': OUT.PPI_OWNED, 'sre-clear': OUT.SRE_CLEAR,
+            'timer-asserted': OUT.TIMER_OWNED, 'timer-asserted-pending': OUT.PPI_OWNED, 'counter': OUT.COUNTER, 'window': OUT.WINDOW_UNWRITABLE,
             'pct-trapped': OUT.EL1_PCT_TRAPPED, 'el1-image': OUT.EL1_IMAGE}
 BEFORE_THE_GIC = {OUT.NOT_EL2, OUT.SPSEL_NOT_1, OUT.DAIF_NOT_MASKED, OUT.IMO_CLEAR, OUT.PIN_GIC, OUT.WINDOW_UNWRITABLE, OUT.EL1_PCT_TRAPPED, OUT.EL1_IMAGE}
 
@@ -527,16 +635,19 @@ class Seeded(Base):
         'no-next-el1': ('happy', lambda run: G.Checks.next_before_el1(run.mon, run.g)),
         'unbounded-el1': ('el1-lost', lambda run: G.Checks.one_interrupt(run.g)),
         'no-settle': ('happy', lambda run: G.Checks.settled(run.g)),
+        'clear-others': ('unit-boot12', lambda run: G.Checks.enable_untouched(run.g, 0x4E800001)),
+        'keep-foreign': ('happy-timer-future', lambda run: G.Checks.arm_overwrites_deadline(run.g)),
+        'restore-ctl-first': ('happy-timer-future', lambda run: G.Checks.timer_quiet(run.g)),
     }
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.seeded = {seed: batch({n: CASES[n] for n in ('happy', 'final-stuck', 'el1-lost')}, variant=seed) for seed in SEEDS}
+        cls.seeded = {seed: batch({n: CASES[n] for n in ('happy', 'final-stuck', 'el1-lost', 'unit-boot12', 'happy-timer-future')}, variant=seed) for seed in SEEDS}
 
     def test_there_is_a_seeded_stage_for_every_fault_the_brief_names_and_every_one_is_tested(self):
         self.assertEqual(set(self.DETECTORS), set(SEEDS))
-        self.assertEqual(len(SEEDS), 15)
+        self.assertEqual(len(SEEDS), 18)
 
     def test_each_seeded_fault_breaks_the_check_that_matches_it_and_the_real_stage_passes_that_check(self):
         for seed, (scenario, check) in self.DETECTORS.items():
@@ -559,6 +670,15 @@ class Seeded(Base):
                          'with IMO clear the interrupt is taken by EL1 own table: named, not taken for the stop')
         run = self.seeded['unbounded-el1']['el1-lost']
         self.assertEqual(run.g.state['hang'], 1, 'a stub without its counter bound would hold the stage at EL1')
+        run = self.seeded['clear-others']['unit-boot12']
+        self.assertEqual((G.OUTCOMES[run.rec.outcome], run.rec.restore_failed, run.g.state['isenabler0']), ('NOT_RESTORED', G.REG_BIT['ISENABLER0'], (0x4E800001, 1 << 26)),
+                         'the stage itself sees that the enables it cleared are not as found, and says so')
+        run = self.seeded['keep-foreign']['happy-timer-future']
+        self.assertEqual((G.OUTCOMES[run.rec.outcome], run.rec.restore_failed, run.g.state['deliveries']), ('T_NOT_HELD', 0, 0),
+                         'the stage itself sees that the deadline it armed is not the one it wrote, and no window is run')
+        run = self.seeded['restore-ctl-first']['happy-timer-future']
+        self.assertEqual((G.OUTCOMES[run.rec.outcome], run.rec.restore_failed, G.Checks.restored(run.g)), ('IRQ_OK', 0, []),
+                         'the stage cannot see the order of its put-back: only the replay of the writes can, and the end state is the same')
 
 
 if __name__ == '__main__':

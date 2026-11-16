@@ -90,6 +90,9 @@ _Static_assert(SP11_STICK_GIC_CYCLE_US >= 1000u && SP11_STICK_GIC_CYCLE_US <= 10
 #define SG_DAIF_MASKED SW_GIC_DAIF_MASK
 #define SG_CNTHP_CTL_ENABLE 1u
 #define SG_CNTHP_CTL_MASK 3u            /* ENABLE and IMASK: ISTATUS is read only */
+#define SG_CNTHP_CTL_IMASK 2u
+#define SG_CNTHP_CTL_STATE (SG_CNTHP_CTL_ENABLE | SG_CNTHP_CTL_IMASK | SG_CNTHP_ISTATUS)    /* the three bits of one read that say whether the line is high */
+#define SG_CNTHP_CTL_FIRING (SG_CNTHP_CTL_ENABLE | SG_CNTHP_ISTATUS)    /* ENABLE and ISTATUS set, IMASK clear: the timer asserts its output now (INFERRED: ISTATUS ignores IMASK) */
 #define SG_CNTHCTL_EL1PCTEN 1u          /* CNTHCTL_EL2.EL1PCTEN: EL1 and EL0 may read the physical counter (HCR_EL2.E2H = 0); OLD is 0x3 on the unit (OBSERVED) */
 
 /* ---- The EL1 excursion (class E). The values are q1n1's el1trap payload's (payloads/el1trap.c; it ran on the unit, boot 11) except
@@ -119,7 +122,9 @@ _Static_assert(SP11_STICK_GIC_CYCLE_US >= 1000u && SP11_STICK_GIC_CYCLE_US <= 10
      defined(SP11_STICK_GIC_SEED_TIMER_ON) || defined(SP11_STICK_GIC_SEED_NO_IRQ_MASK) || defined(SP11_STICK_GIC_SEED_STORE_FIRST) || \
      defined(SP11_STICK_GIC_SEED_NO_NEXT) || defined(SP11_STICK_GIC_SEED_NO_RESTORE) || defined(SP11_STICK_GIC_SEED_FINAL_ACK) || \
      defined(SP11_STICK_GIC_SEED_NO_REARM) || defined(SP11_STICK_GIC_SEED_NO_IMO) || defined(SP11_STICK_GIC_SEED_NO_EL1_RESTORE) || \
-     defined(SP11_STICK_GIC_SEED_NO_NEXT_EL1) || defined(SP11_STICK_GIC_SEED_UNBOUNDED_EL1) || defined(SP11_STICK_GIC_SEED_NO_SETTLE)) && !defined(SP11_STICK_HOST_TEST)
+     defined(SP11_STICK_GIC_SEED_NO_NEXT_EL1) || defined(SP11_STICK_GIC_SEED_UNBOUNDED_EL1) || defined(SP11_STICK_GIC_SEED_NO_SETTLE) || \
+     defined(SP11_STICK_GIC_SEED_CLEAR_OTHERS) || defined(SP11_STICK_GIC_SEED_KEEP_FOREIGN_DEADLINE) || \
+     defined(SP11_STICK_GIC_SEED_RESTORE_CTL_FIRST)) && !defined(SP11_STICK_HOST_TEST)
 #error "the seeded faults are part of the host test build only"
 #endif
 

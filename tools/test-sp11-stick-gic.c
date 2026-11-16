@@ -11,9 +11,11 @@
  * put-back and its report against the model.
  *
  * Scenario lines are the base harness's plus, before RUN:
- *   GIC CTLR v | TYPER v | IIDR v | FRAMES n | AFF idx v | WAKER v | IGROUPR0 v | ISENABLER0 v | ISPENDR0 v | ISACTIVER0 v | PRIO v |
+ *   GIC CTLR v | TYPER v | IIDR v | RTYPER v (the low word of every frame's GICR_TYPER) | FRAMES n | AFF idx v | WAKER v | IGROUPR0 v | ISENABLER0 v |
+ *   ISPENDR0 v | ISACTIVER0 v | PRIO v |
  *   CFG1 v | SRE v | ICCCTLR v | PMR v | BPR1 v | IGRPEN1 v | RPR v | CTL v | CVAL v | DAIF v | SPSEL v | VBAR v | CURRENTEL_LATE v |
  *   NO_FIRE | NO_DELIVER | INTID v | SYNC_AT ticks | STORM | STORM_ONCE | STORM_AFTER ticks | FINAL_STUCK | DROP_AFTER n | HPPIR v | NO_ISTATUS | DELAY ticks | NS_PPI 0|1 |
+ *   HIDE_PEND (the non-secure view of ISPENDR0 never shows the timer's level, as for an interrupt that is Secure: INFERRED) |
  *   IGNORE reg | NOHOLD reg [windows] | RWP gicd|gicr | MAXITER n | CNTHCTL v | HCR_INIT v | VBAR1 v | SCTLR1 v | HCR_IGNORE_IMO |
  *   EL1_LOST | EL1_VECTOR n | EL1_SYNC esr | EL1_INTID v | SPSR_KEPT v | MUTATE offset hexbytes (between two RUNs: bytes of the record)
  * At END the harness prints GICREC (the record in REPORT.DAT), GICLOG (every write, every system register read and every window event, with
@@ -73,13 +75,13 @@ struct gic_event {
 
 static struct {
     /* configuration: what a scenario sets, and the initial state of the machine */
-    uint32_t gicd_ctlr0, gicd_typer, gicd_iidr, waker0, igroupr0_0, isenabler0_0, ispendr0_0, isactiver0_0, icfgr1_0;
+    uint32_t gicd_ctlr0, gicd_typer, gicd_iidr, waker0, igroupr0_0, isenabler0_0, ispendr0_0, isactiver0_0, icfgr1_0, rtyper_lo;
     uint32_t nframes, prio0;
     uint64_t aff[GIC_MAX_FRAMES];
     uint64_t sre, icc_ctlr, pmr0, bpr1_0, igrpen1_0, rpr0, ctl0, cval0, daif0, spsel, vbar0, currentel_late;
     uint64_t cnthctl0, vbar1_0, sctlr1_0, hcr0, spsr_kept;
     int have_currentel_late, no_fire, no_deliver, storm, storm_once, ns_ppi, have_intid, have_sync, final_stuck, have_storm_after, hcr_ignore_imo;
-    int el1_lost, have_el1_vector, have_el1_sync, have_el1_intid, have_drop, have_hppir, no_istatus;
+    int el1_lost, have_el1_vector, have_el1_sync, have_el1_intid, have_drop, have_hppir, no_istatus, hide_pend;
     unsigned drop_after;
     uint64_t hppir_override;
     uint64_t intid_override, sync_at, delay, maxiter, storm_after, el1_vector, el1_sync_esr, el1_intid;
@@ -107,6 +109,7 @@ static void gic_reset(void)
     G.gicd_ctlr0 = 0x10;
     G.gicd_typer = 0x7F;
     G.gicd_iidr = 0x0001143B;
+    G.rtyper_lo = 1;
     G.nframes = 12;
     for (i = 0; i < GIC_MAX_FRAMES; i++) G.aff[i] = i;
     G.sre = 0xF;
@@ -259,7 +262,7 @@ static uint64_t mmio_read(uint64_t pa, unsigned size)
         violation("MMIO read outside the GIC frames", pa);
         return 0;
     }
-    if (off == SG_GICR_TYPER && size == 8) return (G.aff[frame] << 32) | (frame + 1 == G.nframes ? SG_GICR_TYPER_LAST : 0) | 1;
+    if (off == SG_GICR_TYPER && size == 8) return (G.aff[frame] << 32) | (frame + 1 == G.nframes ? SG_GICR_TYPER_LAST : 0) | G.rtyper_lo;
     if (!mine(frame)) {
         violation("read of a redistributor that is not this CPU's", pa);
         return 0;
@@ -270,7 +273,7 @@ static uint64_t mmio_read(uint64_t pa, unsigned size)
         off -= SG_SGI_FRAME;
         if (off == SG_IGROUPR0) return G.igroupr0;
         if (off == SG_ISENABLER0) return G.isenabler0;
-        if (off == SG_ISPENDR0) return (timer_asserted() ? prio_bit() : 0) | G.ispendr0_0;
+        if (off == SG_ISPENDR0) return ((timer_asserted() && !G.hide_pend) ? prio_bit() : 0) | G.ispendr0_0;
         if (off == SG_ISACTIVER0) return (G.active ? prio_bit() : 0) | G.isactiver0_0;
         if (off == SG_ICFGR1) return G.icfgr1;
         if (off >= SG_IPRIORITYR && off < SG_IPRIORITYR + 32) return off - SG_IPRIORITYR == SNAP_TIMER_INTID ? G.prio : 0;
@@ -578,6 +581,7 @@ static void gic_command(char *line)
         if (!strcmp(k, "CTLR")) G.gicd_ctlr0 = (uint32_t)v;
         else if (!strcmp(k, "TYPER")) G.gicd_typer = (uint32_t)v;
         else if (!strcmp(k, "IIDR")) G.gicd_iidr = (uint32_t)v;
+        else if (!strcmp(k, "RTYPER")) G.rtyper_lo = (uint32_t)v;
         else if (!strcmp(k, "FRAMES")) G.nframes = (uint32_t)v;
         else if (!strcmp(k, "AFF")) G.aff[num(tok[2]) % GIC_MAX_FRAMES] = num(tok[3]);
         else if (!strcmp(k, "WAKER")) G.waker0 = (uint32_t)v;
@@ -610,6 +614,7 @@ static void gic_command(char *line)
         else if (!strcmp(k, "DROP_AFTER")) G.drop_after = (unsigned)v, G.have_drop = 1;
         else if (!strcmp(k, "HPPIR")) G.hppir_override = v, G.have_hppir = 1;
         else if (!strcmp(k, "NO_ISTATUS")) G.no_istatus = 1;
+        else if (!strcmp(k, "HIDE_PEND")) G.hide_pend = 1;
         else if (!strcmp(k, "DELAY")) G.delay = v;
         else if (!strcmp(k, "NS_PPI")) G.ns_ppi = (int)v;
         else if (!strcmp(k, "MAXITER")) G.maxiter = v;

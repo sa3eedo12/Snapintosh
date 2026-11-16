@@ -11,7 +11,8 @@
  *            precondition that fails refuses with a named outcome and without a store.
  *   announce one line, NEXT GIC STORES AFTER 8 S, and eight seconds on the counter, then the first store. A hang or a reset at a store
  *            leaves a page that was already filmed.
- *   stores   G the distributor's group 1 enable, only when the decode says it is clear; R this CPU's redistributor, PPI only; C the CPU
+ *   stores   G the distributor's group 1 enable, only when the decode says it is clear; R this CPU's redistributor, PPI 26 only (its enable
+ *            only when found disabled; every other bit of ISENABLER0 is as the firmware left it); C the CPU
  *            interface. The class is marked begun in the record, and the record stored to REPORT.DAT, before its first store, and every
  *            register is read before it is changed and read back after: a store that does not hold is a named failure. PREPARED is
  *            written when all of them held, not before.
@@ -148,8 +149,9 @@ static uint64_t gic_mask(const struct sw_gic *g, unsigned id)
     }
 }
 
-/* One write of a put-back: the register goes back to `old`. A bit that is set by a write of one (ISENABLER0) goes back by the clear
- * register; the redistributor's enable was clear when found (a precondition), so there is never a bit to set. */
+/* One write of a put-back: the register goes back to `old`. A bit that was set by a write of one (ISENABLER0) goes back by the clear register, and
+ * only the PPI's own bit: the stage writes the enable only when PPI 26 was found disabled, so that bit is the only one it can have set, and every
+ * other bit is as the firmware left it and is never written. */
 static void gic_restore_write(struct sw_gic *g, unsigned id, uint64_t old, uint64_t cur)
 {
     switch (id) {
@@ -160,7 +162,7 @@ static void gic_restore_write(struct sw_gic *g, unsigned id, uint64_t old, uint6
         break;
     case SG_R_IGROUPR0: sp11hw_mmio_write32(g->sgi + SG_IGROUPR0, (uint32_t)old); break;
     case SG_R_ISENABLER0:
-        sp11hw_mmio_write32(g->sgi + SG_ICENABLER0, (uint32_t)(cur & ~old));
+        sp11hw_mmio_write32(g->sgi + SG_ICENABLER0, (uint32_t)(cur & g->bit & ~old));
         sw_gic_sync();
         (void)gic_wait_clear32(g, g->rd + SG_GICR_CTLR, SG_GICR_CTLR_RWP);
         break;
@@ -313,13 +315,20 @@ static unsigned gic_read_redistributor(struct sw_gic *g)
     r->reg[SG_R_ICFGR1].old = sw_gic_current(g, SG_R_ICFGR1);
     sw_gic_say(g, SG_L_GICR, 0);
     if (r->gicr_waker & (SG_GICR_WAKER_SLEEP | SG_GICR_WAKER_CHILDREN_ASLEEP)) return SG_OUT_GICR_ASLEEP;
-    /* The whole of ISENABLER0 must be clear, not only the PPI's bit: nothing else may be able to arrive while IRQ is open. */
-    if (r->reg[SG_R_ISENABLER0].old || ((r->reg[SG_R_ISPENDR0].old | r->reg[SG_R_ISACTIVER0].old) & g->bit)) return SG_OUT_PPI_OWNED;
+    /* Only PPI 26 itself pending or active is refused: someone else's interrupt is in flight on the line the windows use. Other PPIs enabled in
+     * ISENABLER0, and PPI 26 itself enabled, are accepted and left exactly as found (boot 12, OBSERVED, one unit: the firmware leaves SGI 0 and
+     * PPIs 23, 25, 26, 27 and 30 enabled). Another interrupt can be signalled while IRQ is open: the windows end on any INTID but 26 and name it
+     * (WRONG_INTID, HPPIR_NOT_26, NOT_CLEAN, FINAL_PENDING), and the reporter's GIC OLD line shows ISPENDR0 and ISACTIVER0 whole. */
+    if ((r->reg[SG_R_ISPENDR0].old | r->reg[SG_R_ISACTIVER0].old) & g->bit) return SG_OUT_PPI_OWNED;
     return 0;
 }
 
 /* The CPU interface is read only when ICC_SRE_EL2.SRE says the system register interface is on: with it off these reads are UNDEFINED. The
- * dry run's build also reads VBAR_EL2 and the timer, and refuses a timer that is already enabled: the monitor sets its own. */
+ * dry run's build also reads VBAR_EL2 and the timer. It refuses the timer only when it is asserting right now (ENABLE, not IMASK, ISTATUS: an
+ * interrupt is firing); the PPI check above normally sees that first, as PPI 26 pending, and this one is for a view in which the pending bit is
+ * not visible (INFERRED: an interrupt that is Secure reads as zero). Any other state, enabled and masked, enabled with its deadline ahead, or
+ * disabled, is accepted: nothing else runs at EL2 and IRQ is masked, the stage arms CNTHP itself, overwriting the deadline (CVAL, then CTL), and
+ * puts the saved CTL and CVAL back at the end (CVAL first, with the timer disabled, so that a past deadline cannot assert the line). */
 static unsigned gic_read_cpu_and_timer(struct sw_gic *g)
 {
     struct sw_gic_rec *r = &g->rec.r;
@@ -340,7 +349,7 @@ static unsigned gic_read_cpu_and_timer(struct sw_gic *g)
 #endif
     sw_gic_say(g, SG_L_CPU, 0);
 #if SW_GIC_DRY_REGS
-    return (r->reg[SG_R_CNTHP_CTL].old & SG_CNTHP_CTL_ENABLE) ? SG_OUT_TIMER_OWNED : 0;
+    return (r->reg[SG_R_CNTHP_CTL].old & SG_CNTHP_CTL_STATE) == SG_CNTHP_CTL_FIRING ? SG_OUT_TIMER_OWNED : 0;
 #else
     return 0;
 #endif
@@ -414,9 +423,14 @@ static unsigned gic_store_r(struct sw_gic *g)
         r->wrote |= 1u << SG_R_ICFGR1;
         sp11hw_mmio_write32(g->sgi + SG_ICFGR1, (uint32_t)cfg->new);
     }
-    en->new = g->bit;
-    r->wrote |= 1u << SG_R_ISENABLER0;
-    sp11hw_mmio_write32(g->sgi + SG_ISENABLER0, (uint32_t)en->new);
+#ifdef SP11_STICK_GIC_SEED_CLEAR_OTHERS
+    sp11hw_mmio_write32(g->sgi + SG_ICENABLER0, (uint32_t)(en->old & ~g->bit));     /* a stage that tidies the register: the other PPIs' enables are lost */
+#endif
+    if (!(en->old & g->bit)) {          /* the enable is written only when PPI 26 was found disabled; the other bits are never written */
+        en->new = g->bit;
+        r->wrote |= 1u << SG_R_ISENABLER0;
+        sp11hw_mmio_write32(g->sgi + SG_ISENABLER0, (uint32_t)en->new);
+    }
     sw_gic_sync();
     rwp = gic_wait_clear32(g, g->rd + SG_GICR_CTLR, SG_GICR_CTLR_RWP);
     en->rb = sw_gic_current(g, SG_R_ISENABLER0);

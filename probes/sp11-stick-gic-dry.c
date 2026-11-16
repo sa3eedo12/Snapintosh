@@ -4,7 +4,8 @@
  * hardware NOT RUN; compiled only under SNAP_SP11_STICK_GIC=1.
  *
  * Order, after the arm (the GIC is enabled, PREPARED is written, the record is in REPORT.DAT).
- *   T, V     the EL2 timer armed for the time box, VBAR_EL2 and IRQ unmasked inside the window routine only.
+ *   T, V     the EL2 timer armed for the time box, overwriting whatever deadline and enable it was found with (CVAL, then CTL; a timer found
+ *            asserting is refused in the reads), VBAR_EL2 and IRQ unmasked inside the window routine only.
  *   window 1 (EL2) three interrupts, each acknowledged, its level dropped by re-arming the timer a short time ahead and then ended
  *            (the order of the monitor's tick path, probes/xnuboot/async.c: HPPIR1, IAR1, the re-arm, the EOI); the fourth deadline is
  *            taken with no acknowledge at all, as the monitor's stop path takes it, and CNTHP_CTL = 0 must leave nothing pending. Each
@@ -105,7 +106,10 @@ static unsigned gic_arm_timer(struct sw_gic *g, unsigned w)
     r->reg[SG_R_CNTHP_CVAL].new = now + r->timebox_ticks;
     r->reg[SG_R_CNTHP_CTL].new = SG_CNTHP_CTL_ENABLE;
     r->wrote |= 1u << SG_R_CNTHP_CVAL | 1u << SG_R_CNTHP_CTL;
-    sp11hw_write_cnthp_cval_el2(r->reg[SG_R_CNTHP_CVAL].new);
+#ifdef SP11_STICK_GIC_SEED_KEEP_FOREIGN_DEADLINE
+    if (!(r->reg[SG_R_CNTHP_CTL].old & SG_CNTHP_CTL_ENABLE))     /* a stage that trusts the deadline it found when the timer was enabled */
+#endif
+    sp11hw_write_cnthp_cval_el2(r->reg[SG_R_CNTHP_CVAL].new);       /* the deadline first: a foreign enable stays quiet while it is overwritten */
     sp11hw_write_cnthp_ctl_el2(SG_CNTHP_CTL_ENABLE);
     r->reg[SG_R_CNTHP_CVAL].rb = sw_gic_current(g, SG_R_CNTHP_CVAL);
     r->reg[SG_R_CNTHP_CTL].rb = sw_gic_current(g, SG_R_CNTHP_CTL);
@@ -295,8 +299,16 @@ static void gic_dry_restore(struct sw_gic *g)
         sw_gic_put_back_reg(g, SG_R_DAIF);
     }
     if (r->begun & SG_CLASS_T) {
+        /* The deadline first, with the timer disabled (CTL = 0 above): a foreign enable put back over the deadline of the last window, which is in
+         * the past, would assert the line until the next write. After both writes the timer is as it was found, and asserts again only if its own
+         * deadline has passed during the run, as it would have without the stage. */
+#ifdef SP11_STICK_GIC_SEED_RESTORE_CTL_FIRST
         sw_gic_put_back_reg(g, SG_R_CNTHP_CTL);
         sw_gic_put_back_reg(g, SG_R_CNTHP_CVAL);
+#else
+        sw_gic_put_back_reg(g, SG_R_CNTHP_CVAL);
+        sw_gic_put_back_reg(g, SG_R_CNTHP_CTL);
+#endif
     }
 }
 

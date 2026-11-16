@@ -38,7 +38,7 @@ _Static_assert(SG_REC_AT == 0x11000u && SG_REC_BYTES <= SG_REC_SLOT && SG_REC_AT
 /* Store classes of the stage, one bit each. The authorisation record (docs/SP11-STICK-GIC.md section 7) groups them: G and R are the
  * frozen format's GIC class, C, T, V and E its EL2 system register class. */
 #define SG_CLASS_G 1u       /* the distributor's non-secure group 1 enable: GICD_CTLR */
-#define SG_CLASS_R 2u       /* this CPU's redistributor, PPI only: IGROUPR0, IPRIORITYR byte, ICFGR1, ISENABLER0, and their put-back */
+#define SG_CLASS_R 2u       /* this CPU's redistributor, PPI 26 only: IGROUPR0, IPRIORITYR byte, ICFGR1, ISENABLER0 (only when found disabled), and their put-back */
 #define SG_CLASS_C 4u       /* the CPU interface: ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1 */
 #define SG_CLASS_T 8u       /* the EL2 physical timer: CNTHP_CVAL_EL2, CNTHP_CTL_EL2 */
 #define SG_CLASS_V 16u      /* VBAR_EL2 and PSTATE.I, inside the window routines only */
@@ -447,14 +447,13 @@ SC_INLINE int sg_line(const struct q1n1_payload_args *a, struct pl_line *l, unsi
         sc_key_dec(l, " INTID=", intid);
         sc_key_dec(l, " HZ=", SG_U64(b, counter_hz));
         return 1;
-    case SG_L_OLD:
+    case SG_L_OLD:      /* the whole of ISPENDR0 and ISACTIVER0, so that another interrupt in flight is visible before the first store */
         pl_text(l, "GIC OLD");
         sg_key_h8(a, l, " PRIO=", SG_REG_OLD(b, SG_R_IPRIORITYR));
         sg_key_h32(a, l, " ICFGR1=", SG_REG_OLD(b, SG_R_ICFGR1));
         sg_key_h32(a, l, " IGROUPR0=", SG_REG_OLD(b, SG_R_IGROUPR0));
-        sg_key_h8(a, l, " PMR=", SG_REG_OLD(b, SG_R_ICC_PMR));
-        sg_key_h8(a, l, " BPR1=", SG_REG_OLD(b, SG_R_ICC_BPR1));
-        sg_key_bit(l, " IGRPEN1=", SG_REG_OLD(b, SG_R_ICC_IGRPEN1), 0);
+        sg_key_h32(a, l, " ISPEND=", SG_REG_OLD(b, SG_R_ISPENDR0));
+        sg_key_h32(a, l, " ISACT=", SG_REG_OLD(b, SG_R_ISACTIVER0));
         return 1;
     case SG_L_NEW:
         pl_text(l, "GIC NEW");

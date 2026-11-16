@@ -148,6 +148,8 @@ class GicQemu(base.WrapperQemu):
         self.assertIn('SNAPREP GIC VERDICT=IRQ_OK OUTCOME=0X20 SUB=DONE', rep)
         self.assertIn(f'SNAPREP GIC FRAMES GICD=0X8000000 GICR=0X80A0000 INTID=26 HZ={f.cntfrq}', rep)
         self.assertTrue(any(re.fullmatch(r'SNAPREP GIC IRQ INTID=26 LAT_US=-?\d+/-?\d+/-?\d+/-?\d+ OK=1111 FINAL=CLEAR', line) for line in rep), rep)
+        self.assertTrue(any(re.fullmatch(r'SNAPREP GIC OLD PRIO=0X[0-9A-F]+ ICFGR1=0X[0-9A-F]+ IGROUPR0=0X[0-9A-F]+ ISPEND=0X0 ISACT=0X0', line) for line in rep),
+                        'the reporter shows the whole of ISPENDR0 and ISACTIVER0 as found')
         cycles = [re.fullmatch(r'SNAPREP GIC CYC([0-4]) IAR=(\d+) HPPIR=(\d+) POST=(\d+) F=([01]{3}) TICKS=(-?\d+) US=(-?\d+)', line) for line in rep]
         cycles = {int(m.group(1)): m.groups()[1:] for m in cycles if m}
         self.assertEqual(sorted(cycles), [0, 1, 2, 3, 4], rep)

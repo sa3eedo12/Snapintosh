@@ -205,8 +205,8 @@ def render(r, which):
         return f'GIC FRAMES GICD={h(r.gicd_base)} GICR={h(r.gicr_base)} INTID={intid} HZ={r.counter_hz}'
     if which == 'OLD':
         g = lambda n, f: f(regs[n]['old'])                                        # noqa: E731
-        return (f'GIC OLD PRIO={g("IPRIORITYR", h8)} ICFGR1={g("ICFGR1", h32)} IGROUPR0={g("IGROUPR0", h32)} PMR={g("ICC_PMR", h8)} '
-                f'BPR1={g("ICC_BPR1", h8)} IGRPEN1={bit(regs["ICC_IGRPEN1"]["old"], 0)}')
+        return (f'GIC OLD PRIO={g("IPRIORITYR", h8)} ICFGR1={g("ICFGR1", h32)} IGROUPR0={g("IGROUPR0", h32)} ISPEND={g("ISPENDR0", h32)} '
+                f'ISACT={g("ISACTIVER0", h32)}')
     if which == 'NEW':
         return (f'GIC NEW GICD={h32(regs["GICD_CTLR"]["new"])} RB={h32(regs["GICD_CTLR"]["rb"])} ISEN={h32(regs["ISENABLER0"]["rb"])} '
                 f'PRIO={h8(regs["IPRIORITYR"]["rb"])} PMR={h8(regs["ICC_PMR"]["rb"])} IGRPEN1={bit(regs["ICC_IGRPEN1"]["rb"], 0)}')
@@ -460,8 +460,45 @@ class Checks:
 
     @staticmethod
     def timer_off(g):
-        ctl = [v for k, n, v, *_ in g.log if k == 'W' and n == 'CNTHP_CTL_EL2']
-        return [] if ctl and ctl[-1] == 0 and g.state['ctl'][1] & 1 == 0 else ['the timer was left enabled']
+        """The stage disables the timer when it is done with it, and a timer found enabled is put back after that: the last write is the disable, or, when
+        the timer was found with enable bits, the disable and then those bits; and the timer ends as it was found."""
+        found = g.state['ctl'][0] & 3
+        ctl = [v & 3 for k, n, v, *_ in g.log if k == 'W' and n == 'CNTHP_CTL_EL2']
+        return [] if ctl[-2 if found else -1:] == ([0, found] if found else [0]) and g.state['ctl'][1] == found else ['the timer was left enabled']
+
+    @staticmethod
+    def timer_quiet(g):
+        """The EL2 timer is never enabled and unmasked with its deadline already in the past, which would assert the line if only until the next
+        write: replays the writes of CNTHP_CVAL_EL2 and CNTHP_CTL_EL2 from the deadline the machine was found with."""
+        cval, found = g.state['cval'][0], []
+        for kind, name, value, _, tick in g.log:
+            if kind == 'W' and name == 'CNTHP_CVAL_EL2':
+                cval = value
+            elif kind == 'W' and name == 'CNTHP_CTL_EL2' and value & 3 == 1 and cval <= tick:
+                found.append(f'the timer was enabled and unmasked at tick {tick} with its deadline {cval} already past')
+        return found
+
+    @staticmethod
+    def arm_overwrites_deadline(g):
+        """The stage's arming overwrites the deadline it found: its first enable of the timer comes after a write of CNTHP_CVAL_EL2."""
+        for kind, name, value, *_ in g.log:
+            if kind == 'W' and name == 'CNTHP_CVAL_EL2':
+                return []
+            if kind == 'W' and name == 'CNTHP_CTL_EL2' and value & 1:
+                return ['the timer was enabled with the deadline it was found with']
+        return ['the timer was never armed']
+
+    @staticmethod
+    def enable_untouched(g, found, bit=1 << 26):
+        """The redistributor's enable register is left as the firmware had it: PPI 26 is written only when it was found disabled (a set, and later
+        a clear, of its own bit and nothing else), and no other bit is ever set or cleared."""
+        sets = [v for k, n, v, *_ in g.log if k == 'W' and n == 'GICR_ISENABLER0']
+        clears = [v for k, n, v, *_ in g.log if k == 'W' and n == 'GICR_ICENABLER0']
+        bad = [f'ISENABLER0 was written ({v:#x}) although PPI 26 was found enabled' for v in sets if found & bit]
+        bad += [f'ICENABLER0 was written ({v:#x}) although PPI 26 was found enabled' for v in clears if found & bit]
+        bad += [f'ISENABLER0 was written with {v:#x}: a bit but the PPI\'s' for v in sets if v & ~bit]
+        bad += [f'ICENABLER0 was written with {v:#x}: a bit but the PPI\'s was cleared' for v in clears if v & ~bit]
+        return bad + [f'ISENABLER0 ends {v[1]:#x}, found {v[0]:#x}' for k, v in g.state.items() if k == 'isenabler0' and v[0] != v[1]]
 
     @staticmethod
     def eoi(g):

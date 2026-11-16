@@ -26,7 +26,8 @@ FAKE_VECTORS, OLD_VBAR = 0xFEED0800, 0xCE879000      # the model's: the table th
 OLD_HCR, OLD_SCTLR1, OLD_VBAR1 = 0x88000010, 0x30D00980, 0x7B000000      # the model's and the unit's (OBSERVED at the payload call) EL1 state
 SEEDS = {'no-save': 'NO_SAVE', 'stray-store': 'STRAY_STORE', 'no-eoi': 'NO_EOI', 'timer-on': 'TIMER_ON', 'no-irq-mask': 'NO_IRQ_MASK',
          'store-first': 'STORE_FIRST', 'no-next': 'NO_NEXT', 'no-restore': 'NO_RESTORE', 'final-ack': 'FINAL_ACK', 'no-rearm': 'NO_REARM',
-         'no-imo': 'NO_IMO', 'no-el1-restore': 'NO_EL1_RESTORE', 'no-next-el1': 'NO_NEXT_EL1', 'unbounded-el1': 'UNBOUNDED_EL1', 'no-settle': 'NO_SETTLE'}
+         'no-imo': 'NO_IMO', 'no-el1-restore': 'NO_EL1_RESTORE', 'no-next-el1': 'NO_NEXT_EL1', 'unbounded-el1': 'UNBOUNDED_EL1', 'no-settle': 'NO_SETTLE',
+         'clear-others': 'CLEAR_OTHERS', 'keep-foreign': 'KEEP_FOREIGN_DEADLINE', 'restore-ctl-first': 'RESTORE_CTL_FIRST'}
 PIN = {n: o for n, o, _, _ in sb.PIN_LAYOUT}
 RECORD_AT = T.World.REPORT + G.REC_AT
 WINDOW_AT = T.World.REPORT + sb.REPORT_OUT
@@ -79,10 +80,21 @@ def batch(cases, variant='base', runs=('snapmon', 'snaprep')):
     return {name: Run(name, worlds[name], out.results[name], out.gic[name]) for name in cases}
 
 
-# The scenarios of the main run: each is a line or two of the model's configuration (tools/test-sp11-stick-gic.c). The unit as read (GICD_CTLR
-# 0x10, two security states, nothing enabled) is the default.
+# The scenarios of the main run: each is a line or two of the model's configuration (tools/test-sp11-stick-gic.c). The default is the unit as read
+# by the first boots (GICD_CTLR 0x10, two security states, nothing enabled); UNIT is the state boot 12 found (OBSERVED, one unit, from a photo of the
+# page): the firmware had enabled SGI 0 and PPIs 23, 25, 26, 27 and 30, PPI 26 at priority 0xA0, all PPIs level, PPI 26 neither pending nor active.
+# The EL2 timer (CNTHP) has never been read on the unit: the model's CTL is bits 1:0 and ISTATUS is derived from the deadline, so a CTL of 1 with the
+# default deadline 0 reads 0x5 (enabled, unmasked, asserting), a CTL of 3 reads 0x7 and a CTL of 1 with a far deadline reads 0x1. An asserting timer
+# also shows as PPI 26 pending, and the PPI check comes first; HIDE_PEND is the non-secure view that cannot see that bit (an interrupt that is Secure).
+FUTURE_CVAL = 0xFFFFFFFFFFFF
+UNIT = ['TYPER 0xF87F051E', 'IIDR 0x4010438', 'RTYPER 0xD0000E7', 'ISENABLER0 0x4E800001', 'PRIO 0xA0']
+UNIT_LINES = ('SNAPMON GIC GICD CTLR=0X10 ARE=1 DS=0 G1A=0 NEED_G=1 TYPER=0XF87F051E IIDR=0X4010438',
+              'SNAPMON GIC GICR IDX=0 TYPER=0XD0000E7 WAKER=0X0 ISEN=0X4E800001 PEND=0 ACT=0')
 CASES = {
     'happy': {},
+    'unit-boot12': dict(gic=UNIT),
+    'happy-enabled': dict(gic=['ISENABLER0 0x4000000']),
+    'happy-other-enabled': dict(gic=['ISENABLER0 0x40000000']),
     'happy-ds1': dict(gic=['CTLR 0x50']),
     'happy-g-on': dict(gic=['CTLR 0x13']),
     'happy-edge': dict(gic=[f'CFG1 {EDGE26:#x}']),
@@ -134,13 +146,17 @@ CASES = {
     'no-frame': dict(gic=['AFF 0 99']),
     'asleep': dict(gic=['WAKER 2']),
     'children-asleep': dict(gic=['WAKER 4']),
-    'owned-enabled': dict(gic=['ISENABLER0 0x4000000']),
-    'owned-other': dict(gic=['ISENABLER0 0x40000000']),
     'owned-pending': dict(gic=['ISPENDR0 0x4000000']),
     'owned-active': dict(gic=['ISACTIVER0 0x4000000']),
+    'unit-pending': dict(gic=[*UNIT, 'ISPENDR0 0x4000000']),
+    'unit-active': dict(gic=[*UNIT, 'ISACTIVER0 0x4000000']),
     'sre-clear': dict(gic=['SRE 0xE']),
-    'timer-masked': dict(gic=['CTL 3']),
-    'timer-future': dict(gic=['CTL 1', 'CVAL 0xFFFFFFFFFFFF']),
+    'timer-asserted': dict(gic=['CTL 1', 'HIDE_PEND']),
+    'timer-asserted-pending': dict(gic=['CTL 1']),
+    'happy-timer-masked': dict(gic=['CTL 3']),
+    'happy-timer-future': dict(gic=['CTL 1', f'CVAL {FUTURE_CVAL:#x}']),
+    'happy-timer-off': dict(gic=['CTL 0', 'CVAL 0x123456789']),
+    'timer-expires': dict(gic=['CTL 1', 'CVAL 19201000']),      # one second ahead of the model's first tick (1000): past long before the put-back
     'counter': dict(extra=['TICK 1000 0']),
     'window': dict(extra=[f'AT {RECORD_AT:#x} 0x300 ro']),
     'not-authorised': dict(bundle='plain'),
@@ -223,7 +239,8 @@ class Held:
 
     @staticmethod
     def common(run):
-        return WC.fault(run.mon) + G.Checks.stray_writes(run.g) + Held.page_text(run) + Held.report(run) + G.Checks.one_interrupt(run.g)
+        return (WC.fault(run.mon) + G.Checks.stray_writes(run.g) + Held.page_text(run) + Held.report(run) + G.Checks.one_interrupt(run.g) +
+                G.Checks.timer_quiet(run.g))
 
     @staticmethod
     def bounded(run):
@@ -244,10 +261,12 @@ def el2_ok(r):
     return all(G.entered(r.irq[k]) and r.irq[k].flags & G.IRQF['OK'] for k in range(4))
 
 
-def expected_writes(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, eoimode=0, pmr=0xFF, bpr1=0, igrpen1=0, cval0=0, cvals, intid=26):
+def expected_writes(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, isen=0, eoimode=0, pmr=0xFF, bpr1=0, igrpen1=0, cval0=0, ctl0=0, cvals, intid=26):
     """The stores of a clean run, in the document's order (docs/SP11-STICK-GIC.md section 4): G, R, C, T and window 1 (three acknowledged
     interrupts, each with the re-arm before its end, and the deadline taken without an acknowledge), the writes of class E, window 2, and the
-    put-backs. `cvals` are the deadlines the record names: the arm, the three re-arms and window 2's arm."""
+    put-backs. `cvals` are the deadlines the record names: the arm, the three re-arms and window 2's arm. `isen` is ISENABLER0 as found: the
+    PPI's enable is written, and cleared again, only when its bit was clear. `cval0` and `ctl0` are the EL2 timer as found: the arm overwrites
+    the deadline, and the put-back writes the deadline, and then the enable bits when it had any, over the timer that is disabled."""
     bit, ds, edge, w = 1 << intid, ctlr >> 6 & 1, 2 << (2 * (intid - 16)), []
     end = [('ICC_EOIR1_EL1', intid)] + ([('ICC_DIR_EL1', intid)] if eoimode else [])
     if not ctlr & 2:
@@ -258,7 +277,9 @@ def expected_writes(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, eoimode=0, pmr=0xF
         w.append(('GICR_IPRIORITYR', 0x80))
     if cfg1 & edge:
         w.append(('GICR_ICFGR1', cfg1 & ~edge))
-    w += [('GICR_ISENABLER0', bit), ('ICC_PMR_EL1', 0xF0), ('ICC_BPR1_EL1', 0), ('ICC_IGRPEN1_EL1', 1), ('CNTHP_CVAL_EL2', cvals[0]), ('CNTHP_CTL_EL2', 1),
+    if not isen & bit:
+        w.append(('GICR_ISENABLER0', bit))
+    w += [('ICC_PMR_EL1', 0xF0), ('ICC_BPR1_EL1', 0), ('ICC_IGRPEN1_EL1', 1), ('CNTHP_CVAL_EL2', cvals[0]), ('CNTHP_CTL_EL2', 1),
           ('VBAR_EL2', FAKE_VECTORS), ('DAIF', 0)]
     for k in (1, 2, 3):
         w += [('CNTHP_CVAL_EL2', cvals[k]), *end]
@@ -268,13 +289,16 @@ def expected_writes(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, eoimode=0, pmr=0xF
     w += [('CNTHP_CTL_EL2', 0), ('HCR_EL2', OLD_HCR), ('SCTLR_EL1', OLD_SCTLR1), ('VBAR_EL1', OLD_VBAR1)]
     if cvals[4] != cval0:
         w.append(('CNTHP_CVAL_EL2', cval0))
+    if ctl0 & 3:
+        w.append(('CNTHP_CTL_EL2', ctl0 & 3))
     if igrpen1 != 1:
         w.append(('ICC_IGRPEN1_EL1', igrpen1))
     if bpr1 != 0:
         w.append(('ICC_BPR1_EL1', bpr1))
     if pmr != 0xF0:
         w.append(('ICC_PMR_EL1', pmr))
-    w.append(('GICR_ICENABLER0', bit))
+    if not isen & bit:
+        w.append(('GICR_ICENABLER0', bit))
     if prio != 0x80:
         w.append(('GICR_IPRIORITYR', prio))
     if cfg1 & edge:
@@ -286,9 +310,11 @@ def expected_writes(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, eoimode=0, pmr=0xF
     return w
 
 
-def expected_wrote(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, **_):
+def expected_wrote(*, ctlr=0x10, prio=0, cfg1=0, igroupr0=0, isen=0, **_):
     """The registers a clean run marks as written in the record: the stores of expected_writes and the windows' VBAR_EL2 and DAIF."""
-    names = ['ISENABLER0', 'ICC_PMR', 'ICC_BPR1', 'ICC_IGRPEN1', 'CNTHP_CVAL', 'CNTHP_CTL', 'VBAR_EL2', 'DAIF', 'VBAR_EL1', 'SCTLR_EL1', 'HCR_EL2']
+    names = ['ICC_PMR', 'ICC_BPR1', 'ICC_IGRPEN1', 'CNTHP_CVAL', 'CNTHP_CTL', 'VBAR_EL2', 'DAIF', 'VBAR_EL1', 'SCTLR_EL1', 'HCR_EL2']
+    if not isen >> 26 & 1:
+        names.append('ISENABLER0')
     if not ctlr & 2:
         names.append('GICD_CTLR')
     if ctlr >> 6 & 1 and not igroupr0 >> 26 & 1:
