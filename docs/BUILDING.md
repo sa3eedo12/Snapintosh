@@ -294,6 +294,8 @@ python3 tools/test-sam-frames.py                # Surface Aggregator frame codec
 python3 tools/test-monitor-hardening.py         # SP11 monitor: the SSD adoption refusal (-145), GUEST_CPU_COUNT rules, the vCPU launch refusal (-146); needs clang, llvm-nm and ../q1n1 for the object checks
 python3 tools/test-sp11-timer-guard.py          # SP11 monitor: the CNTHCTL_EL2 read-back and CNTVOFF_EL2 refusals (-147, -148) against modelled worlds, and their call site (ASan/UBSan; needs clang; the object checks need llvm-objdump and q1n1)
 python3 tools/test-sp11-m1-profile.py           # the M1 monitor profile: pinned flag set, the required NV2 record and every refusal of it, the build (SKIP without clang, lld and q1n1)
+python3 tools/test-sp11-stick-bundle.py         # the stick bundle interface (SP11-STICK-BUNDLE.md): C and Python validators, refusal codes, seeded bad records (ASan/UBSan; needs clang; Q1N1_SP11_TREE=<q1n1 checkout> adds the runner-header comparisons)
+python3 tools/test-sp11-stick-bundle-build.py   # the bundle builder (SP11-STICK-BUILD.md): synthetic bundles, every refusal, determinism (needs a q1n1 checkout through Q1N1_SP11_TREE, 3 tests SKIP without one; SP11_BUILD_SKIP_SLOW=1 skips the build at realistic sizes)
 python3 tools/test-sp11-integration.py          # the units together: status bands, the 1<<36 boundary, cites, dump names, thermal, wiring
 ```
 
