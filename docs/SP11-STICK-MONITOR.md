@@ -1,4 +1,4 @@
-# SP11 stick wrapper: the monitor entry (work item 4b, Phases A to D)
+# SP11 stick wrapper: the monitor entry (work item 4b, Phases A to E)
 
 Status: EXPERIMENTAL. Hardware NOT RUN. Nothing in this note authorises a run: the operator authorises by the SHA-256 of the record that
 `--m1-run` makes (sections 10 and 12), and only then. Labels: VERIFIED (a host test of this tree shows it; never a hardware result), OBSERVED (a run on the unit,
@@ -7,8 +7,10 @@ one unit), INFERRED, EXPERIMENTAL, UNIMPLEMENTED, UNKNOWN. This work item has no
 ## 1. What it is
 
 SNAPMON-M1.BIN is the stick wrapper (docs/SP11-STICK-WRAPPER.md) with the monitor of the M1 profile appended and CALLED. After COPIED the
-wrapper synchronises the instruction caches, checks what the call relies on, arms the GIC with the arm half of the GIC stage (classes G, R, C
-only: docs/SP11-STICK-GIC.md), calls the monitor, and puts the GIC back. The monitor owns the CPU until it returns: nothing of the wrapper runs
+wrapper synchronises the instruction caches, checks what the call relies on, arms the GIC with the arm half of the GIC stage (the quarantine of this
+CPU's other enabled interrupts, classes G, R and C with their read-back, and the check of ICC_HPPIR1_EL1; docs/SP11-STICK-GIC.md section 4), calls the
+monitor, and puts the GIC back, the quarantine's enables last (not written when the put-backs of both group 1 gates failed: the stage then ends NOT_RESTORED with that quarantine
+still on; section 16). The monitor owns the CPU until it returns: nothing of the wrapper runs
 meanwhile, so its stops are its own (the EL2 timer's interrupt) and the power switch (docs/SP11-MONITOR-PORT.md stop rules).
 
 Opt-in at compile time: `SNAP_SP11_STICK_MONITOR=1` (needs `SNAP_SP11_STICK_GIC=1`, so `SNAP_SP11_STICK=1`; only 0 and 1; `#error` otherwise).
@@ -30,6 +32,8 @@ SNAPMON-M1.BIN and SNAPREP-M1.BIN: a different SHA-256 is a different authorisat
 | `tools/sp11_stick_bundle_m1.py`, `sp11_stick_bundle_build.py`, `sp11_stick_bundle_record.py` | Phase B (section 12): `--m1-run`, the build report read against the files, `PARAMS_LAUNCH`, `M1_TOUCHES` |
 | `tools/sp11_monitor_census.py`, `tools/test-sp11-stick-monitor-auth.py`, `tools/test-sp11-stick-monitor-interlock.py` | Phase B: the record checked against the binaries; the suites (the second: the interlock, reach and the corrected statements) |
 | `tools/sp11_stick_bundle_record_m1.py`, `tools/test-sp11-stick-monitor-{census,builder,devices}.py` | Phase D (section 14): the blocks of the M1 record that are checked against the binary or the sources (the guest SMC paragraph, the device section 3b, the placed entries); the three new suites |
+| `tools/sp11_stick_bundle_record_m1.py` (`GIC_LINES`, `GIC_FACT_LINES`, `PASS6_LINES`), `tools/test-sp11-stick-monitor-arm.py`, `tools/test-sp11-stick-monitor.c` (`MONREADS`) | Phase E (section 15): the record's `gic` class after pass 5 and its test against the host model's logs; the arm refusals 22 and 23; the harness counts the MMIO reads that the model does not log |
+| `tools/test-sp11-stick-monitor-gates.py`, `tools/sp11_stick_monitor_testlib.py` (`patches`, `reads_at`), `tools/test-sp11-stick-monitor.c` (`MONREADS POINT`) | Phase E part 2 (section 16): the exception to the put-back's last write (both group 1 gates left open) in the record text, the comments and the tests, with mutants of the stage |
 
 ## 3. Design
 
@@ -53,11 +57,11 @@ uses x18 freely (INFERRED harmless: the dry run returned to the runner).
 | --- | --- | --- |
 | COPIED 9 | checks, reads only: the record slot and the stack area probed writable (AT), the monitor's 64 KiB window and the 184 KiB filler below the stack's area zero, the PIN.DAT's `build_label` starting with `M1RUN-` (D2, section 14: after the probe, so that its refusal can store the record), PARAMS (time box 1 to 5 s, `early_stop.flags` 0, `gpu.flags` 0), the five ID registers, the monitor image hashed in place | refuse GIC_NOT_READY, detail 64 to 73 and 75; the record is stored with it, except for 72 REPORT_UNWRITABLE: its slot is what was found unwritable, so the page says it and nothing is stored there |
 | | `IC IALLUIS; DSB ISH; ISB` | none |
-| | `sw_gic_arm`: reads, the NEXT line, 8 s, stores G, R, C, read back; sets PREPARED | refuse GIC_NOT_READY, detail = the GIC outcome (0 to 48); put back first, and the GIC record finished (sub-stage DONE) as the dry run's `gic_finish` does |
+| | `sw_gic_arm`: the reads and the survey, the NEXT line, 8 s, then the stores in this order: the quarantine Q (a member of class R: one ICENABLER0 write, when this CPU has interrupts enabled besides PPI 26), G, R, C, each read back; then ICC_HPPIR1_EL1 read with IRQ masked (1023 or 26 passes); sets PREPARED | refuse GIC_NOT_READY, detail = the GIC outcome (this arm half returns 1 to 11, 13, 16 to 18, 20, 22, 23 and 48; 12, 14, 15, 19 and 21 are the dry run's own; Q_NOT_HELD 22 and FOREIGN_PENDING 23 are pass 5's, section 15); `mon_arm_failed` puts back first (the quarantine's enables last) and finishes the GIC record (sub-stage DONE) as the dry run's `gic_finish` does; the monitor is not called |
 | PREPARED 10 | thirteen EL2 registers read ("pre"); the stack area filled with a pattern | none |
 | MONITOR_ENTERED 11 | record stored (CALLING), head stored (`monitor_out`, `work_*`, `params_pa`, `ticks_launch`), the MON CALL line printed, the counter read once more, then the call | none |
 | MONITOR_RETURNED 12 | extension slots compared with what was stored before the call; window cleaned by VA; x0 and window words 0 and 1 stored; registers read again and compared; stack and filler scanned, zeroed and cleaned | none: a difference is a finding |
-| DONE 13 | GIC put back (C, R, G) and its record finished, this record stored, lines printed, `payload_entry` returns 0 | none |
+| DONE 13 | GIC put back (C, R, G, and last the quarantine's enables, unless both group 1 gates failed to go back: section 16) and its record finished, this record stored, lines printed, `payload_entry` returns 0 | none |
 
 No frozen refusal code fits the new checks: GIC_NOT_READY (82, side W) is reused with a detail from a new range (see section 11, change request 1).
 A quarantine return (0x51554E01 or 0x51554E02, probes/xnuboot-terminal.h) is recorded and printed with "POWER CYCLE"; the wrapper still returns
@@ -83,15 +87,15 @@ is not seen by the wrapper, which cannot tell it from the monitor's data (a stac
 
 At most 30 lines (frozen). The stage prints, after `STAGE=COPIED`: `MON IDS` (two lines), `MON IMAGE` (offset, bytes, 8 digest bytes, the time box
 and the two PARAMS flags), the GIC reads and the NEXT line (WI 8), `MON CALL` (x0 to x4 and SP), then after the call `MON RET`, `MON REGS`,
-`MON QUARANTINE` (only then), `GIC RESTORE`, `MON VERDICT`, `STAGE=DONE RETURN=0`. A quarantine page is 30 lines; the lines that can be dropped
-(IDS, IMAGE, TICKS) are the non-essential ones.
+`MON QUARANTINE` (only then), `GIC RESTORE`, `MON VERDICT`, `STAGE=DONE RETURN=0`. A `MON QUARANTINE` page is 30 lines; the lines that can be dropped
+(IDS, IMAGE, TICKS) are the non-essential ones. The page of an arm refusal, Q_NOT_HELD (22) or FOREIGN_PENDING (23), is 29 lines in the host model, one under the budget (Phase E, section 15).
 
 | Page | Meaning | Next |
 | --- | --- | --- |
 | runner `PAYLOAD REFUSED=...` | the runner refused SNAPMON-M1.BIN (hash, size, ABI) | fix the file |
 | `REFUSED=<NAME>` at stage <= GUEST_OK | bundle, pins or placement disagree; no RAM beyond REPORT.DAT written | frozen table |
 | `MON VERDICT=<PARAMS_* or IMAGE_* or REPORT_UNWRITABLE or WINDOW_DIRTY or PIN_LABEL>`, `REFUSED=GIC_NOT_READY DETAIL=0X40..0X49 or 0X4B` | a check before the call; stage COPIED, placement written, no register written | the named field |
-| `GIC VERDICT=<name>`, `REFUSED=GIC_NOT_READY DETAIL=0X0..0X30` | the GIC arm refused or a store did not hold (U3); nothing called | docs/SP11-STICK-GIC.md |
+| `GIC VERDICT=<name>`, `REFUSED=GIC_NOT_READY DETAIL=0X1..0X30`; for Q_NOT_HELD (0X16) and FOREIGN_PENDING (0X17) also `GIC QUAR MASK= DONE= HPPIR=` before `GIC RESTORE` | the GIC arm refused or a store did not hold (U3), or a foreign interrupt was next; the GIC is put back (when both group 1 gates fail to go back the quarantine's enables are not written: DETAIL 0X30, section 16), no `MON CALL` line, nothing called | docs/SP11-STICK-GIC.md section 10 |
 | last line `MON CALL ...`, no `MON RET` | the monitor never returned: unbounded guest (timer class or vector), a long prepare, or a fault in its first instructions. A hang or a reset then leaves in DRAM only the head and the CALLING record, both stored and cleaned before the call (its `ticks_call` is the counter read before the MON CALL line, section 5): the window is cleaned by the wrapper after the call returns, and the monitor's own clean at its exit covers the guest range, not REPORT.DAT (`publish(c->params->mem_low, c->params->mem_high)`, `probes/xnuboot/report.c:244`; `publish` is `probes/xnuboot/mmu_access.c:193`; INFERRED: the placement is above REPORT.DAT). All of it only if RAM survives the restart (U4) | power cycle |
 | q1n1 fault page after `PAYLOAD CALL` | a fault before the monitor's `msr vbar_el2` (offset 0x8c in the existing ELF) or in `xnuboot_setup/save`; else a wrapper bug. `_start` does not look at `xnuboot_setup`'s return value (below) | `llvm-nm -n` on the ELF |
 | `STACK=OVERFLOW` on `PAYLOAD DONE` | the runner's stack overran (not S2's) | report |
@@ -100,6 +104,10 @@ and the two PARAMS flags), the GIC reads and the NEXT line (WI 8), `MON CALL` (x
 | `WINDOW OVERRUN` | the extension slots changed during the call | finding |
 | `GIC RESTORE CLEAN=NO` | a GIC register did not go back | finding |
 | `MON QUARANTINE` | partial window; RAM must not be reused (RET 0x51554E01 or 02) | power cycle |
+
+Two lines say quarantine and are not the same thing on a photographed page. `MON QUARANTINE: THE REPORT IS PARTIAL AND RAM MUST NOT BE REUSED. POWER CYCLE` is the monitor's own
+return code (0x51554E01 or 0x51554E02) after a call, and it follows a `MON CALL` line. `GIC QUAR MASK= DONE= HPPIR=` is the arm half's quarantine of the firmware's other enabled
+interrupts: it is printed before any call, only when that half refused (Q_NOT_HELD or FOREIGN_PENDING), and no `MON CALL` line follows it.
 
 **`_start` ignores a refused setup** (the reviewer's finding 8). `probes/xnuboot.S:97-100` is `bl xnuboot_setup`, `mov x1, sp`, `mrs x9, tpidr_el2`, `str x1, [x9]`: x0, the `int`
 that `xnuboot_setup` returns (1 for a work area that is small or not 4 KiB aligned, `setup.c:15,22`, for a `txm_native` that is not zero, `:75`, and others; 0 at `:117`), is
@@ -197,13 +205,15 @@ Run from the repository root with `source <env>` first (clang, lld, llvm, QEMU o
 
 | H | Suite | What | Tests |
 | --- | --- | --- | --- |
-| H1, H2, H6 | test-sp11-stick-monitor.py | H1: a fake monitor returns ok, a prepare failure, an ESR, both quarantine codes, another value; leaves HCR, VBAR, TPIDR, DAIF, CNTHCTL, MDCR, VTTBR, CNTHP changed; stores beyond its window (three offsets); uses 1 KiB, 128 KiB, all of the stack. H2: order (copy, IC sync with no GIC access yet, arm, PREPARED, call); exact x0 to x4 and SP; no store to the placement after MONITOR_ENTERED; GIC writes only classes G, R, C to this CPU's frame; every check before the call (eight refusals, four GIC arm refusals). H6: the stop timer's interrupts as `async.c` takes them (transcribed): HPPIR1 26, IAR1 26, re-arm, EOIR1 (+ DIR with EOImode), post 1023, three times, then the deadline without an acknowledge leaves nothing pending; also from the OBSERVED firmware state of section 9. Phase C: the GIC record the reporter reads after a failed put-back, the filler below the stack (three overflows), the unwritable record slot, the tick of the call, and the model's dirty lines (section 13). Phase D: the PIN.DAT's label (section 14, D2): the reviewer's mix of a `--gic-stop` PIN.DAT with the M1 image, a marker that is late or one byte short, and a one-character facts label that passes | 33 |
+| H1, H2, H6 | test-sp11-stick-monitor.py | H1: a fake monitor returns ok, a prepare failure, an ESR, both quarantine codes, another value; leaves HCR, VBAR, TPIDR, DAIF, CNTHCTL, MDCR, VTTBR, CNTHP changed; stores beyond its window (three offsets); uses 1 KiB, 128 KiB, all of the stack. H2: order (copy, IC sync with no GIC access yet, arm, PREPARED, call); exact x0 to x4 and SP; no store to the placement after MONITOR_ENTERED; GIC writes only classes G, R (the quarantine is a member) and C to this CPU's frame; every check before the call (eight refusals, four GIC arm refusals). H6: the stop timer's interrupts as `async.c` takes them (transcribed): HPPIR1 26, IAR1 26, re-arm, EOIR1 (+ DIR with EOImode), post 1023, three times, then the deadline without an acknowledge leaves nothing pending; also from the OBSERVED firmware state of section 9. Phase C: the GIC record the reporter reads after a failed put-back, the filler below the stack (three overflows), the unwritable record slot, the tick of the call, and the model's dirty lines (section 13). Phase D: the PIN.DAT's label (section 14, D2): the reviewer's mix of a `--gic-stop` PIN.DAT with the M1 image, a marker that is late or one byte short, and a one-character facts label that passes | 33 |
 | H3, H4, H7 | test-sp11-stick-monitor-build.py | section 7; the gate off (the dry-run pair is the unit's, byte for byte; the GIC pair is not changed by this item: built twice from snapshots, with the earlier files as committed and as edited); the census; the stack census; hygiene | 33 |
 | H5 | test-sp11-stick-monitor-record.py | the record decoded independently; the page lines of wrapper and reporter against an independent renderer; the reporter on REPORT.DAT files built in Python; the window offsets and PARAMS words compiled against the monitor's own translation unit; the event and status names against the host's tables | 19 |
 | H8 | test-sp11-stick-monitor-build.py, class Trampoline | Phase C (section 13): the real bytes of `sw_monitor_call` run at EL2 under QEMU's `-cpu max`; the monitor and the wrapper as a whole are NOT RUN under QEMU (EDK2 sets T0SZ 16 under `-cpu max`; FEAT_NV2 there is UNKNOWN) | 4 (the suite: 37) |
 | H9 | test-sp11-stick-monitor-census.py | Phase D (section 14, D3): the second review's mutants (an MSR, an SMC, a TLBI, a DC and an IC written over the first instruction of `xnuboot_report`; an MRS turned into an MSR in the wrapper; a data word that is an MSR), each failing the placed check that the name check passes; the ties of both ELFs to section 1b; the parser and the decoder | 20 |
 | H10 | test-sp11-stick-monitor-builder.py | Phase D (D2, D4): the label marker in PIN.DAT, refused in the facts of every kind and when it does not fit; the two EFI digests; `real --m1-run` refused unless the panel is withheld and the HVC patch is 0; `real --m1-run` run end to end on the host (SKIP without the J700 boot set) | 14 |
 | H11 | test-sp11-stick-monitor-devices.py | Phase D (D1, D5, D6, D7): the families of device code against the symbol table, the families the build leaves out, every SMC owner, the sources the gates are read from, the interrupts the monitor acknowledges, the thermal text, the kernelcache scan (SKIP without the boot set) and the hygiene of the new files | 22 |
+| H12 | test-sp11-stick-monitor-arm.py | Phase E (section 15, E1 and E2): the record's `gic` class against the registers the host model of the arm half logs in 17 runs, its offsets and outcome numbers, the place for pass 6; the arm outcomes 22, 23 and 48 refused before the monitor is called (the call counter, the put-back, the page at 29 of 30 lines, the reporter without `GIC QUAR`); five seeded-bad stages | 27 |
+| H13 | test-sp11-stick-monitor-gates.py | Phase E part 2 (section 16): the put-back's last write is not made with both group 1 gates left open (after a refusal and after the call) and is made with one gate stuck or a gate found open; the record's claims about it against the model; four mutants of the stage and nine faulty texts | 20 |
 
 Seeded-bad stages (a test define each; the real stage passes the check, the seeded one fails it; all as required): `no-params-check`, `no-digest`,
 `no-reg-check`, `no-ic-sync`, `stray-gic` (a write to another CPU's redistributor frame), `wrong-args` (x1 and x2 swapped), `no-s2`,
@@ -218,15 +228,16 @@ HPPIR value and a timer that never fires. What no host test shows: the monitor's
 
 The dry run of docs/SP11-STICK-GIC.md refused in its read phase (boot 12, one unit, from a photograph): ISENABLER0 0x4E800001 (SGI 0 and PPIs 23, 25,
 26, 27, 30 enabled), IPRIORITYR[26] 0xA0, all PPIs level, PPI 26 neither pending nor active, GICR awake, GICD_CTLR 0x10 (ARE_NS 1, DS 0), GICD_TYPER
-0xF87F051E, IIDR 0x401043B (the boot 12 note read 0x4010438 from the photograph: one digit misread, corrected from the boot 13 video, OBSERVED). These are the initial state of the `happy-observed` and `replay-observed*` cases. WI 8 relaxed the precondition (accept
-firmware-enabled PPIs, refuse only PPI 26 pending or active; ISENABLER0 written only when bit 26 is clear): with it the arm stores GICD_CTLR (G1A),
-IPRIORITYR[26] = 0x80 and the class C registers, leaves ISENABLER0 alone, and puts everything back (VERIFIED in the model). RISK (INFERRED): PPIs 23,
-25, 27 and 30 stay enabled while the guest runs and IRQ is routed to EL2: any of them arriving ends the run with EV_ASYNC (`async.c`: only
-HPPIR1 == 26 is the tick). Whether PPI 26 arrives at EL2 at all (U3), and from the guest at EL1, is UNKNOWN until the dry run's second half runs. Pass 5 (e9bc7c1,
-docs/SP11-STICK-GIC.md) changed the arm half after boot 13 showed INTID 27, the EL1 virtual timer, pending and enabled from firmware (OBSERVED from video): it takes the other
-enabled bits of this CPU's ISENABLER0 away (ICENABLER0, 0x4A800001 where firmware left 0x4E800001) before the call and puts them back after it (ISENABLER0 last), and refuses
-FOREIGN_PENDING (detail 23) when ICC_HPPIR1_EL1 shows anything but 1023 or 26. The cases above now expect those two writes. What the monitor does with an interrupt that is not
-PPI 26 is unchanged (section 14, D7).
+0xF87F051E, IIDR 0x401043B (the boot 12 note read 0x4010438 from the photograph: one digit misread, corrected from the boot 13 video, OBSERVED). These are the initial state of the `happy-observed` and `replay-observed*` cases.
+WI 8's first relaxation of the precondition (pass 4, superseded: accept firmware-enabled PPIs, refuse only PPI 26 pending or active, write ISENABLER0 only when bit 26 is clear and leave the
+other enabled PPIs as found) let the arm store GICD_CTLR (G1A), IPRIORITYR[26] = 0x80 and the class C registers and put them back (VERIFIED in the model). Its RISK (INFERRED then) was that PPIs 23, 25, 27 and 30
+stay enabled while the guest runs and IRQ is routed to EL2: any of them arriving ends the run with EV_ASYNC (`async.c`: only HPPIR1 == 26 is the tick). Boot 13 showed it in the dry run (INTID 27, the EL1
+virtual timer by the unit's GTDT, pending and enabled from firmware; OBSERVED from video), and pass 5 (e9bc7c1, docs/SP11-STICK-GIC.md) replaced the rule. Since pass 5 the arm half (1) takes every enabled
+bit of this CPU's ISENABLER0 but PPI 26's away first, in one ICENABLER0 write (0x4A800001 where firmware left 0x4E800001); (2) writes ISENABLER0 for two purposes only: PPI 26's own bit, when it was found clear
+(not on the unit's state), and, as the last write of the run, the bits it cleared (not written, since pass 6, when the put-backs of both group 1 gates failed: section 16); (3) refuses FOREIGN_PENDING (detail 23) when ICC_HPPIR1_EL1, read with IRQ masked after the stores, shows anything
+but 1023 or 26, and Q_NOT_HELD (detail 22) when ISENABLER0 does not read back as PPI 26's bit alone after the quarantine. The cases above expect the first and the last of those writes. Whether PPI 26 arrives at
+EL2 at all (U3), and from the guest at EL1, is UNKNOWN until the dry run's second half runs. What the monitor does with an interrupt that is not PPI 26 is unchanged (section 14, D7); the record's `gic` class
+says what the arm half does since pass 5, per register, duration and outcome (section 15), and since pass 6 the one exception to its last write (section 16).
 
 ## 10. For Phase B: the record text, the builder and the authorisation
 
@@ -242,7 +253,7 @@ registers, the keys and the maintenance, and names OSLAR, which is conditional a
   (three sites), VTCR_EL2, VTTBR_EL2 (with TLBI VMALLS12E1IS), VMPIDR_EL2, CNTHCTL_EL2, VNCR_EL2, MDCR_EL2, SPSR_EL2, ELR_EL2, CNTHP_CVAL/CTL_EL2; the
   guest's EL1 regime: MAIR, TCR, TTBR0/1, VBAR, ESR, FAR, CNTKCTL, SCTLR, MDSCR, DBGBVR0-5 and DBGBCR0-5_EL1; the ten EL1 PAC key registers; AT, PAR_EL1,
   TLBI and DC maintenance. Restored at return except VNCR_EL2, VBAR_EL1, ESR/FAR_EL1, SPSR/ELR, SP_EL0/1, PAR_EL1 and the keys (probes/xnuboot/report.c).
-- `gic`: the wrapper's classes G, R, C and their put-back (GICD_CTLR, IGROUPR0, IPRIORITYR[26], ICFGR1, ISENABLER0 only when bit 26 was clear, ICC_PMR,
+- `gic` (pass 4's list; since pass 5 the record's text is section 15's, and since pass 6 it carries the exception of section 16): the wrapper's classes G, R, C and their put-back (GICD_CTLR, IGROUPR0, IPRIORITYR[26], ICFGR1, ISENABLER0 when bit 26 was clear and, since pass 5, ICENABLER0 for the quarantine and last ISENABLER0 for the bits it cleared (not when both group 1 gates failed to go back), ICPENDR0, ICC_PMR,
   BPR1, IGRPEN1); the monitor's ICC_IAR1, EOIR1 and DIR. No GIC frame of another CPU, no ITS.
 - `ram`: the monitor's 64 KiB window, its 240 MiB work arena, the guest range and the cache maintenance that publishes it, REPORT.DAT's two records, and
   the 256 KiB stack in REPORT.DAT's tail (filled with a pattern, zeroed afterwards).
@@ -408,6 +419,85 @@ wrapper checks it again and nothing makes it later (PRIVATE). `compat/hamoa-ther
 **D7, which interrupts are acknowledged (finding 7).** The boot CPU reads ICC_IAR1_EL1 in two places, both in `xnuboot_async` (the census: that function twice, `secondary_gic_stop`, not reached, once): INTID 26, when
 `ICC_HPPIR1_EL1` names it, the timer's ISTATUS is set and the run's deadline is ahead (`async.c:87-94`), and, behind the LIVE gate `gpu.flags`, INTID 0x14C (`gpu_irq`, `async.c:79-83`). Any other IRQ or FIQ, and the timer at the
 deadline, ends the run with the interrupt not acknowledged (`async.c:167`): the monitor records it, disables its timer and returns, so a foreign interrupt stays pending (INFERRED). The arm half's quarantine of the
-firmware's enabled interrupts is pass 5's (section 9); the record's `gic` class says nothing of it here.
+firmware's enabled interrupts is pass 5's (section 9); Phase D left the record's `gic` class silent on it, and Phase E's text says it (section 15).
 
 Counts: monitor 33, record 19, build 37, auth 54, interlock 46, census 20, builder 14, devices 22. The size caps of this note and of the auth suite's check of it were raised for this section; nothing was cut.
+
+## 15. Phase E: the third review (host only): the M1 record's `gic` class after pass 5, the arm refusals 22 and 23, the stale statements
+
+A third independent review, of the GIC stage's pass 5 (e9bc7c1), whose arm half the monitor entry calls (`probes/sp11-stick-gic.c`, shared), found what follows on the files of this item. Hardware NOT RUN;
+nothing here authorises a run.
+
+**E1, the `gic` class of the M1 record (HIGH).** The class said that "the other PPIs that firmware enabled stay as found" and nothing of the quarantine, the check of ICC_HPPIR1_EL1 or the outcomes 22 and
+23: false for this build since pass 5. It is now `GIC_LINES` of `tools/sp11_stick_bundle_record_m1.py` (the literal in `M1_TOUCHES` is gone; the texts of the dry run and of `--gic-stop` are untouched, and
+their digests regenerate) with the facts block `GIC_FACT_LINES` after the classes. Per register it gives, on one line (two spaces, `W` or `R`, the name): the frame and offset (D = gicd_base; RD = gicr_first +
+index * gicr_stride, the frame whose GICR_TYPER matches this CPU; SGI = RD + 0x10000), when the stage touches it, what it is read back against, the outcome that names a failure and its put-back, in the order the
+stage makes them: Q, the quarantine (ICENABLER0), first; G; R; C; the quarantine's enables (ISENABLER0) last, but for the exception of pass 6 (section 16). The arm half is the dry run's source built with SW_GIC_DRY_REGS=0: no CNTHP, VBAR_EL2, EL1 register or
+EL1 timer; its survey is stored in the GIC record (version 3, 1456 bytes at REPORT.DAT + 0x11000) and printed by no M1 line.
+- Duration. The quarantine is on from its ICENABLER0 write to the put-back's last write, which is after the monitor returns: the whole call (with the exception of pass 6, section 16, there is no such write and it is still on when the run ends). What bounds it is the monitor's own stop (the CNTHP interrupt, PPI 26, at
+  the time box, 5 s at most; whether PPI 26 arrives is U3, UNKNOWN), after the monitor's prepare (duration UNKNOWN) and before its stop's clean (about 0.6 s, INFERRED) and the wrapper's scans and polls. Nothing in the
+  wrapper bounds it: a call that never returns ends by the power cycle, and the put-back does not run (that the firmware sets the GIC up again at the restart is INFERRED). While it is on SGI 0 and PPIs 23, 25, 27
+  and 30 cannot be signalled, the guest's EL1 timers (INTID 27 and 30 in the unit's GTDT, OBSERVED) among them: what the guest does without them is UNKNOWN.
+- The page. The arm refusals reach the operator through `mon_arm_failed`: `GIC QUAR`, `GIC RESTORE`, `GIC VERDICT`, `MON VERDICT=GIC_NOT_READY`, `REFUSED=GIC_NOT_READY STAGE=COPIED DETAIL=0X16 or 0X17` (0X30 when the
+  put-back fails too). The foreign INTID of a FOREIGN_PENDING refusal is on that live page only: SNAPREP-M1.BIN prints `GIC GICD`, `GICR`, `CPU`, `NEW` and `RESTORE` and has no `GIC QUAR` line.
+- Labels. The boot 12 and boot 13 facts are OBSERVED, one unit, one boot each, in the dry run's build (docs/SP11-STICK-GIC.md section 12), with its INFERRED and UNKNOWN items; the text says that neither the
+  quarantine nor the check has run on the unit. The offsets are the stage's map, INFERRED from the GICv3 text as remembered. The text has no VERIFIED (a test).
+- The place for pass 6 was `PASS6_LINES` in the same module, empty in Phase E. Phase E part 2 (section 16) filled it: its sentence is printed after the lines of the ISENABLER0 write, and the rendered text has no marker.
+- The test. The census sees system registers and not MMIO, so `tools/test-sp11-stick-monitor-arm.py` compares the text with what the host model of the stage logs outside the fake monitor, in 17 runs (7 that complete,
+  10 that refuse or fail): every register written in some run is a `W` line, every register only read an `R` line, every `W` line is written in some run; the offsets (the architecture's as remembered, and
+  `probes/sp11-stick-gic.h`'s), the outcome numbers and the order of the page lines are checked, and so are the conditions the text states (ICPENDR0 only when INTID 26 is left pending, IGROUPR0 only with DS set, no
+  other ICC register read when SRE is clear, no write of GICR_WAKER). The model logs only some MMIO reads (GICD_CTLR, GICD_ISENABLER[n], GICD_ISPENDR[n]), so the monitor entry's harness counts the others itself
+  (`MONREADS`: the model's three read functions are renamed for the include, and no GIC test file is edited); that depends on the names `sp11hw_mmio_read8/32/64`, `locate`, `mine` and `in_window` of
+  `tools/test-sp11-stick-gic.c`. Faulty cases: a text without a register, with one labelled the other way, with one no run writes, with one named twice, with a wrong offset and with a wrong outcome number.
+
+**E2, the missing cases (MEDIUM).** The arm outcomes Q_NOT_HELD (22) and FOREIGN_PENDING (23) had no case at all. `refuse-q-not-held` (the model ignores the ICENABLER0 write) and `refuse-foreign-pending` (an SPI,
+INTID 40, enabled and pending: what the quarantine of this CPU's redistributor does not cover) end before the monitor is called: GIC_NOT_READY with detail 22 or 23 at stage COPIED; through `mon_arm_failed` (the points
+PUTBACK and REFUSED, the monitor record GIC_NOT_READY at ARMING, the GIC record DONE with the refusal as outcome and first outcome); the call counter 0 (no CALL mark, no state line, no `MON CALL` line); every
+register as found (the model's state, the record's failed and retried masks 0) and, for 23, the writes in their exact order (the quarantine first, C, R and G put back, ISENABLER0 last); the page at 29 of the 30
+lines (re-measured on the host model: 29 for both and for NOT_RESTORED, 26 to 28 for the refusals before a store); and the reporter without a `GIC QUAR` line. A third case, `refuse-foreign-not-restored`, makes the
+put-back of ISENABLER0 fail: DETAIL 0X30, `GIC VERDICT=NOT_RESTORED FIRST=FOREIGN_PENDING`, the register left as the quarantine left it. Seeded-bad stages: the GIC stage's `no-quarantine`, `no-hppir-check` and
+`quarantine-no-putback` (their defines are `probes/sp11-stick-gic.h`'s) and two of the monitor stage's own, `SP11_STICK_MONITOR_SEED_ARM_REFUSAL_CALLS` (a refused arm does not stop the call) and
+`SP11_STICK_MONITOR_SEED_NO_ARM_PUTBACK` (`mon_arm_failed` does not put back), compiled only into the host harness. Each fails the check that matches its fault on the run that shows it, and the real stage passes that
+check.
+
+**E3, stale statements (LOW).** "Classes G, R and C" without the quarantine, the check and the outcomes 22 and 23, "ISENABLER0 only when bit 26 was clear" and "the other PPIs stay as found" are corrected: the header
+comments of `probes/sp11-stick-monitor.c` and `-monitor.h`, the build report's `variant` string, and this note (sections 1, 3, 4, 9, 10 and 14). Nothing but comments changed there: the dry-run pair, the GIC pair and
+the M1 pair, and their ELFs, rebuild byte for byte before and after. Section 4 also tells the two quarantines apart on a photographed page: `MON QUARANTINE ... POWER CYCLE` is the monitor's own return code and follows a
+`MON CALL` line; `GIC QUAR MASK= DONE= HPPIR=` is the arm half's quarantine of foreign interrupts, comes before any call and only when that half refused.
+
+Counts: monitor 33, record 19, build 37, auth 54, interlock 46, census 20, builder 14, devices 22, arm 27. The size cap of this note and of the auth suite's check of it was raised from 60,000 to 70,000 for this section;
+nothing was cut. The M1 template (`build/sp11-m1-record-template.txt`, the test record) grew from 33,082 to 45,987 bytes and from 343 to 470 lines: only the `gic` class changed, and the facts block was added. The two
+digests that the auth suite pins for the text were re-pinned.
+
+## 16. Phase E, part 2: pass 6 of the GIC stage, the exception to the put-back's last write (host only)
+
+Pass 6 (6eed864; `probes/sp11-stick-gic.c`, `gic_both_gates_open`) changed a rule that this note and the record text still stated the old way: the put-back's last write, which enables again the bits the
+quarantine cleared, is NOT made when the put-backs of BOTH ICC_IGRPEN1_EL1 and GICD_CTLR failed (both group 1 gates left open). ISENABLER0 is then only read and named in FAILED (bit 2), the quarantined
+interrupts stay disabled and the run ends NOT_RESTORED (48, OUTCOME=0X30; a refusal stays FIRST). One gate stuck and the other closed is not that case (the write is made, inert behind the closed gate); a
+gate found open is not counted as failed, so with GICD_CTLR found with EnableGrp1A set and ICC_IGRPEN1_EL1 stuck the write IS made behind two open gates, a limit that docs/SP11-STICK-GIC.md section 4
+states. On the unit's state both gates are the stage's own (OBSERVED, boots 12 and 13). The rule holds after a refusal (`mon_arm_failed`) and after the call alike: both call `sw_gic_put_back`. The reason
+is the stage's, INFERRED. Hardware NOT RUN; the rule has never run on the unit.
+
+**P1, the record's text.** `PASS6_LINES` of `tools/sp11_stick_bundle_record_m1.py`, empty in Phase E, holds the sentence, printed as a continuation of the ISENABLER0 entry, which now says "the last register
+write of the whole run, but for the exception that follows". The ICPENDR0 entry, the how-long paragraph (no last write: the quarantine is still on when the run ends, and the put-back after a refusal does
+not lift it), the refusal paragraph (DETAIL 0X30), the "Never" paragraph and the facts block ("always followed by the put-back", no longer "with a full put-back") carry the exception. Measured on the host
+model, the case after a FOREIGN_PENDING refusal prints 29 lines with `GIC RESTORE CLEAN=NO FAILED=0X205 RETRIED=0X201 BEGUN=GRC` (a mask: GICD_CTLR 0X1, ISENABLER0 0X4, ICC_IGRPEN1_EL1 0X200), `GIC
+VERDICT=NOT_RESTORED FIRST=FOREIGN_PENDING OUTCOME=0X30` and `DETAIL=0X30`; after the call it prints `GIC RESTORE CLEAN=NO FAILED=0X205 ...` and `MON VERDICT=RETURNED FLAGS=0X8F` (GIC_NOT_RESTORED, 0X80):
+no refusal.
+
+**P2, the other places.** Sections 1, 3, 4, 9, 10 and 15, and the comments of `probes/sp11-stick-monitor.c`, `.h` and `tools/test-sp11-stick-monitor.py`. Comments only: every binary and ELF of the
+monitor-off, GIC and M1 builds is what it was before this part (SNAPMON-GIC.BIN and SNAPMON-M1.BIN moved with pass 6, whose arm half they share).
+
+**P3 and P5, the tests.** `tools/test-sp11-stick-monitor-gates.py` (20 tests) runs nine scenarios in the harness: no gate stuck (control); a refused arm (FOREIGN_PENDING, INTID 40) with both gates stuck
+(`NOHOLD GICD_CTLR 0` and `NOHOLD ICC_IGRPEN1_EL1 0`, from the start of the put-back), with either, and with a gate found open; and after the call with both and with either. It holds the stage to: no write of
+ISENABLER0 and the put-back's reads of it (`MONREADS POINT`: 2, against 3 with a write read back), FAILED, NOT_RESTORED, the gates still open, the page and the path (`mon_arm_failed` or the call); with one
+gate, the write as the last write. It compares the claims of the text with what the runs show. Four mutants (text patches of `probes/sp11-stick-gic.c` made in memory in a scratch copy: `patches` of `harness()`
+in `tools/sp11_stick_monitor_testlib.py`; one that no longer matches exactly once fails loudly) each fail the check that matches and the comparison: `gates-rule-removed` (`withheld`), `gates-either` (`made`),
+`gates-not-reported` (`withheld`) and `found-open-counted` (`found_open_made`). The comparison names nine faulty texts, among them one without the sentence, one that claims the write unconditional and one with
+"either" for "both".
+
+**P4, pins, limits.** The auth suite's two pinned texts were re-pinned; the template (`build/sp11-m1-record-template.txt`, the test record) is 47,878 bytes in 487 lines (45,987 and 470 before, on the pass 6
+binaries). The size cap of this note and of the auth suite's check of it was raised from 70,000 to 75,500 for this section, which leaves a few hundred bytes; nothing was cut. Limits: `NOHOLD reg 0` reads the GIC record's sub-stage to know that
+the put-back began, so these tests follow `tools/test-sp11-stick-gic.c`; the comparison reads phrases, so a re-worded sentence needs `claims()` changed with it.
+
+Counts: monitor 33, record 19, build 37, auth 54, interlock 46, census 20, builder 14, devices 22, arm 27, gates 20.

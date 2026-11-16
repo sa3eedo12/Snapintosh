@@ -4,7 +4,7 @@
 around the call, host only. H1: a fake monitor (tools/test-sp11-stick-monitor.c) that returns ok, a prepare failure, an EL2 fault status, both
 quarantine codes, another value, leaves HCR_EL2, VBAR_EL2 or TPIDR_EL2 changed or stores beyond its window. H2: the order of events (the copy, the
 instruction-cache sync, the GIC arm, PREPARED, the call), the exact arguments x0 to x4, the stack, no store to the placement after MONITOR_ENTERED,
-GIC writes only to this CPU's frame and only of classes G, R and C. Every check before the call, each refusing before anything but REPORT.DAT is
+GIC writes only to this CPU's frame and only of classes G, R and C (since pass 5 the quarantine is a member of R). Every check before the call, each refusing before anything but REPORT.DAT is
 stored to. H6: the stop timer's interrupts as the monitor takes them (probes/xnuboot/async.c, transcribed in the harness) against the GIC state the
 arm half leaves, with the firmware's own state as the unit showed it once (OBSERVED, one unit). Phase C (section 13): the GIC record that the reporter
 reads after a failed put-back, the filler below the stack, an unwritable record slot, the tick of the call, and the dirty lines of the harness's model
@@ -37,7 +37,7 @@ PIN = {n: o for n, o, _, _ in sb.PIN_LAYOUT}
 # The GIC as the unit showed it once, in the read phase of the dry run (OBSERVED, one unit, from a photograph; docs/SP11-STICK-MONITOR.md section 8).
 OBSERVED_GIC = ['CTLR 0x10', 'TYPER 0xF87F051E', 'IIDR 0x401043B', 'ISENABLER0 0x4E800001', 'PRIO 0xA0', 'CFG1 0', 'WAKER 0', 'IGROUPR0 0']
 WRAPPER_WRITES = {'GICD_CTLR', 'GICR_IGROUPR0', 'GICR_IPRIORITYR', 'GICR_ICFGR1', 'GICR_ISENABLER0', 'GICR_ICENABLER0', 'GICR_ICPENDR0', 'ICC_PMR_EL1',
-                  'ICC_BPR1_EL1', 'ICC_IGRPEN1_EL1'}             # classes G, R and C and their put-back: nothing else, whoever the register belongs to
+                  'ICC_BPR1_EL1', 'ICC_IGRPEN1_EL1'}             # classes G, R (the quarantine's ICENABLER0 and the last ISENABLER0 among them) and C and their put-back: nothing else, whoever the register belongs to
 BAD_STATUS = 0xFFFFFFFFFFFFFFA6                                   # a prepare failure: negative (the step is in the word; probes/xnuboot.S OUT_STATUS)
 REGS = {'hcr': 0x88000010, 'vbar': 0xCE879000, 'tpidr': 0xCE8A0000}   # the model's values before the call (the harness's defaults)
 
@@ -213,7 +213,7 @@ class Held:
 
     @staticmethod
     def gic_writes(run):
-        """Before and after the call the GIC writes are the wrapper's: classes G, R and C only, to this CPU's frame; none of CNTHP, VBAR_EL2, HCR_EL2
+        """Before and after the call the GIC writes are the wrapper's: classes G, R (the pass 5 quarantine is a member) and C only, to this CPU's frame; none of CNTHP, VBAR_EL2, HCR_EL2
         or an EL1 register. The writes between the call and its return are the fake monitor's (the replay) and are not held to this."""
         call, ret = run.mark('CALL'), run.mark('RET')
         lo, hi = (call[1], ret[1]) if call and ret else (len(run.g.log), len(run.g.log))
@@ -530,7 +530,8 @@ class Contract(Base):
             self.assertEqual((h['refusal'], h['refusal_detail']), (E.GIC_NOT_READY, G.OUT.PPI_OWNED), 'the strict precondition names itself')
         else:
             # WI 8 pass 5: PPI 26 was enabled already, so its bit is never written; the firmware's other enabled bits are quarantined by one ICENABLER0
-            # write before any other store and enabled again by one ISENABLER0 write, the last write of the run (docs/SP11-STICK-GIC.md section 4).
+            # write before any other store and enabled again by one ISENABLER0 write, the last write of the run unless both group 1 gates failed to go back (pass 6:
+            # tools/test-sp11-stick-monitor-gates.py; docs/SP11-STICK-GIC.md section 4).
             writes = [(e[1], e[2]) for e in r.g.log if e[0] == 'W']
             enables = [w for w in writes if w[0] in ('GICR_ISENABLER0', 'GICR_ICENABLER0')]
             self.assertEqual(enables, [('GICR_ICENABLER0', 0x4A800001), ('GICR_ISENABLER0', 0x4A800001)])

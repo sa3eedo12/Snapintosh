@@ -50,7 +50,7 @@ sha = lambda data: hashlib.sha256(data).hexdigest()     # noqa: E731
 LLVM = ('clang', 'ld.lld', 'llvm-objcopy', 'llvm-readelf', 'llvm-nm', 'llvm-objdump')
 OWN = ('tools/sp11_stick_bundle_m1.py', 'tools/sp11_monitor_census.py', 'tools/test-sp11-stick-monitor-auth.py', 'tools/test-sp11-stick-monitor-interlock.py',
        'docs/SP11-STICK-MONITOR.md')
-DOC_CAP = 60000         # raised from 46,000 on purpose (Phase D: section 14 and the corrections; 36,000 before Phase C); nothing was cut to make room
+DOC_CAP = 75500         # raised from 70,000 on purpose (Phase E part 2: section 16; 60,000 before Phase E, 46,000 before Phase D, 36,000 before Phase C); nothing was cut to make room
 # The records the operator was shown or approved, regenerated here from the files they were made from (docs/SP11-MONITOR-PORT.md section 15 D4/D7).
 RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e035977bf700e',
            'gic and stop dry run': 'c74f7af0217c507e7738673b9d437d6c76589ef3c243c23eef4837b0ca435b3b',
@@ -58,7 +58,7 @@ RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e03597
 FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=7, time_box_s=5, label='M1-FIXED', monitor=(445935, '1' * 64), reporter=(58463, '2' * 64),
              note=None, gic_stop=False, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
 # The SHA-256 of record_text for FIXED and FABRICATED[...]: the text of an M1 record is what the operator approves, so a changed byte is another record.
-GOLDEN = {'a test record': '7db08474819ac1e73a77059c9bc568912d8bb68967376bd08ec29eaf35377566', 'another record': '1f8cb965877cbef212bd3f8a3cbe8d595d318a525f969b9443e3ebe038307f7f'}
+GOLDEN = {'a test record': 'e3f7d7fb80a8f3fb7eea72fcb546f6ddb9a21b4b754563540577a87388837e38', 'another record': '7d8c507bfc11ccc5946cb75b0a3abbd9914082876b1103c9337456aee29c9d1b'}
 
 
 def quietly(function, *args):

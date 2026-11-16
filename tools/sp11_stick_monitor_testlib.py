@@ -170,10 +170,12 @@ def shared(tree, gic=None):
         return _objects[key]
 
 
-def harness(tree, name='base', extra=(), gic=None):
+def harness(tree, name='base', extra=(), gic=None, patches=()):
     """The executable of one variant: `extra` are -D flags (a seeded fault). Only the wrapper's sources are compiled again for a seed; the harness,
-    the text layer, sha256 and the reporter are the base variant's objects."""
-    key = (name, tuple(extra), tuple(sorted((gic or {}).items())))
+    the text layer, sha256 and the reporter are the base variant's objects. `patches` are (source, old, new) text replacements made in memory in a copy of
+    one source below the scratch directory, which is compiled instead of the real file: a mutant of the real stage that no seed names, which the tests that
+    use it must show to fail. `old` must occur exactly once, so that a mutant that no longer matches the source fails loudly and does not silently pass."""
+    key = (name, tuple(extra), tuple(sorted((gic or {}).items())), tuple(patches))
     objs = shared(tree, gic)
     with _lock:
         if key in _objects:
@@ -187,7 +189,18 @@ def harness(tree, name='base', extra=(), gic=None):
         for src in MON_SOURCES:
             obj = out / (Path(src).stem + '.o')
             built.append(str(obj))
-            futures.append(pool.submit(T.clang, [*fl, '-c', str(ROOT / src), '-o', str(obj)], f'compiling {src} ({name})'))
+            edits = [p for p in patches if p[0] == src]
+            if edits:
+                text = (ROOT / src).read_text()
+                for _, old, new in edits:
+                    if text.count(old) != 1:
+                        raise AssertionError(f'the mutant {name!r} does not match {src} exactly once: {old!r}')
+                    text = text.replace(old, new)
+                path = out / Path(src).name
+                path.write_text(text)
+                futures.append(pool.submit(T.clang, [*fl, f'-I{ROOT / "probes"}', '-c', str(path), '-o', str(obj)], f'compiling the mutant {name} of {src}'))
+            else:
+                futures.append(pool.submit(T.clang, [*fl, '-c', str(ROOT / src), '-o', str(obj)], f'compiling {src} ({name})'))
         for future in futures:
             future.result()
     exe = out / 'harness'
@@ -206,10 +219,13 @@ class Out:
     state: dict
     recs: dict          # scenario name -> {point: the monitor record as REPORT.DAT held it at that point}
     dirty: dict         # scenario name -> {point: {part: dirty 64-byte lines of REPORT.DAT in that part, in the model's cache}}
+    reads: dict = dataclasses.field(default_factory=dict)       # scenario name -> {register: reads of it by the stage}, as of the last observation point
+    reads_at: dict = dataclasses.field(default_factory=dict)    # scenario name -> {point: {register: reads of it so far}}: what a stretch of the run read is the difference
 
 
 def parse_extra(text):
-    marks, replay, state, recs, dirty, cur_m, cur_r, cur_s, cur_c, cur_d = {}, {}, {}, {}, {}, [], [], {}, {}, {}
+    marks, replay, state, recs, dirty, reads, reads_at = {}, {}, {}, {}, {}, {}, {}
+    cur_m, cur_r, cur_s, cur_c, cur_d, cur_rd, cur_ra = [], [], {}, {}, {}, {}, {}
     for raw in text.splitlines():
         word, _, rest = raw.partition(' ')
         if word == 'MONMARK':
@@ -226,10 +242,14 @@ def parse_extra(text):
         elif word == 'MONDIRTY':
             point, _, parts = rest.partition(' ')
             cur_d[point] = {k: int(v) for k, v in (x.split('=') for x in parts.split())}
+        elif word == 'MONREADS':
+            point, _, counts = rest.partition(' ')
+            cur_rd = {k: int(v) for k, v in (x.split('=') for x in counts.split())}
+            cur_ra[point] = cur_rd
         elif word == 'END':
-            marks[rest], replay[rest], state[rest], recs[rest], dirty[rest] = cur_m, cur_r, cur_s, cur_c, cur_d
-            cur_m, cur_r, cur_s, cur_c, cur_d = [], [], {}, {}, {}
-    return marks, replay, state, recs, dirty
+            marks[rest], replay[rest], state[rest], recs[rest], dirty[rest], reads[rest], reads_at[rest] = cur_m, cur_r, cur_s, cur_c, cur_d, cur_rd, cur_ra
+            cur_m, cur_r, cur_s, cur_c, cur_d, cur_rd, cur_ra = [], [], {}, {}, {}, {}, {}
+    return marks, replay, state, recs, dirty, reads, reads_at
 
 
 def run(exe, scenarios, cfg=None, timeout=1800):
@@ -242,8 +262,8 @@ def run(exe, scenarios, cfg=None, timeout=1800):
     done = subprocess.run([str(exe)], input=''.join(text for _, text in scenarios), capture_output=True, text=True, env=env, timeout=timeout)
     if done.returncode:
         raise AssertionError(f'the harness exited {done.returncode}:\n{done.stderr[-4000:]}\n{done.stdout[-1000:]}')
-    marks, replay, state, recs, dirty = parse_extra(done.stdout)
-    return Out(T.parse_output(done.stdout), G.parse_gic(done.stdout), marks, replay, state, recs, dirty)
+    marks, replay, state, recs, dirty, reads, reads_at = parse_extra(done.stdout)
+    return Out(T.parse_output(done.stdout), G.parse_gic(done.stdout), marks, replay, state, recs, dirty, reads, reads_at)
 
 
 def marked_pin(bundle, label=None):

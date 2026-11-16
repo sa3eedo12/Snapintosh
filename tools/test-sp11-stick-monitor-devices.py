@@ -304,14 +304,14 @@ class Interrupts(Need):
         self.assertEqual(async_c.count('icc_iar1_el1'), 1, 'one acknowledge in the locked handler, besides the GPU interrupt\'s in gpu_glue.c')
         self.assertEqual(source('probes/xnuboot/gpu_glue.c').count('icc_iar1_el1'), 1)
         flat = ' '.join(self.text.split())
+        gic_class = flat[flat.index('gic: memory-mapped GIC registers'):flat.index('The arm half since pass 5')]
         for needle in ('and, on the boot CPU, acknowledges an interrupt in two cases only: INTID 26 (the timer) when its ISTATUS is set and the run\'s deadline is ahead, and INTID 0x14C when gpu.flags '
                        'has its enable bit (a LIVE gate)', 'Any other IRQ or FIQ, and the timer at the deadline, ends the run with the interrupt not acknowledged',
                        'a foreign interrupt stays pending (INFERRED from probes/xnuboot/async.c)'):
-            self.assertIn(needle, flat)
+            self.assertIn(needle, gic_class, 'the monitor\'s part of the gic class, kept when Phase E described the arm half')
         for gone in ('acknowledges and ends whatever interrupt reaches EL2', 'the firmware-enabled PPIs among them (INFERRED); any interrupt but PPI 26 stops the run',
                      'The monitor writes no memory-mapped GIC register'):
             self.assertNotIn(gone, flat)
-        self.assertNotIn('boot 13', flat, 'the arm half\'s subject: the gic class text is updated with it, not here')
 
 
 class Thermal(Need):
@@ -342,7 +342,7 @@ class Other(unittest.TestCase):
         self.assertIn('calls no monitor', ' '.join(rec.GIC_STOP_TOUCHES['el2_sysreg']))
         for kind, text in (('dry run', BT.template(stores='ram,el2_sysreg')[1]), ('gic and stop', BT.cli(['authorisation-template', 'synthetic',
                                                                                                          *BT.opts(stores='ram,el2_sysreg,gic'), '--gic-stop'])[1])):
-            for line in (*m1t.SMC_LINES, *m1t.DEVICE_LINES):
+            for line in (*m1t.SMC_LINES, *m1t.DEVICE_LINES, m1t.GIC_FACT_LINES[0], *(f'      {l}' for l in m1t.GIC_LINES[1:4])):
                 self.assertNotIn(line, text, kind)
             self.assertNotIn('3b. Device code', text)
 

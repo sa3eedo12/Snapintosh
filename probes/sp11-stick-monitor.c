@@ -10,12 +10,18 @@
  *             pin. A check that fails refuses with GIC_NOT_READY and an SM_OUT_* detail before anything is stored but REPORT.DAT; the record slot
  *             is stored with it, except for REPORT_UNWRITABLE, whose slot is what was found unwritable.
  *   sync      IC IALLUIS, DSB ISH, ISB: the guest will execute what the copy wrote with data stores.
- *   arm       the GIC stage's arm half (sp11-stick-gic.c, built with SW_GIC_DRY_REGS=0): classes G, R and C, the NEXT line and eight seconds first.
+ *   arm       the GIC stage's arm half (sp11-stick-gic.c, built with SW_GIC_DRY_REGS=0; docs/SP11-STICK-GIC.md section 4): the reads and the survey, the
+ *             NEXT line and eight seconds, then the stores, in this order: the quarantine (one ICENABLER0 write that takes away every enabled interrupt of
+ *             this CPU but PPI 26: SGI 0 and PPIs 23, 25, 27 and 30 where the unit's ISENABLER0 read 0x4E800001), classes G, R and C with their read-back,
+ *             and the check that ICC_HPPIR1_EL1 names nothing (1023) or PPI 26. A refusal, Q_NOT_HELD (22) and FOREIGN_PENDING (23) among them, goes
+ *             through mon_arm_failed: the put-back runs first (as under `return`, with its one exception) and the monitor is not called.
  *   call      thirteen EL2 registers read, the stack area filled, the arguments and the head stored, MONITOR_ENTERED stored, the MON CALL line, the
  *             counter read once more, then the call.
  *   return    the extension slots compared with what was stored before the call, the monitor's window cleaned to the point of coherency, x0 and
  *             the window's first two words stored, the registers read again and compared, the stack scanned for its depth and zeroed, the filler
- *             below it scanned and zeroed, then the GIC put back (classes C, R, G) and its record finished. Nothing after the call is a refusal.
+ *             below it scanned and zeroed, then the GIC put back (classes C, R, G, and last the enables the quarantine cleared, which are not written
+ *             when the put-backs of both group 1 gates, ICC_IGRPEN1_EL1 and GICD_CTLR, failed: NOT_RESTORED, with the quarantine still on) and its record
+ *             finished. Nothing after the call is a refusal.
  * No recursion, no allocation, no writable global, no libc; every loop has a fixed bound. The wrapper's stores are sp11hw_store64's. */
 #include "sp11-stick-hw.h"
 
@@ -329,7 +335,11 @@ static uint64_t mon_arm_failed(struct sw_mon *m, struct sw_gic *g, unsigned out)
 #ifdef SP11_STICK_HOST_TEST
     sp11hw_test_point("PUTBACK");
 #endif
+#ifndef SP11_STICK_MONITOR_SEED_NO_ARM_PUTBACK
     put = sw_gic_put_back(g);
+#else
+    put = 0;
+#endif
     mon_gic_finish(g, out, put);
     sw_gic_say(g, SG_L_RESTORE, 1);
     sw_gic_say(g, SG_L_VERDICT, 1);
@@ -359,7 +369,13 @@ uint64_t sw_monitor_stage(struct sw_ctx *c)
     mon_flush(&m);
     r->substage = SM_SUB_ARMING;
     mon_flush(&m);
-    if ((out = sw_gic_arm(&g, c, 0)) != 0) return mon_arm_failed(&m, &g, out);
+    if ((out = sw_gic_arm(&g, c, 0)) != 0) {
+#ifndef SP11_STICK_MONITOR_SEED_ARM_REFUSAL_CALLS
+        return mon_arm_failed(&m, &g, out);
+#else
+        (void)mon_arm_failed;           /* seeded fault: a refusal of the arm half does not stop the call */
+#endif
+    }
 #ifdef SP11_STICK_MONITOR_SEED_STRAY_GIC
     sp11hw_mmio_write32(SNAP_GICR_FIRST + SNAP_GICR_STRIDE + SG_SGI_FRAME + SG_ISENABLER0, 0);
 #endif

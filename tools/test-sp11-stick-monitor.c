@@ -21,10 +21,18 @@
  *   below=n                         n words stored below the stack area, at stack_lo - 8 * i: an overflow into REPORT.DAT's filler; with stack=0x3FFF8
  *                                   the area's lowest word is the one word left alone
  * Output, besides the base harness's and the GIC model's: MONMARK (IC, CALL and RET: where each came in the GIC log and the event log, the
- * counter, the arguments), MONREPLAY (one line per interrupt of the replay), MONSTATE (the model's registers at the return) and MONREC and
+ * counter, the arguments), MONREPLAY (one line per interrupt of the replay), MONSTATE (the model's registers at the return), MONREC and
  * MONDIRTY (the stage's observation points: the monitor record as REPORT.DAT holds it, and how many 64-byte lines of REPORT.DAT are still
- * dirty in the model's cache). Hardware: NOT RUN; nothing here touches a device. */
+ * dirty in the model's cache) and MONREADS (at the same points, the point's name first: how many times the stage read each memory-mapped GIC register of the
+ * model so far, by its name, outside the fake monitor; the model's own log holds only some of those reads). Hardware: NOT RUN; nothing here touches a device. */
+/* The model's three MMIO readers are renamed for the length of the include so that this file can count the reads before it passes them on. */
+#define sp11hw_mmio_read8 gic_model_mmio_read8
+#define sp11hw_mmio_read32 gic_model_mmio_read32
+#define sp11hw_mmio_read64 gic_model_mmio_read64
 #include "test-sp11-stick-gic.c"
+#undef sp11hw_mmio_read8
+#undef sp11hw_mmio_read32
+#undef sp11hw_mmio_read64
 
 #include "../probes/sp11-stick-monitor.h"
 
@@ -49,6 +57,67 @@ static void mark(const char *kind, uint64_t a, uint64_t b, uint64_t c, uint64_t 
 {
     printf("MONMARK %s %u %zu %llu %llx %llx %llx %llx %llx %llx\n", kind, G.nev, W.nev, (unsigned long long)W.tick, (unsigned long long)a,
            (unsigned long long)b, (unsigned long long)c, (unsigned long long)d, (unsigned long long)e, (unsigned long long)f);
+}
+
+/* ---- the memory-mapped GIC reads, by register ----
+ * The model logs GICD_CTLR, GICD_ISENABLER[n], GICD_ISPENDR[n] and the system registers it is read through, and none of its other MMIO reads. The test of the
+ * record's gic text (tools/test-sp11-stick-monitor-arm.py) needs every register the stage reads, so each read of a register the model decodes is counted here,
+ * per scenario (the count starts again when the scenario's name changes) and only while the fake monitor is not running. */
+static struct {
+    char scenario[sizeof W.name];
+    unsigned long n[GR_COUNT];
+    int in_monitor;
+} RD;
+
+static void reads_sync(void)
+{
+    if (strcmp(RD.scenario, W.name)) {
+        memset(&RD, 0, sizeof RD);
+        snprintf(RD.scenario, sizeof RD.scenario, "%s", W.name);
+    }
+}
+
+static void count_read(uint64_t pa)
+{
+    unsigned frame;
+    uint64_t off;
+    int reg = -1;
+    reads_sync();
+    if (RD.in_monitor) return;
+    if (in_window(pa, SNAP_GICD_BASE, 0x10000)) {
+        off = pa - SNAP_GICD_BASE;
+        reg = off == SG_GICD_CTLR ? GR_GICD_CTLR : off == SG_GICD_TYPER ? GR_GICD_TYPER : off == SG_GICD_IIDR ? GR_GICD_IIDR :
+              (off >= SG_GICD_ISENABLER && off < SG_GICD_ISENABLER + 0x80) ? GR_GICD_ISENABLER :
+              (off >= SG_GICD_ISPENDR && off < SG_GICD_ISPENDR + 0x80) ? GR_GICD_ISPENDR : -1;
+    } else if (locate(pa, &frame, &off)) {
+        if (off == SG_GICR_TYPER) {
+            reg = GR_GICR_TYPER;
+        } else if (mine(frame) && off == SG_GICR_CTLR) {
+            reg = GR_GICR_CTLR;
+        } else if (mine(frame) && off == SG_GICR_WAKER) {
+            reg = GR_GICR_WAKER;
+        } else if (mine(frame) && off >= SG_SGI_FRAME) {
+            off -= SG_SGI_FRAME;
+            reg = off == SG_IGROUPR0 ? GR_IGROUPR0 : off == SG_ISENABLER0 ? GR_ISENABLER0 : off == SG_ISPENDR0 ? GR_ISPENDR0 :
+                  off == SG_ISACTIVER0 ? GR_ISACTIVER0 : off == SG_ICFGR1 ? GR_ICFGR1 :
+                  (off >= SG_IPRIORITYR && off < SG_IPRIORITYR + 32) ? GR_IPRIORITYR : -1;
+        }
+    }
+    if (reg >= 0) RD.n[reg]++;
+}
+
+uint8_t sp11hw_mmio_read8(uint64_t pa) { count_read(pa); return gic_model_mmio_read8(pa); }
+uint32_t sp11hw_mmio_read32(uint64_t pa) { count_read(pa); return gic_model_mmio_read32(pa); }
+uint64_t sp11hw_mmio_read64(uint64_t pa) { count_read(pa); return gic_model_mmio_read64(pa); }
+
+static void print_reads(const char *point)
+{
+    unsigned i;
+    reads_sync();
+    printf("MONREADS %s", point);
+    for (i = 0; i < GR_COUNT; i++)
+        if (RD.n[i]) printf(" %s=%lu", gr_names[i], RD.n[i]);
+    printf("\n");
 }
 
 /* IC IALLUIS: an ISB-shaped event in the base log (a = 0x1C) so that its place among the stores and cache operations is known. */
@@ -222,6 +291,7 @@ void sp11hw_test_point(const char *what)
         for (i = 0; i < SM_REC_BYTES; i++) printf("%02x", rep->cpu[SM_REC_AT + i]);
     printf("\n");
     point_dirty(what);
+    print_reads(what);
     if (!strcmp(what, "PUTBACK")) {
         struct mon_cfg k;
         cfg_load(&k);
@@ -235,6 +305,8 @@ uint64_t sw_monitor_call(uint64_t out, uint64_t work, uint64_t size, uint64_t pa
     struct mon_cfg k;
     uint64_t i;
     cfg_load(&k);
+    reads_sync();
+    RD.in_monitor = 1;
     mark("CALL", out, work, size, params, host_cpus, stack_top);
     sp11hw_test_point("CALL");                                      /* what a hang here would leave in DRAM: the record as stored, and what is still dirty */
     mon_store64(out, k.status);                                     /* _start stores status and entered first */
@@ -254,6 +326,7 @@ uint64_t sw_monitor_call(uint64_t out, uint64_t work, uint64_t size, uint64_t pa
     mark("RET", k.ret, 0, 0, 0, 0, 0);
     printf("MONSTATE hcr=%llx vbar=%llx tpidr=%llx daif=%llx ic=%u\n", (unsigned long long)G.hcr, (unsigned long long)G.vbar,
            (unsigned long long)M.tpidr, (unsigned long long)((G.daif & ~(uint64_t)0x80) | (G.i_masked ? 0x80 : 0)), M.n_ic);
+    RD.in_monitor = 0;
     return k.ret;
 }
 

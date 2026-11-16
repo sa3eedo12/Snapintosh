@@ -6,9 +6,11 @@
  * and the dry-run and GIC builds keep their bytes.
  *
  * What the stage is. After COPIED the wrapper synchronises the instruction caches, checks what the call will rely on, arms the GIC with the
- * arm half of the GIC stage (classes G, R and C only: never CNTHP, VBAR_EL2 or HCR_EL2, which the monitor sets itself), calls the monitor that
- * the build appended to the file, and puts the GIC back. The call is a direct `bl` to the symbol sp11_monitor, which the build defines at the
- * offset where it put the image. The monitor owns the CPU until it returns: nothing of the wrapper runs meanwhile, so the only stop is the
+ * arm half of the GIC stage (the quarantine of this CPU's other enabled interrupts, classes G, R and C with their read-back and the check of
+ * ICC_HPPIR1_EL1 before the call; never CNTHP, VBAR_EL2 or HCR_EL2, which the monitor sets itself), calls the monitor that the build appended
+ * to the file, and puts the GIC back, the quarantine's enables last (not written when the put-backs of both group 1 gates failed: the stage then ends
+ * NOT_RESTORED with that quarantine still on). The call is a direct `bl` to the symbol sp11_monitor, which the build defines
+ * at the offset where it put the image. The monitor owns the CPU until it returns: nothing of the wrapper runs meanwhile, so the only stop is the
  * monitor's own (the EL2 timer's interrupt) and the operator's power switch.
  *
  * The stack is option S2 of docs/SP11-STICK-MONITOR.md section 3: the call runs on the tail of REPORT.DAT, 256 KiB like the A16 host's
@@ -66,13 +68,15 @@ _Static_assert(SM_FILLER_AT == 0x13000u && SM_FILLER_BYTES == 0x2E000u && SM_FIL
 #define SM_PARAMS_EARLY_STOP_FLAGS 0x23E0u      /* early_stop.flags: bit 3 makes setup allocate c->thermal and so opens the loads from the A16's sensor addresses */
 
 /* ---- sp11-stick-monitor.c ---- */
-/* Test-only faults (tools/test-sp11-stick-monitor.py proves each check can fail by building the stage with it). They exist only in the host build. */
+/* Test-only faults (tools/test-sp11-stick-monitor.py proves each check can fail by building the stage with it; ARM_REFUSAL_CALLS and NO_ARM_PUTBACK, the two that
+ * break what a refused arm half must do, are proved by tools/test-sp11-stick-monitor-arm.py). They exist only in the host build. */
 #if (defined(SP11_STICK_MONITOR_SEED_NO_PARAMS_CHECK) || defined(SP11_STICK_MONITOR_SEED_NO_DIGEST) || defined(SP11_STICK_MONITOR_SEED_NO_REG_CHECK) || \
      defined(SP11_STICK_MONITOR_SEED_NO_IC_SYNC) || defined(SP11_STICK_MONITOR_SEED_STRAY_GIC) || defined(SP11_STICK_MONITOR_SEED_WRONG_ARGS) || \
      defined(SP11_STICK_MONITOR_SEED_NO_S2) || defined(SP11_STICK_MONITOR_SEED_NO_OVERRUN_CHECK) || defined(SP11_STICK_MONITOR_SEED_STORE_AFTER) || \
      defined(SP11_STICK_MONITOR_SEED_REFUSE_AFTER) || defined(SP11_STICK_MONITOR_SEED_NO_GIC_FINISH) || defined(SP11_STICK_MONITOR_SEED_NO_FILLER_SCAN) || \
      defined(SP11_STICK_MONITOR_SEED_NO_FILLER_PRECHECK) || defined(SP11_STICK_MONITOR_SEED_NO_FILLER_CLEAN) || \
      defined(SP11_STICK_MONITOR_SEED_FLUSH_UNWRITABLE) || defined(SP11_STICK_MONITOR_SEED_NO_LABEL_CHECK) || \
+     defined(SP11_STICK_MONITOR_SEED_ARM_REFUSAL_CALLS) || defined(SP11_STICK_MONITOR_SEED_NO_ARM_PUTBACK) || \
      defined(SP11_STICK_MONITOR_SEED_TICKS_EARLY) || defined(SP11_STICK_MONITOR_SEED_NO_WINDOW_CLEAN) || \
      defined(SP11_STICK_MONITOR_SEED_NO_RECORD_CLEAN)) && !defined(SP11_STICK_HOST_TEST)
 #error "the seeded faults are part of the host test build only"

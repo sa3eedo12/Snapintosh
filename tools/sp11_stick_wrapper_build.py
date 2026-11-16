@@ -390,7 +390,8 @@ def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset
               'q1n1_inputs': {rel: sha((tree / rel).read_bytes()) for rel in Q1N1_INPUTS}, 'cflags': [f.replace(str(tree), '<q1n1>') for f in cflags],
               'ldflags': ldflags, 'gic_macros': defines, 'hardware': 'NOT RUN', 'profile': record['profile'],
               'added': ['-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1', '-DSNAP_SP11_STICK_GIC=1', '-DSNAP_SP11_STICK_MONITOR=1', '-DSW_GIC_DRY_REGS=0', *pinned],
-              'variant': 'm1: the wrapper arms the GIC (classes G, R, C), calls the appended monitor and puts the GIC back (docs/SP11-STICK-MONITOR.md)'}
+              'variant': 'm1: the wrapper arms the GIC (the quarantine of this CPU\'s other enabled interrupts, classes G, R and C, the check of ICC_HPPIR1_EL1), calls the '
+                         'appended monitor and puts the GIC back (docs/SP11-STICK-MONITOR.md)'}
     (out / REPORT_NAME).write_text(json.dumps(report, indent=1, sort_keys=True) + '\n')
     return report
 

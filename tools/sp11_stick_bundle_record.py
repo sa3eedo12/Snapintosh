@@ -7,7 +7,7 @@ reading, the approval check and the pipeline.
 The text is wrapped by hand, never by a library: its digest is the operator's approval, so it must not depend on how a library version breaks
 lines, and a changed byte is another record. A record of a synthetic build must not change when a line about a real build is added: the
 lines of section 1a exist only for kind `real`. In the same way the lines of section 1b, the touches of M1_TOUCHES, the paragraphs of
-tools/sp11_stick_bundle_record_m1.py (the guest SMC and section 3b), the budget of section 4, the
+tools/sp11_stick_bundle_record_m1.py (the guest SMC, section 3b, the gic class and its facts), the budget of section 4, the
 silence rule of section 5 (M1_SILENCE_RULE, in place of SILENCE_RULE) and the two stop rules of M1_STOP_RULES exist only for a record of the monitor
 entry run (--m1-run), and the records of the other kinds are what they were (tools/test-sp11-stick-bundle-record.py pins their digests).
 
@@ -167,21 +167,7 @@ M1_TOUCHES = {
                    '   the two TrustZone calls, and DC IVAC. The A16 thermal sensors are memory-mapped and are read only through',
                    '   c->thermal (section 3b); they write no system register. SMC is a call to firmware.',
                    *m1t.PLACED_LINES),
-    'gic': ('memory-mapped GIC registers in the pinned frames only (PIN.DAT gicd_base, gicr_first, gicr_stride, gicr_count),',
-            'written by the wrapper before the call and put back after it, as in the GIC and stop dry run',
-            '(docs/SP11-STICK-GIC.md). Class G: GICD_CTLR, only when group 1 reads disabled (a read of 0x10 becomes 0x13).',
-            'Class R, in this CPU\'s own redistributor (found by matching GICR_TYPER to MPIDR; the other frames are read for',
-            'GICR_TYPER only), the SGI frame of INTID 26: IPRIORITYR byte (0x80 if it differs), ISENABLER0 bit 26 only when it',
-            'reads clear (the other PPIs that firmware enabled stay as found: one boot read ISENABLER0 0x4E800001, OBSERVED),',
-            'ICFGR1 field if it reads edge, IGROUPR0 bit if the distributor shows one security state, and the put-backs',
-            'ICENABLER0 and ICPENDR0. The census cannot see the monitor\'s stores to the GIC distributor: they are in the GPU',
-            'code of section 3b, at the address that PARAMS gpu.gicd holds, and its one fixed distributor address is in',
-            'secondary_run (group G, not reached). The monitor uses the CPU interface (group D) and, on the boot CPU,',
-            'acknowledges an interrupt in two cases only: INTID 26 (the timer) when its ISTATUS is set and the run\'s deadline',
-            'is ahead, and INTID 0x14C when gpu.flags has its enable bit (a LIVE gate). Any other IRQ or FIQ, and the timer at',
-            'the deadline, ends the run with the interrupt not acknowledged: the monitor records it, disables its timer and',
-            'returns, and a foreign interrupt stays pending (INFERRED from probes/xnuboot/async.c). Never the ITS, SMMU, PCIe,',
-            'USB or the framebuffer.')}
+    'gic': m1t.GIC_LINES}       # what the arm half writes and reads, register by register: tools/sp11_stick_bundle_record_m1.py, checked by tools/test-sp11-stick-monitor-arm.py
 M1_STOP_RULES = ('   - MON STATUS -90 to -95 is the monitor\'s NV2 and PAuth gate refusing: a result, and the expected first one while D6',
                  '     is open; the same bundle is not retried.',
                  '   - MON QUARANTINE on the page (RET=0X51554E01 or 0X51554E02): the monitor\'s window is partial. Power cycle; never',
@@ -371,6 +357,7 @@ def record_text(r):
             first, *rest = touches[name]
             lines += [f'   {name}: {first}', *(f'      {line}' for line in rest)]
     lines += gq.FACT_LINES if r.get('gic_quarantine') else ()
+    lines += m1t.GIC_FACT_LINES if m1 else ()
     lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.',
               *(m1t.SMC_LINES if m1 else ()), *(('', *m1t.DEVICE_LINES) if m1 else ()), '',
               *(m1_time_lines(r['time_box_s'], p) if m1 else

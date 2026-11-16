@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 """The static text of the record of a monitor entry run (--m1-run) that is checked against binaries or against the sources, in one place of its own so
-that tools/sp11_stick_bundle_record.py stays under its size limit: the guest SMC paragraph (D5), the device-code section 3b (D1) and the placed entries of
-the el2_sysreg class (D3). The record module appends them to its text for the M1 kind only, and the records of the other kinds are what they were.
+that tools/sp11_stick_bundle_record.py stays under its size limit: the guest SMC paragraph (D5), the device-code section 3b (D1), the placed entries of
+the el2_sysreg class (D3) and the gic class with its facts (E1). The record module appends them to its text for the M1 kind only, and the records of the
+other kinds are what they were.
 
  - SMC_LINES follows the shared "Not authorised" line of section 3. Its numbers are those of a read-only scan of the local J700 26A428 kernelcache
    (tools/test-sp11-stick-monitor-devices.py repeats it when the kernelcache is present and says SKIP when it is not).
@@ -12,6 +13,13 @@ the el2_sysreg class (D3). The record module appends them to its text for the M1
    module adds in front of each line taken off. The census check fails when they differ from the binaries. Regenerate them after any change of the
    monitor or of the wrapper, with `placed --binary wrapper ELF` and `placed --binary monitor ELF`, and say so in the commit. A line of prose in the
    sub-block must not start with `wrapper ` or `monitor `.
+ - GIC_LINES is the gic class: what the arm half of the GIC stage (probes/sp11-stick-gic.c, built with SW_GIC_DRY_REGS=0) writes and reads, register by
+   register, with its offset, when, what it is read back against and the outcome that names a failure, then how long the quarantine lasts, what the page
+   shows when the arm refuses, and what the monitor does. A register is a line of two spaces, W or R and its name (entry()); the census sees system
+   registers and not MMIO, so tools/test-sp11-stick-monitor-arm.py compares those lines with what the host model of the stage logs in its runs.
+   GIC_FACT_LINES follows the classes: the boot 12 and 13 facts with their labels. PASS6_LINES is the sentence of pass 6, the one case in which the put-back's
+   last write is not made (both group 1 gates left open); tools/test-sp11-stick-monitor-gates.py compares each claim of it with the model, in the real stage
+   and in mutants of it. Any change of the arm half's registers, or of its order, conditions or outcomes, is a change of this text.
 
 The prose is filled by wrap() below, a greedy fill on single spaces at a fixed width and not a library's, so that the bytes of the text the operator
 approves (its SHA-256 is PIN.DAT's authorisation_sha256) depend on nothing but this file.
@@ -77,6 +85,170 @@ DEVICE_LINES = (
           'monitor\'s state and the guest\'s RAM by design. That none of them stores to a device is INFERRED from the sources, which were not all read '
           'for this record; the census sees system registers and not MMIO, and an exploratory scan for constant-address stores found them only in the '
           'families above.', rest=6))
+
+# ---- The gic class (E1, E2 part 2): the arm half of the GIC stage as pass 6 left it, built for the monitor entry ----------------------------------------------
+GIC_WIDTH = 111         # the lines of a class block are indented six spaces by the record module and at most 120 characters wide; the first goes after `   gic: `
+
+
+def entry(kind, name, where, text):
+    """One register of the gic class, `  W|R NAME WHERE text`: two spaces in front and the lines after the first indented by eight (the record module adds six
+    to every line). tools/test-sp11-stick-monitor-arm.py reads these lines: a W is a register that the stage writes (and so reads first), an R one that it only reads."""
+    return wrap(f'{kind} {name} {where} {text}', first=2, rest=8, width=GIC_WIDTH)
+
+
+def prose(text):
+    return wrap(text, first=0, rest=0, width=GIC_WIDTH)
+
+
+# PASS 6: the one case in which the arm half's put-back does not make its last write, the quarantine's ISENABLER0 (probes/sp11-stick-gic.c, gic_both_gates_open). It
+# is printed after the lines of that write, as a continuation of its entry, so it is wrapped for it. tools/test-sp11-stick-monitor-gates.py compares each claim of
+# it with the host model, in the real stage and in mutants of it, and shows that a text without it, or with the write claimed unconditional, is refused.
+PASS6_LINES = wrap(
+    'The exception: that write is NOT made when the put-backs of both ICC_IGRPEN1_EL1 and GICD_CTLR failed, which leaves both group 1 gates open. The reason '
+    '(INFERRED): enabling the quarantined interrupts again would let a pending one (INTID 27 was pending in boot 13, OBSERVED) be signalled with both gates '
+    'open. ISENABLER0 is then only read, and named in FAILED (its bit 2, 0X4) because the bits Q cleared are still clear: they stay disabled when the run ends (SGI 0 and '
+    'PPIs 23, 25, 27 and 30 on the unit\'s state), and the run ends NOT_RESTORED (48, OUTCOME=0X30), with FIRST naming the refusal when there was one. '
+    'One gate stuck and the other closed is not that case: the write is made, inert behind the closed gate. A gate found open is not counted as failed: with '
+    'GICD_CTLR found enabled (class G never begun) and ICC_IGRPEN1_EL1 stuck, the write is made although both gates are open. On the unit\'s state both gates '
+    'are this stage\'s own (GICD_CTLR 0x10 in boots 12 and 13, ICC_IGRPEN1_EL1 0 in boot 13: OBSERVED, one unit). The rule holds after a refusal and after the '
+    'call alike. EXPERIMENTAL: host model only, never run on the unit.', first=8, rest=8, width=GIC_WIDTH)
+
+
+def gic_lines(pass6=PASS6_LINES):
+    """The lines of the gic class of the M1 record: the first goes after `   gic: `, the others are indented six spaces by the record module."""
+    return (
+        *prose('memory-mapped GIC registers in the pinned frames (PIN.DAT gicd_base, gicr_first, gicr_stride, gicr_count) and the CPU interface, written by the '
+               'arm half of the GIC stage (probes/sp11-stick-gic.c; docs/SP11-STICK-GIC.md sections 4 and 7) as pass 6 left it, before the call, and by its '
+               'put-back after it. It is the dry run\'s source built here with SW_GIC_DRY_REGS=0: no read or write of CNTHP, VBAR_EL2, HCR_EL2 or an EL1 '
+               'register or timer, no window, no vector table, no ERET (the wrapper\'s own reads of some of those registers around the call are in the wrapper '
+               'group of section 3); the census of section 3 lists its three system register writes, ICC_PMR_EL1, '
+               'ICC_BPR1_EL1 and ICC_IGRPEN1_EL1, and no other. Its stores come after the 8 s wait that its NEXT GIC STORES line announces. D below is '
+               'gicd_base; RD is gicr_first + index * gicr_stride, the one frame whose GICR_TYPER affinity matches this CPU (a bounded scan: every other '
+               'frame is read at +0x008 and nothing else); SGI is RD + 0x10000. The offsets are the stage\'s register map, INFERRED from the GICv3 text as '
+               'remembered (the specification was not re-read). The registers are named as the host model of the stage names them, and '
+               'tools/test-sp11-stick-monitor-arm.py compares this list with what the model logs in its nominal and its failing runs: a register that a '
+               'run writes and no W line names, one that a run reads and no line names, and a W line that no run writes, are failures. That is a host '
+               'check and shows nothing about the unit\'s GIC.'),
+        *prose('Writes, in the order made. Each register (ICENABLER0 and ICPENDR0 by their readable twins, ISENABLER0 and ISPENDR0) is read before it is changed '
+               'and read back after it (RWP waited where it applies); a store that does not hold is a named refusal, GIC_NOT_READY with DETAIL = the outcome, '
+               'after which what was written is put back, but for the one write that the exception under ISENABLER0 withholds, and no monitor is called.'),
+        *entry('W', 'GICR_ICENABLER0', 'SGI+0x180',
+               'Q, the quarantine (a member of class R), first: every bit that ISENABLER0 was found to have set but bit 26, PPI 26, the stop timer\'s: SGI 0 and '
+               'PPIs 23, 25, 27 and 30, so 0x4A800001 where the unit\'s ISENABLER0 read 0x4E800001 (OBSERVED, boot 12). No write, and nothing begun, when that is '
+               '0. Then GICR_CTLR.RWP is polled, and ISENABLER0 must read back as exactly PPI 26\'s bit as found, else Q_NOT_HELD (22, OUTCOME=0X16). Put back '
+               'here too: PPI 26\'s own bit alone, only if the stage set it.'),
+        *entry('W', 'GICD_CTLR', 'D+0x000',
+               'class G, only when EnableGrp1A (bit 1) reads clear: the value read with bit 1 set, and bit 0 too when DS (bit 6) is clear (the unit\'s 0x10 is written '
+               '0x13, as q1n1\'s A16 recipe does; boot 13 read it back 0x12, OBSERVED). GICD_CTLR.RWP (bit 31) is polled, and ARE and EnableGrp1A must read back, '
+               'else G_NOT_HELD (16). Put back: the value read, then RWP.'),
+        *entry('W', 'GICR_IGROUPR0', 'SGI+0x080',
+               'class R, only when DS is set and bit 26 reads clear: the value read with bit 26 set (with DS clear the group is EL3\'s and no write is made; the unit '
+               'read 0, which says nothing of PPI 26\'s group: INFERRED). Read back: bit 26 set, else R_NOT_HELD (17). Put back: the value read.'),
+        *entry('W', 'GICR_IPRIORITYR', 'SGI+0x41A',
+               'class R: the byte of INTID 26 becomes 0x80 when it differs (it read 0xA0 on the unit, OBSERVED, boot 12). Put back: the byte read. The survey reads the '
+               'bytes of INTIDs 23, 25, 27 and 30 (SGI+0x417, 0x419, 0x41B, 0x41E) and writes none.'),
+        *entry('W', 'GICR_ICFGR1', 'SGI+0xC04',
+               'class R: PPI 26\'s two-bit field is made level, only when it reads edge (every PPI read level on the unit, OBSERVED, boot 12). Read back: not edge, else '
+               'R_NOT_HELD (17). Put back: the field read.'),
+        *entry('W', 'GICR_ISENABLER0', 'SGI+0x100',
+               'class R: bit 26 alone, only when it was found clear (it was found set on the unit, OBSERVED, boot 12, so the stage makes no such write on that '
+               'state). After RWP, ISENABLER0 '
+               'must be exactly the value read without the bits Q cleared, with bit 26 set, else R_NOT_HELD (17). Put back, and the last register write of the '
+               'whole run, but for the exception that follows: the bits Q cleared (0x4A800001 on the unit\'s state), in one write with RWP waited, then ISENABLER0 is verified whole against the '
+               'value read, with one retry, else NOT_RESTORED (48, OUTCOME=0X30).'),
+        *pass6,
+        *entry('W', 'ICC_PMR_EL1', '(MSR)',
+               'class C: 0xF0. PMR read 0xF8 before and after this write on the unit (OBSERVED, boot 13): INFERRED that the write is ignored. The priority 0x80 must be '
+               'below the PMR read back, else PRIO_NOT_BELOW_PMR (20). Put back: the value read, only if it differs.'),
+        *entry('W', 'ICC_BPR1_EL1', '(MSR)', 'class C: 0. It read 3 on the unit (OBSERVED, boot 13). Put back: the value read, only if it differs.'),
+        *entry('W', 'ICC_IGRPEN1_EL1', '(MSR)', 'class C: 1; it must read back 1, else C_NOT_HELD (18). It read 0 on the unit (OBSERVED, boot 13). Put back: the value read.'),
+        *entry('W', 'GICR_ICPENDR0', 'SGI+0x280',
+               'Put back only: bit 26, if INTID 26 is pending when the call ends and was not when read. The stage never writes the pending state of any other '
+               'interrupt, the quarantined ones included: a source that asserts through the call is pending, and, except in the both-gates case above, enabled again, '
+               'when the run ends.'),
+        *prose('Reads only, before the first store unless said otherwise (the put-back reads again what it puts back):'),
+        *entry('R', 'GICD_TYPER', 'D+0x004', 'ITLinesNumber (bits 4:0) bounds the survey: at most 31 registers of each kind.'),
+        *entry('R', 'GICD_IIDR', 'D+0x008', 'printed on the GIC GICD line (0x401043B on the unit, OBSERVED, boot 13).'),
+        *entry('R', 'GICR_TYPER', 'RD+0x008',
+               '64 bits, once per frame scanned until the affinity in bits 63:32 matches MPIDR_EL1 (if none does: GICR_NOT_FOUND (8)): the one access to a frame '
+               'that is not this CPU\'s.'),
+        *entry('R', 'GICR_WAKER', 'RD+0x014', 'asleep (bit 1 or 2 set) refuses GICR_ASLEEP (9): waking it is not authorised.'),
+        *entry('R', 'GICR_CTLR', 'RD+0x000', 'RWP (bit 3), polled after a write that needs it: at most 100000 reads and 50 ms for each poll.'),
+        *entry('R', 'GICR_ISPENDR0', 'SGI+0x200',
+               'INTID 26 pending refuses PPI_OWNED (10); read whole and kept in the GIC record (the unit read 0x08000000, INTID 27 pending: OBSERVED, boot 13).'),
+        *entry('R', 'GICR_ISACTIVER0', 'SGI+0x300', 'INTID 26 active refuses PPI_OWNED (10); read again by the put-back and never written: an interrupt left active is NOT_RESTORED.'),
+        *entry('R', 'GICD_ISENABLER[n]', 'D+0x100+4n',
+               'the survey, n = 1 to ITLinesNumber (register 0 is banked in each redistributor and is not read): which SPIs are enabled. It decides nothing.'),
+        *entry('R', 'GICD_ISPENDR[n]', 'D+0x200+4n', 'the survey, the same n: which SPIs are pending; the first two that are enabled and pending are kept in the GIC record.'),
+        *entry('R', 'ICC_SRE_EL2', '(MRS)', 'SRE clear refuses SRE_CLEAR (11), and none of the other ICC registers is read then.'),
+        *entry('R', 'ICC_CTLR_EL1', '(MRS)', 'only if SRE is set; EOImode read 1 on the unit (OBSERVED, boot 13).'),
+        *entry('R', 'ICC_RPR_EL1', '(MRS)', 'once before any store and once after the put-back, as a check: never written.'),
+        *entry('R', 'ICC_HPPIR1_EL1', '(MRS)',
+               'after the last store, with IRQ masked (this read acknowledges nothing): 1023 (none) or 26 passes; any other INTID, the special 1020 to 1022 '
+               'included, is FOREIGN_PENDING (23, OUTCOME=0X17): a PPI that did not disable, or an enabled SPI, which the quarantine of this CPU\'s redistributor '
+               'does not cover. No monitor is called.'),
+        *prose('How long the quarantine lasts. It is on from Q\'s write until the put-back\'s last write, which comes after the monitor has returned: the whole '
+               'call, so the monitor\'s prepare, its guest and its stop are inside it, and so is what the wrapper does after the return. In the both-gates case '
+               'above there is no such write, and the quarantine is still on when the run ends. What bounds it is the '
+               'monitor\'s own stop, the interrupt of its timer (CNTHP, PPI 26) at the time box on CNTPCT_EL0, at most 5 s (the wrapper\'s PARAMS check), once the '
+               'monitor has armed the timer. Before that comes the monitor\'s prepare, whose duration is UNKNOWN (never run on this unit); after it the stop\'s '
+               'cache clean (about 0.6 s, INFERRED, section 4), the wrapper\'s scans and cleans of REPORT.DAT and the put-back\'s polls (each at most 50 ms). '
+               'Whether PPI 26 reaches EL2 at all is UNKNOWN (U3). Nothing in the wrapper bounds the call: a guest that the timer never interrupts, or a monitor '
+               'that does not return, ends only by the operator\'s power cycle, and this stage\'s put-back does not run then (that the firmware sets the GIC up '
+               'again at the restart is INFERRED: two boots found the same enabled set). On a refusal of the arm half the quarantine lasts only as long as the '
+               'put-back that follows at once, except in the both-gates case, in which that put-back does not lift it.'),
+        *prose('While it is on, SGI 0 and PPIs 23, 25, 27 and 30 cannot be signalled to this CPU. The guest\'s EL1 timers are among them (INTID 27 and 30 in the '
+               'unit\'s GTDT, OBSERVED from its ACPI dump), and what the guest does without them inside the time box is UNKNOWN. The monitor stops its run on '
+               'any interrupt that is not PPI 26 (probes/xnuboot/async.c), so with the quarantine on such a PPI cannot do that (INFERRED). An enabled SPI is '
+               'not covered: one pending at the check refuses FOREIGN_PENDING and no monitor is called, and one that asserts during the call stops the run '
+               'unacknowledged (below).'),
+        *prose('The refusals of the arm half, Q_NOT_HELD (22, OUTCOME=0X16) and FOREIGN_PENDING (23, OUTCOME=0X17) among them, end the run before the monitor is '
+               'called: the wrapper puts back what the arm wrote, but for the exception above (mon_arm_failed, probes/sp11-stick-monitor.c), and its page shows, in this order, GIC QUAR MASK= '
+               'DONE= HPPIR= (these two refusals only: MASK is what was written to ICENABLER0 and DONE what ISENABLER0 read back, left out with MASK=NONE '
+               'when nothing needed disabling; HPPIR is the INTID that ICC_HPPIR1_EL1 gave, - when it was not read), GIC RESTORE CLEAN= FAILED= RETRIED= '
+               'BEGUN=, GIC VERDICT=<name> OUTCOME=, MON VERDICT=GIC_NOT_READY and REFUSED=GIC_NOT_READY STAGE=COPIED DETAIL=0X16 or 0X17. DETAIL is 0X30 '
+               'instead when the put-back itself did not hold (NOT_RESTORED; the both-gates case above is one, and GIC RESTORE then says CLEAN=NO). There is no MON CALL line. The INTID of a FOREIGN_PENDING refusal is on that live '
+               'page only: SNAPREP-M1.BIN prints GIC GICD, GICR, CPU, NEW and RESTORE from the record and has no GIC QUAR line, so a page that was not filmed '
+               'does not show it (it is in the GIC record, version 3, 1456 bytes at REPORT.DAT + 0x11000, with the survey, which no M1 line prints). A '
+               'put-back that fails after the call is not a refusal: GIC RESTORE CLEAN=NO.'),
+        *prose('Never the ITS, another interrupt\'s priority, group or configuration, an SPI (read only), another CPU\'s redistributor (GICR_TYPER read only), '
+               'SMMU, PCIe, USB or the framebuffer. The only writes to other interrupts are the enable bits of this CPU\'s own SGI 0 and PPIs, cleared by Q '
+               'and set again by the put-back (not in the both-gates case above).'),
+        *prose('The monitor, while the guest runs (as the record said before this arm half was described here): the census cannot see its stores to the GIC '
+               'distributor: they are in the GPU code of section 3b, at the address that PARAMS gpu.gicd holds, and its one fixed distributor address is in '
+               'secondary_run (group G, not reached). The monitor uses the CPU interface (group D) and, on the boot CPU, acknowledges an interrupt in two '
+               'cases only: INTID 26 (the timer) when its ISTATUS is set and the run\'s deadline is ahead, and INTID 0x14C when gpu.flags has its enable bit '
+               '(a LIVE gate). Any other IRQ or FIQ, and the timer at the deadline, ends the run with the interrupt not acknowledged: the monitor records it, '
+               'disables its timer and returns, and a foreign interrupt stays pending (INFERRED from probes/xnuboot/async.c). Never the ITS, SMMU, PCIe, USB or '
+               'the framebuffer.'))
+
+
+GIC_LINES = gic_lines()
+
+GIC_FACT_LINES = (
+    '   The arm half since pass 5 and what it rests on (docs/SP11-STICK-GIC.md sections 4 and 12; its labels):',
+    *wrap('Changed from the stage that ran in boot 13: the survey (reads), the quarantine (one ICENABLER0 write and the one ISENABLER0 write that undoes it, '
+          'which is not made in the both-gates case above), the check of ICC_HPPIR1_EL1 before the call, record version 3 and two outcomes. Neither the '
+          'quarantine nor the check has run on the unit (hardware NOT RUN). The quarantine\'s writes have run only in the host model, and the check of '
+          'ICC_HPPIR1_EL1 there and under QEMU (docs/SP11-STICK-GIC.md section 9); the both-gates case, only in the host model.', first=6, rest=6, width=GIC_WIDTH + 6),
+    *wrap('Outcomes (OUTCOME= on the page, in hex): 0X1 to 0XF a refusal before any store; 0X10 to 0X1F a store that did not hold or a foreign interrupt next, '
+          'always after a store and so always followed by the put-back (0X16 Q_NOT_HELD, 0X17 FOREIGN_PENDING); 0X30 NOT_RESTORED.', first=6, rest=6, width=GIC_WIDTH + 6),
+    *wrap('OBSERVED, one unit, one boot each, in the dry run\'s own build, not in this one (boot 12 from a photograph of the page, boot 13 from one video read '
+          'frame by frame):', first=6, rest=6, width=GIC_WIDTH + 6),
+    '         the firmware leaves SGI 0 and PPIs 23, 25, 26, 27 and 30 enabled: ISENABLER0 0x4E800001 (boot 12);',
+    '         INTID 27 was pending before any store: ISPENDR0 0x08000000 (boot 13);',
+    '         the unit\'s GTDT, from its ACPI dump, gives Virtual EL1 GSIV 27 (Secure EL1 29, Non-secure EL1 30,',
+    '           Non-secure EL2 26);',
+    '         GICD_CTLR written 0x13 read back 0x12 (boot 13);',
+    '         an enabled, pending PPI is delivered to EL2 as an IRQ once group 1 and the CPU interface are on: INTID 27,',
+    '           not 26, was the first interrupt of window 1 in boot 13, and everything was put back clean.',
+    *wrap('INFERRED: that INTID 27 is the EL1 virtual timer asserting (this build does not read CNTV_CTL_EL0; the dry run\'s survey does); that the monitor, '
+          'which stops on any interrupt that is not PPI 26 (probes/xnuboot/async.c), would end a monitor entry run at its first IRQ unmask on the same '
+          'interrupt; that nothing else runs on this CPU between the first store and the call (the wrapper runs after the runner has left the firmware).',
+          first=6, rest=6, width=GIC_WIDTH + 6),
+    *wrap('UNKNOWN: whether PPI 26 itself reaches EL2 (U3); whether INTID 27 is the only foreign source (the SPIs were never read on the unit, and SGI 0 and '
+          'PPIs 23, 25 and 30 are enabled too); whether the quarantine holds on this unit (its non-secure ICENABLER0 write is the first of its kind there, and '
+          'has not been made); what the guest does without INTID 27 and 30 for the call.', first=6, rest=6, width=GIC_WIDTH + 6))
 
 # The census placed entries (D3): the first line is the head of the sub-block (six spaces and `placed` once the record module has indented it).
 PLACED_LINES = (
