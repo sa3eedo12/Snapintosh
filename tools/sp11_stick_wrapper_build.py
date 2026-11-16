@@ -13,8 +13,11 @@ With --monitor and --monitor-build the tool builds the monitor entry variant ins
 (docs/SP11-STICK-MONITOR.md): the wrapper image padded to a fixed offset, then the profile build's xnuboot.bin byte for byte, called by a
 direct `bl` to the symbol sp11_monitor that --defsym places at that offset. The monitor must be the output of the profile build that
 --monitor-build names (python3 tools/sp11_m1_profile.py build ... writes profile-build.json), must start at 0 with its vectors at 0x800 and
-must be position independent: its objects are relinked with --emit-relocs, the flat bytes must equal the monitor's and q1n1's ELF check must
-pass on the result. Build order: monitor, its digest, wrapper, concatenation.
+must be position independent: its objects are relinked with --emit-relocs, the flat bytes must equal the monitor's, q1n1's ELF check must
+pass on the result and the entry and vectors are checked in that relinked ELF. Build order: monitor, its digest, wrapper, concatenation.
+What that proof cannot show: an address dependence that is not a relocation, an address built from integers, .init_array and TLS are not
+examined, and profile-build.json is self-attesting: the tool holds its flags to the profile's rules and its digests to the files beside it,
+and nothing proves that the objects were compiled with those flags.
 
 The recipe is q1n1's and is read from its Makefile, not copied: PAYLOAD_CFLAGS and PAYLOAD_LDFLAGS (the flags, --emit-relocs among
 them), payloads/start.S first, payloads/payload.ld, then llvm-objcopy -O binary, then q1n1's tools/sp11_payload_elfcheck.py on each ELF.
@@ -242,17 +245,52 @@ def macros_of(flags):
     return found if sorted(found) == sorted(GIC_MACROS) else None
 
 
+def flag_problems(flags):
+    """[what] in the `flags` of a profile-build.json that the rules of tools/sp11_m1_profile.py load_profile (read from this tree's profile) refuse:
+    a required define that is absent or has another value, a define whose name is forbidden or holds a forbidden part (THERMAL), one that occurs twice,
+    a base define the profile requires that is missing, and a record that does not carry the NV2 record's header define exactly once. The profile tool
+    appends that define itself, so it is the one name the forbidden list may not apply to."""
+    try:
+        import sp11_m1_profile as profile_tool
+    except ImportError as error:
+        raise Refused('BUILD_FAILED', f'tools/sp11_m1_profile.py cannot be imported: {error}') from None
+    try:
+        profile, _ = profile_tool.load_profile(ROOT)
+    except profile_tool.Refused as error:
+        raise Refused('PROFILE_BAD', str(error)) from None
+    header, defines, problems = profile['required_input']['define'], {}, []
+    for flag in flags:
+        match = re.fullmatch(r'-D([A-Z][A-Z0-9_]*)(?:=(.*))?', flag)
+        if not match:
+            continue
+        name = match.group(1)
+        if name in defines:
+            problems.append(f'-D{name} occurs twice')
+        defines[name] = match.group(2)
+        if name != header and (name in profile['forbidden_define_names'] or any(part in name for part in profile['forbidden_define_substrings'])):
+            problems.append(f'-D{name} is forbidden in the sp11-m1 profile')
+    problems += [f'-D{name}={value} is required' for name, value in profile_tool.REQUIRED_DEFINES.items() if defines.get(name) != value]
+    problems += [f'{flag} is required' for flag in profile['required_base_defines'] if flag not in flags]
+    problems += [] if header in defines else [f'-D{header} is missing']
+    return problems
+
+
 def read_monitor(monitor_arg, record_arg):
     """(the monitor's bytes, the build record, its directory): the monitor must be the output of the profile build that `record_arg` (its
-    profile-build.json) describes: the record's own digests, and the ELF and objects beside it, say so."""
+    profile-build.json) describes: the record's own digests, and the ELF and objects beside it, say so. The record is a file the profile tool wrote
+    and nothing authenticates it (self-attesting): its digests tie the files together and its flags are held to the profile's rules, but nothing
+    proves that the objects were compiled with those flags."""
     try:
         record = json.loads(Path(record_arg).read_text())
         built = record['monitor']
         assert record['format'] == BUILD_RECORD_FORMAT and record['profile'] == 'sp11-m1' and record['hardware'] == 'NOT RUN'
         assert isinstance(record['flags'], list) and isinstance(built['bytes'], int) and isinstance(record['nv2_record'], dict)
         assert all(re.fullmatch(r'[0-9a-f]{64}', built[k]) for k in ('sha256', 'elf_sha256')) and macros_of(record['flags']) is not None
+        assert all(isinstance(flag, str) for flag in record['flags'])
     except (OSError, ValueError, KeyError, TypeError, AssertionError) as error:
         raise Refused('MONITOR_BUILD_BAD', f'{record_arg} is not the record of an sp11-m1 profile build ({error!r})') from None
+    if problems := flag_problems(record['flags']):
+        raise Refused('MONITOR_BUILD_BAD', f'{record_arg}: the flags of the build break the rules of the sp11-m1 profile: {"; ".join(problems[:3])}')
     directory = Path(record_arg).resolve().parent
     try:
         monitor = Path(monitor_arg).read_bytes()
@@ -334,6 +372,7 @@ def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     pic = relink_check(monitor_objects(directory, record['flags']), tree, out / 'monitor-pic', monitor)
+    check_layout(out / 'monitor-pic' / 'xnuboot-relocs.elf')       # the ELF that was proved to flatten to these bytes, not only the record's
     pinned = monitor_defines(monitor, offset)
     extra = [*pinned, '-DSW_GIC_DRY_REGS=0']
     wrapper = build_one('SNAPMON-M1.BIN', tree, cflags, ldflags, defines, out, extra, [f'--defsym={MONITOR_CALL}={offset:#x}'])
@@ -349,7 +388,7 @@ def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset
                           'build_record_sha256': sha(Path(record_arg).read_bytes()), 'nv2_record': record['nv2_record'].get('record_sha256'),
                           'relocations': pic, 'call': f'bl {MONITOR_CALL} (R_AARCH64_CALL26, --defsym)'},
               'q1n1_inputs': {rel: sha((tree / rel).read_bytes()) for rel in Q1N1_INPUTS}, 'cflags': [f.replace(str(tree), '<q1n1>') for f in cflags],
-              'ldflags': ldflags, 'gic_macros': defines, 'hardware': 'NOT RUN',
+              'ldflags': ldflags, 'gic_macros': defines, 'hardware': 'NOT RUN', 'profile': record['profile'],
               'added': ['-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1', '-DSNAP_SP11_STICK_GIC=1', '-DSNAP_SP11_STICK_MONITOR=1', '-DSW_GIC_DRY_REGS=0', *pinned],
               'variant': 'm1: the wrapper arms the GIC (classes G, R, C), calls the appended monitor and puts the GIC back (docs/SP11-STICK-MONITOR.md)'}
     (out / REPORT_NAME).write_text(json.dumps(report, indent=1, sort_keys=True) + '\n')

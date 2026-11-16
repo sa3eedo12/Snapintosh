@@ -25,6 +25,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sp11_stick_wrapper_build as wb  # noqa: E402
@@ -70,6 +71,16 @@ def refused(*argv):
     code, out, err = quietly(wb.main, list(argv))
     found = re.search(r'^REFUSED=(\w+)$', out, re.M)
     return (found.group(1) if found else None), err, code
+
+
+def tiny_elf(work, tag, before, align):
+    """An ELF of two nops linked with the monitor's own linker script: `before` is assembly placed ahead of the entry, the vectors sit on `align` bytes."""
+    work.mkdir(exist_ok=True)
+    T.write(work / f'{tag}.S', (f'.section .text.entry,"ax"\n{before}.global _start\n_start: nop\n.text\n.balign {align}\n.global xnuboot_vectors\n'
+                               f'xnuboot_vectors: nop\n').encode())
+    T.clang(['--target=aarch64-unknown-none-elf', '-c', str(work / f'{tag}.S'), '-o', str(work / f'{tag}.o')], f'assembling {tag}')
+    subprocess.run([T.find_tool('ld.lld'), '-T', str(ROOT / 'probes/probe.ld'), '-o', str(work / f'{tag}.elf'), str(work / f'{tag}.o')], check=True, capture_output=True)
+    return work / f'{tag}.elf'
 
 
 def setUpModule():
@@ -124,6 +135,7 @@ class Build(Base):
         self.assertEqual(report['monitor']['sha256'], STATE['record']['monitor']['sha256'])
         self.assertEqual(report['wrapper'], {'bytes': len(wrapper), 'sha256': hashlib.sha256(wrapper).hexdigest(), 'padding': offset - len(wrapper)})
         self.assertEqual(report['hardware'], 'NOT RUN')
+        self.assertEqual(report['profile'], STATE['record']['profile'], 'the report names the profile the monitor was built from (the authorisation record reads it)')
         self.assertEqual(report['monitor']['nv2_record'], STATE['record']['nv2_record']['record_sha256'], 'the report names the NV2 record the monitor was built with')
 
     def test_the_wrapper_pins_the_image_it_calls(self):
@@ -173,20 +185,15 @@ class Build(Base):
     def test_the_layout_check_refuses_a_misplaced_entry_and_vectors(self):
         """Tiny objects linked with the monitor's own linker script: the entry stub first and the vectors on a 2 KiB boundary pass; a word before
         the entry, or vectors on 1 KiB, are refused."""
-        work = SCRATCH / 'layout'
-        work.mkdir(exist_ok=True)
         for tag, before, align in (('good', '', 2048), ('start', '    nop\n', 2048), ('vectors', '', 1024)):
-            T.write(work / f'{tag}.S', (f'.section .text.entry,"ax"\n{before}.global _start\n_start: nop\n.text\n.balign {align}\n.global xnuboot_vectors\n'
-                                       f'xnuboot_vectors: nop\n').encode())
-            T.clang(['--target=aarch64-unknown-none-elf', '-c', str(work / f'{tag}.S'), '-o', str(work / f'{tag}.o')], f'assembling {tag}')
-            subprocess.run([T.find_tool('ld.lld'), '-T', str(ROOT / 'probes/probe.ld'), '-o', str(work / f'{tag}.elf'), str(work / f'{tag}.o')], check=True,
-                           capture_output=True)
+            elf = tiny_elf(SCRATCH / 'layout', tag, before, align)
             if tag == 'good':
-                wb.check_layout(work / 'good.elf')
+                wb.check_layout(elf)
             else:
                 with self.assertRaises(wb.Refused) as caught:
-                    wb.check_layout(work / f'{tag}.elf')
+                    wb.check_layout(elf)
                 self.assertEqual(caught.exception.name, 'MONITOR_LAYOUT', tag)
+
 
 
 class Refusals(Base):
@@ -225,6 +232,43 @@ class Refusals(Base):
         T.write(bare / 'profile-build.json', (STATE['profile'] / 'profile-build.json').read_bytes())
         name, why, _ = refused(*self.args(record=bare / 'profile-build.json'))
         self.assertEqual(name, 'MONITOR_BUILD_BAD', why)
+
+    def test_a_record_whose_flags_break_the_rules_of_the_profile(self):
+        """Each record below keeps the five GIC macros, which were the only flags checked before, so only the profile's own rules (tools/
+        sp11_m1_profile.py load_profile) refuse it, and the detail names the rule."""
+        flags = STATE['record']['flags']
+        self.assertEqual(wb.flag_problems(flags), [], 'the control: the flags of the real profile build break no rule')
+        header = next(f for f in flags if f.startswith('-DSNAP_NV2_RECORD_HEADER='))
+        cases = {'a required define is absent': ([f for f in flags if f != '-DSNAP_FAIR_TOKEN=1'], '-DSNAP_FAIR_TOKEN=1 is required'),
+                 'a required define has another value': (['-DSNAP_PLATFORM_SP11=0' if f == '-DSNAP_PLATFORM_SP11=1' else f for f in flags], '-DSNAP_PLATFORM_SP11=1 is required'),
+                 'a forbidden name': ([*flags, '-DSNAP_BOOT_RELOCATE=1'], '-DSNAP_BOOT_RELOCATE is forbidden'),
+                 'a forbidden part': ([*flags, '-DSNAP_SOME_THERMAL_GUARD=1'], '-DSNAP_SOME_THERMAL_GUARD is forbidden'),
+                 'a base define the profile requires is absent': ([f for f in flags if f != '-DSNAP_NATIVE_CALLS=1'], '-DSNAP_NATIVE_CALLS=1 is required'),
+                 'a define twice': ([*flags, '-DSNAP_FAIR_TOKEN=1'], '-DSNAP_FAIR_TOKEN occurs twice'),
+                 'no NV2 header': ([f for f in flags if f != header], '-DSNAP_NV2_RECORD_HEADER is missing'),
+                 'two NV2 headers': ([*flags, header.replace('test-record.h', 'other.h')], '-DSNAP_NV2_RECORD_HEADER occurs twice')}
+        broken = SCRATCH / 'flags'
+        broken.mkdir(exist_ok=True)
+        for tag, (bad, expected) in cases.items():
+            self.assertNotEqual(wb.macros_of(bad), None, f'{tag}: the five GIC macros are intact, so the older check passes this record')
+            T.write(broken / 'profile-build.json', json.dumps({**STATE['record'], 'flags': bad}).encode())
+            name, why, _ = refused(*self.args(record=broken / 'profile-build.json'))
+            self.assertEqual(name, 'MONITOR_BUILD_BAD', f'{tag}: {why}')
+            self.assertIn(expected, why, tag)
+
+    def test_the_layout_is_checked_in_the_relinked_elf_and_not_only_in_the_records(self):
+        """The record's ELF is right, so only a check of the ELF that the proof relinked can see a relink whose vectors moved: the doctored relink
+        below leaves the proof's bytes alone and replaces the ELF that the layout check is then given."""
+        bad, real_relink = tiny_elf(SCRATCH / 'layout', 'relinked-vectors', '', 1024), wb.relink_check
+
+        def doctored(objects, tree, out, monitor):
+            counts = real_relink(objects, tree, out, monitor)
+            shutil.copy(bad, out / 'xnuboot-relocs.elf')
+            return counts
+        with mock.patch.object(wb, 'relink_check', doctored):
+            name, why, _ = refused(*self.args())
+        self.assertEqual(name, 'MONITOR_LAYOUT', why)
+        self.assertIn("'xnuboot_vectors': 1024", why, 'the ELF the check was given is the doctored relink, not the record\'s')
 
     def test_a_profile_whose_gic_macros_differ_from_the_monitor_build(self):
         profile = json.loads((ROOT / 'config/monitor-profile-sp11-m1.json').read_text())
@@ -439,6 +483,13 @@ class Hygiene(unittest.TestCase):
         for name in wb.MONITOR_REFUSALS:
             self.assertIn(name, note)
 
+    def test_what_the_position_proof_cannot_show_is_written_in_the_tool_and_in_the_note(self):
+        note = (ROOT / 'docs/SP11-STICK-MONITOR.md').read_text()
+        for where, text in (('the note', note), ('the tool', wb.__doc__)):
+            flat = ' '.join(text.split())
+            for needle in ('an address dependence that is not a relocation', 'an address built from integers', '.init_array', 'TLS', 'self-attesting'):
+                self.assertIn(needle, flat, f'{where}: {needle}')
+
     def test_the_new_files_are_ascii_with_an_spdx_line_within_the_size_limits_and_hold_no_machine_data(self):
         for rel in OWN:
             path = ROOT / rel
@@ -452,7 +503,7 @@ class Hygiene(unittest.TestCase):
                     self.assertLess(len(data), 50 * 1024)
                     self.assertLess(data.count(b'\n'), 1500)
                 else:
-                    self.assertLessEqual(len(data), 30000)
+                    self.assertLessEqual(len(data), 36000)       # raised from 30,000 on purpose for the review addendum; nothing was cut
                 for needle in (b'/Us' + b'ers/', b'/Vol' + b'umes/', b'/t' + b'mp/', b'/var/fol' + b'ders'):
                     self.assertNotIn(needle, data)
 

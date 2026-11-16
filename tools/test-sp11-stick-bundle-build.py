@@ -717,7 +717,7 @@ class Hygiene(Case):
             self.assertTrue(text.isascii(), path.name)
             self.assertIn('SPDX-License-Identifier: MIT', text[:200] if path.suffix != '.md' else text[:100], path.name)
             self.assertLess(len(text.splitlines()), 1500, path.name)
-            self.assertLess(len(text.encode()), 33000 if path == DOC else 50 * 1024, path.name)
+            self.assertLess(len(text.encode()), 33200 if path == DOC else 50 * 1024, path.name)      # 33000 until the pointer to --m1-run (+116 bytes): raised on purpose
             for prefix in MACHINE_PATHS:
                 self.assertNotIn(prefix, text, f'{path.name}: {prefix}')
             self.assertIsNone(re.search(r'(?i)\b([0-9a-f]{2}:){5}[0-9a-f]{2}\b', text), path.name)

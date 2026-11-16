@@ -8,6 +8,8 @@
     sp11_stick_bundle_build.py authorisation-template synthetic|real [--note FILE] ...    the record the operator approves, on stdout
     sp11_stick_bundle_build.py real         --kernelcache K ...   the same from a kernelcache (docs/SP11-STICK-REAL.md): EXPERIMENTAL, host only
 
+--m1-run BUILD_REPORT (synthetic, real and the template) makes the record that of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10). It is
+the only kind that authorises a wrapper that calls a monitor, and it refuses one that calls none (tools/sp11_stick_bundle_m1.py).
 The bundle is the five files of docs/SP11-STICK-BUNDLE.md, q1n1's PAYLOAD.MAN and, with --base-tree, a stage tree that the stager verifies.
 A refusal prints `REFUSED=<NAME>` and exits 1: the interface's name (tools/sp11_stick_bundle.py) where it has one, else BUILDER_REFUSALS.
 Output is deterministic and is written only below --out, which must be under build/ (or --allow-under). The placement (D1), the stores (D4),
@@ -31,6 +33,7 @@ sys.path.insert(0, str(ROOT / 'tools'))
 import board_descriptor as bd  # noqa: E402
 import sp11_stick_bundle as sb  # noqa: E402
 import sp11_stick_bundle_chunks as ch  # noqa: E402
+import sp11_stick_bundle_m1 as m1  # noqa: E402
 import sp11_stick_bundle_record as rec  # noqa: E402
 
 Refused = ch.Refused
@@ -388,6 +391,14 @@ def read_note(path):
     return rec.note_lines(data)
 
 
+def read_m1_report(path):
+    """The bytes of the --m1-run file: a regular file (no symbolic link) of at most m1.REPORT_CAP bytes, else M1_REPORT_BAD."""
+    try:
+        return read_regular(path, '--m1-run', cap=m1.REPORT_CAP)
+    except Refused as error:
+        raise Refused('M1_REPORT_BAD', error.detail) from None
+
+
 def need_authorisation(a):
     if not (a.authorisation or a.authorisation_sha256):
         raise Refused('NO_AUTHORISATION', 'give --authorisation (the approved record) or --authorisation-sha256; authorisation-template prints the record')
@@ -483,8 +494,14 @@ def prepare(a, kind, before_filler=None):
     gic_stop = getattr(a, 'gic_stop', False)
     if gic_stop and not stores & sb.STORE_GIC:
         raise Refused('OPTIONS_BAD', '--gic-stop is the record of the GIC and stop dry run, which stores in the gic class: --stores must include gic')
+    m1_path = getattr(a, 'm1_run', None)
+    if m1_path is not None:         # an empty path is the kind with a file that cannot be read, never the other kind
+        m1.check_options(stores, gic_stop, a.time_box_s)
     descriptor, state, board = descriptor_digest(a, facts, kind)
     monitor, reporter = read_regular(a.monitor, '--monitor', minimum=4), read_regular(a.reporter, '--reporter', minimum=4)
+    if m1_path is None:
+        m1.refuse_monitor_wrapper(monitor)
+    m1_facts = m1.read_report(read_m1_report(m1_path), monitor, reporter) if m1_path is not None else None
     declared = declared_ranges(a.declared)
     early = pack_pin(pin_fields(facts, place, stores, DUMMY, DUMMY, dict(guest_file_size=1024, guest_chunk_count=1, guest_file_sha256=DUMMY,
                                                                        guest_index_sha256=DUMMY)), check=False)
@@ -509,14 +526,16 @@ def prepare(a, kind, before_filler=None):
     if sb.params_dest(guest) != lay.params_pa:
         raise Refused('BUILT_SHAPE', 'x3 of the monitor call, the PARAMS chunk destination, is not PARAMS_PA')
     ch.check_params(chunks, place, a.time_box_s)
+    if m1_path is not None:
+        m1.check_launch(chunks)
     head, table = sb.unpack_guest(guest)
     record = rec.record_text(dict(place=place, stores=stores, time_box_s=a.time_box_s, label=facts['build_label'], monitor=(len(monitor), sha(monitor)),
-                                  reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop,
+                                  reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop, m1=m1_facts,
                                   guest=dict(size=len(guest), sha256=sha(guest), chunks=len(table), index=head['index_sha256'].hex()),
                                   real=real and dict(real, descriptor_sha256=descriptor.hex(), board_id=board.board_id, board_status=board.status,
                                                      ecam_windows=len(board.ecam))))
     return dict(facts=facts, dumps=dumps, place=place, stores=stores, descriptor=descriptor, state=state, board=board, monitor=monitor, reporter=reporter,
-                guest=guest, maps=maps, lines=lines, record=record, declared=declared, real=real)
+                guest=guest, maps=maps, lines=lines, record=record, declared=declared, real=real, m1=m1_facts)
 
 
 def finish(p, digest):
@@ -607,7 +626,7 @@ def report_of(a, kind, p, files, digest, manifest, staged):
         checked=['facts against every dump', 'placement against every map', 'PIN.DAT and GUEST.DAT (structure, table, chunk and file digests) by the interface checks',
                  'PARAMS memory range and watchdog', 'file count, roles and sizes'],
         not_run=['the wrapper and the reporter (work item 4)', 'any hardware'] + (['the kernelcache path'] if kind == 'synthetic' else []),
-        **({'real': p['real']} if p['real'] else {}))
+        **({'real': p['real']} if p['real'] else {}), **({'m1': p['m1']} if p['m1'] else {}))
 
 
 def build(a, kind):
@@ -647,10 +666,14 @@ def build_opts(p, kind, template=False):
                      ('--base', dict(required=True, help='guest_base: a multiple of 32 MiB (D1)')), ('--guest-mib', dict(type=int, required=True)),
                      ('--reserve-mib', dict(type=int, help='default: the loader\'s bootstrap_reserve() for this guest')),
                      ('--declared', dict(action='append', default=[], help='BASE:SIZE the runner declared: kept clear')),
-                     ('--monitor', dict(required=True, help='SNAPMON.BIN: payload 0, the wrapper (the dry-run one of docs/SP11-STICK-WRAPPER.md, or any file)')),
+                     ('--monitor', dict(required=True, help='SNAPMON.BIN: payload 0, the wrapper (the dry-run one of docs/SP11-STICK-WRAPPER.md, or any file that calls no '
+                                                            'monitor: WRAPPER_CALLS_MONITOR; with --m1-run, SNAPMON-M1.BIN)')),
                      ('--reporter', dict(required=True, help='SNAPREP.BIN: payload 1, the reporter')),
                      ('--stores', dict(required=True, help='ram,el2_sysreg[,gic]: the store classes authorised (D4)')),
                      ('--gic-stop', dict(action='store_true', help='the record of the GIC and stop dry run (docs/SP11-STICK-GIC.md); needs gic in --stores')),
+                     ('--m1-run', dict(metavar='BUILD_REPORT', help='the record of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10): the build-report.json of '
+                                                                   'tools/sp11_stick_wrapper_build.py --monitor, which made the SNAPMON-M1.BIN and SNAPREP-M1.BIN given '
+                                                                   'as --monitor and --reporter; needs ram, el2_sysreg and gic in --stores and a time box of 1 to 5 s')),
                      ('--time-box-s', dict(type=int, required=True, help='D5')), ('--descriptor', dict(help='a boot-ready board descriptor (real needs one)')),
                      ('--note', dict(help='a text file (printable ASCII, at most 40 lines of 120 characters) appended to the record as its section 6'))):
         p.add_argument(flag, **kw)
