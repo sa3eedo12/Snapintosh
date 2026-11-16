@@ -1,0 +1,26 @@
+{
+  "format": "sp11-bundle-facts-1",
+  "description": "SPDX-License-Identifier: MIT. SYNTHETIC EXAMPLE, not the unit's facts. Copy it to a local file under build/, replace every value from your own dumps and boots, and never commit the copy. The platform constants repeat the OBSERVED values already committed in docs/SP11-STICK-BUNDLE.md; the framebuffer base and the table digests are invented. docs/SP11-STICK-BUILD.md says what each field is and which dump checks it.",
+  "board_id": "sp11",
+  "build_label": "example-synthetic",
+  "midr": ["0x511F0011", "0x512F0011"],
+  "boot_mpidr": "0x80000000",
+  "cntfrq_hz": 19200000,
+  "gicd_base": "0x17000000",
+  "gicr_first": "0x17080000",
+  "gicr_limit": "0x17380000",
+  "gicr_stride": "0x40000",
+  "gicr_count": 12,
+  "its_base": "0x17040000",
+  "timer_intid": 26,
+  "gop": {"base": "0xE0000000", "bytes": "0x1518000", "width": 2880, "height": 1920, "stride": 2880, "format": 1},
+  "avoid": [
+    {"base": "0x10000000", "size": "0x100000", "tag": "OPERATOR"}
+  ],
+  "acpi": [
+    {"sig": "APIC", "length": 1000, "sha256": "1206a574f8290e2a1c984f98b42533ad5d1124b49dc19808afa9bff4e1184d7e"},
+    {"sig": "FACP", "length": 300, "sha256": "095c23019284fc35e512f6fc62f729b390325630353549b139ac4e58c27efed0"},
+    {"sig": "GTDT", "length": 160, "sha256": "2865243b39f09de3ed45c85f25731829cd116824a835231634f3be61f1395aa8"},
+    {"sig": "MCFG", "length": 180, "sha256": "03d3e18e281cd028cb2f23b598249aa8ff3ea91d04abbd04ae49a3a5a94c06d4"}
+  ]
+}
