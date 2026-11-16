@@ -98,7 +98,7 @@ BUNDLE_SIZES = (('`PIN.DAT` (1024 bytes', 1024), ('`REPORT.DAT` (528,384 zero by
 # Built is not run: what each work item may claim (its row must keep these words).
 WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                     2: ('BUILT, NOT RUN (q1n1 d8a5d2b)', 'the first is staged, ready to run, not run (`memhash`'),
-                    3: ('BUILT for the synthetic path', '`real` NOT RUN'), 4: ('IN PROGRESS elsewhere, not audited here',),
+                    3: ('BUILT for the synthetic path', '`real` NOT RUN'), 4: ('4a BUILT for the dry run, EXPERIMENTAL, NOT RUN (6151945',),
                     5: ('BUILT, EXPERIMENTAL, host side',), 9: ('BUILT, NOT RUN (q1n1 1e7318f)', 'first code below EL2')}
 # The tree as the document states it (matched on whitespace-collapsed text); the sources that decide them are read below.
 STATE_REQUIRED = (
@@ -832,7 +832,7 @@ class SeededBad(unittest.TestCase):
                  ('then the ITS structure, no GICR-range structure', 'then the ITS structure and a GICR-range structure'),
                  ('MCFG: eight allocations, segments 0 to 7', 'MCFG: four allocations, segments 0 to 3'),
                  ('bits that stick and trap nothing pass', 'bits that stick prove the traps work'),
-                 ('`real` NOT RUN', '`real` PASS'), ('IN PROGRESS elsewhere, not audited here', 'DONE'),
+                 ('`real` NOT RUN', '`real` PASS'), ('4a BUILT for the dry run, EXPERIMENTAL, NOT RUN', '4a DONE'),
                  ('BUILT, NOT RUN (q1n1 d8a5d2b)', 'BUILT, PASS (q1n1 d8a5d2b)'),
                  ('the first is staged, ready to run, not run', 'the first has run'),
                  ('first code below EL2', 'first code at EL2'),
