@@ -183,7 +183,8 @@ entered, 0 for a point not reached), `PLACE BASE= SIZE= DESC= DBASE= DPAGES=`, `
 
 The manifest order is the bundle note's: SNAPMON.BIN, SNAPREP.BIN, GUEST.DAT, PIN.DAT, REPORT.DAT. The bundle builder takes the two built files as
 `--monitor build/sp11-wrapper/SNAPMON.BIN --reporter build/sp11-wrapper/SNAPREP.BIN`, and the facts and authorisation record as its note says
-(`docs/SP11-STICK-BUILD.md`), with `--stores ram,el2_sysreg` (the format's minimum). **This note authorises no run.** A run on the unit
+(`docs/SP11-STICK-BUILD.md`), with `--stores ram,el2_sysreg` (the format's minimum) and a `--note FILE` that says in the record's section 6 what this
+wrapper does and does not do (the record is the operator's approval, so the note is part of what is approved). **This note authorises no run.** A run on the unit
 needs the operator's authorisation record, the single hardware client and the safety rules of AGENTS.md; none of that was done.
 
 ## 8. UNIMPLEMENTED and UNKNOWN
