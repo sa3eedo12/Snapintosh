@@ -8,8 +8,9 @@ The text is wrapped by hand, never by a library: its digest is the operator's ap
 lines, and a changed byte is another record. A record of a synthetic build must not change when a line about a real build is added: the
 lines of section 1a exist only for kind `real`. In the same way the lines of section 1b, the touches of M1_TOUCHES, the paragraphs of
 tools/sp11_stick_bundle_record_m1.py (the guest SMC, section 3b, the gic class and its facts), the budget of section 4, the
-silence rule of section 5 (M1_SILENCE_RULE, in place of SILENCE_RULE) and the two stop rules of M1_STOP_RULES exist only for a record of the monitor
-entry run (--m1-run), and the records of the other kinds are what they were (tools/test-sp11-stick-bundle-record.py pins their digests).
+silence rule of section 5 (M1_SILENCE_RULE, in place of SILENCE_RULE) and the stop rules of M1_STOP_RULES, and the sections that tell the operator what he decides,
+what can go wrong, what a pass is, what the pages say and what he does (0, 0b and 5 to 5c, in tools/sp11_stick_bundle_record_m1_guide.py) exist only for a
+record of the monitor entry run (--m1-run), and the records of the other kinds are what they were (tools/test-sp11-stick-bundle-record.py pins their digests).
 
 Evidence: EXPERIMENTAL, hardware NOT RUN. Nothing here approves anything."""
 import hashlib
@@ -21,6 +22,7 @@ import sp11_stick_bundle as sb  # noqa: E402
 import sp11_stick_bundle_chunks as ch  # noqa: E402
 import sp11_stick_bundle_record_gic as gq  # noqa: E402
 import sp11_stick_bundle_record_m1 as m1t  # noqa: E402
+import sp11_stick_bundle_record_m1_guide as m1g  # noqa: E402
 
 ch.KNOWN_REFUSALS.add('NOTE_BAD')       # the builder lists it among its own refusals too
 MIB = sb.MIB
@@ -110,7 +112,7 @@ M1_TOUCHES = {
                    'monitor A, entry and stage-2 setup, before the NV2 gate, whether or not the gate allows: DAIFSet, VBAR_EL2,',
                    '   HCR_EL2, TPIDR_EL2, VTCR_EL2, VTTBR_EL2 with TLBI VMALLS12E1IS, VMPIDR_EL2, CNTHCTL_EL2, CNTKCTL_EL1; DC CIVAC',
                    '   publishes its tables and work area.',
-                   'monitor B, only if the NV2 gate allows (D6; else the monitor stops before this with status -90 to -95), before the',
+                   'monitor B, only if the NV2 gate allows (MON PREPARE FAILED CODE=-90 to -95 stops it before this), before the',
                    '   guest runs: VNCR_EL2, HCR_EL2 (NV and NV2), MDCR_EL2, MAIR_EL1, TCR_EL1, TTBR1_EL1, TTBR0_EL1, VBAR_EL1,',
                    '   ESR_EL1, FAR_EL1, SCTLR_EL1 (the guest MMU on, over the shadow tables), MDSCR_EL1, TLBI VMALLE1IS, AT S1E1R',
                    '   (sets PAR_EL1), DBGBVR0_EL1 DBGBVR1_EL1 DBGBVR2_EL1 DBGBVR3_EL1 DBGBVR4_EL1 DBGBVR5_EL1 (breakpoint values) and',
@@ -131,8 +133,9 @@ M1_TOUCHES = {
                    '   the six breakpoint pairs of group B and OSLAR_EL1 (only if the lock was set at entry); stops the timer with',
                    '   CNTHP_CTL_EL2; TLBI ALLE1, TLBI ALLE1IS, TLBI VMALLS12E1 and TLBI VMALLS12E1IS; DC CIVAC over the guest',
                    '   range and the reserve.',
-                   '   IF PREPARE REFUSED BEFORE IT SAVED THEM (for example MON STATUS -24, -15, -14, -22 or -17; a status such as',
-                   '   -22 can come from either side, so the rows tell), the saved values are zero and the monitor writes ZEROS,',
+                   '   IF PREPARE REFUSED BEFORE IT SAVED THEM (for example MON PREPARE FAILED CODE=-24 UNNAMED, or -15',
+                   '   CLOCK_ADAPTER, -14 DEVICE_REGISTRY, -22 UNNAMED, -17 UNNAMED; a status such as -22 can come from either side,',
+                   '   so the rows tell), the saved values are zero and the monitor writes ZEROS,',
                    '   not what the registers held, into MDCR_EL2, VTCR_EL2, VTTBR_EL2, VMPIDR_EL2, MDSCR_EL1, MAIR_EL1, TTBR0_EL1',
                    '   and TTBR1_EL1: expect CHANGED rows for the first four on such a status (the other four have no row). That',
                    '   this is harmless to the runner, which is at EL2 with E2H = 0 and has no use for them, is INFERRED.',
@@ -168,29 +171,49 @@ M1_TOUCHES = {
                    '   c->thermal (section 3b); they write no system register. SMC is a call to firmware.',
                    *m1t.PLACED_LINES),
     'gic': m1t.GIC_LINES}       # what the arm half writes and reads, register by register: tools/sp11_stick_bundle_record_m1.py, checked by tools/test-sp11-stick-monitor-arm.py
-M1_STOP_RULES = ('   - MON STATUS -90 to -95 is the monitor\'s NV2 and PAuth gate refusing: a result, and the expected first one while D6',
-                 '     is open; the same bundle is not retried.',
-                 '   - MON QUARANTINE on the page (RET=0X51554E01 or 0X51554E02): the monitor\'s window is partial. Power cycle; never',
-                 '     continue on that RAM.')
+M1_STOP_RULES = (
+    *m1t.wrap('- MON PREPARE FAILED CODE=-91 NV2_OTHER_CORE, or any other code from -90 to -95, on the SNAPREP page, and MON RET=0X0 STATUS=0X<the code as a 64-bit '
+              'number> on the live page, is the monitor\'s NV2 and PAuth gate refusing: M1 has failed, a result, and the same bundle is not retried. The plan expected '
+              'this one first while no record was embedded (D6); the record is embedded now, and a pass of the gate is INFERRED (section 5a).', first=3, rest=5),
+    *m1t.wrap('- MON QUARANTINE on the page (RET=0X51554E01 or 0X51554E02): the monitor\'s window is partial. FORCE OFF (section 5c); never continue on that RAM.', first=3, rest=5))
 # The silence rule of every kind, and the rule of this one in its place: the monitor prints nothing while it runs and its prepare is UNKNOWN, so twice the
 # time box after ENTER (10 s at most) could end a legitimate run. The 60 s is the operator's safe wait, not a measurement (docs/SP11-STICK-MONITOR.md section 10).
 SILENCE_RULE = '   - No page change for twice the time box after ENTER: note the last line and power cycle.'
-M1_SILENCE_RULE = ('   - No page change for 60 seconds after the MON CALL line: note the last line and power cycle. The 60 s is an operator-safe wait and not a',
-                   '     measurement: the monitor prints nothing while it runs and its prepare is UNKNOWN (never run on this unit), so the rule of the other',
-                   '     kinds, twice the time box after ENTER, could end a legitimate run.')
+M1_SILENCE_RULE = m1t.wrap('- No page change for 60 seconds after the MON CALL line: note the last line and FORCE OFF (section 5c). The 60 s is an operator-safe wait and not a '
+                           'measurement: the monitor prints nothing while it runs and its prepare is UNKNOWN (never run on this unit), so the rule of the other kinds, '
+                           'twice the time box after ENTER, could end a legitimate run.', first=3, rest=5)
+
+
+def labelled(label, text):
+    """Section 1b's form: `label` in the first column and `text` filled beside it, the lines after the first indented to the column of the text."""
+    first, *rest = m1t.wrap(text, first=16, rest=16)
+    return [f'   {label:<12} ' + first[16:], *rest]
+
+
+def m1_regime_lines():
+    """D6 of 2026-11-17 and what is known of the regime of the embedded record (docs/SP11-MONITOR-PORT.md section 15, D6): the operator's choice rests on these words."""
+    return list(m1t.wrap(
+        'D6, decided by the operator on 2026-11-17: embed this first-image record, the local one from X2 run 4 (2026-11-11, build 89889b7f). The regime it was measured in '
+        'is NOT RECORDED in the record: it has no regime field, and the monitor\'s gate compares register values only (MIDR, REVIDR, MMFR2 and MMFR4 with this CPU, and the '
+        'two pass flags). Run 4\'s page printed no HCR_EL2 (the REGIME row came with run 6), and run 4 ran under the test-only no-sweep slbounce (docs/SP11-X2-TESTS.md:811-812), '
+        'a plain slbounce whose return leaves E2H and TGE set (read in the source: docs/SURFACE-PRO-11.md E6, a host reading; OBSERVED once for the scoped-sweep build, '
+        '2026-11-12: docs/SP11-EL2-ENTRY.md M2), so INFERRED E2H = 1 for this record (docs/SP11-MONITOR-PROFILE.md section 4). The monitor runs with E2H = 0. NV2 at E2H = 0 '
+        'is OBSERVED in X2 runs 6 and 7 (REGIME row, one boot each: docs/SP11-X2-TESTS.md:271 and :384) on records that were not ingested. Whether a record from an INFERRED '
+        'E2H = 1 image describes the E2H = 0 regime is UNKNOWN, and the gate cannot tell: approving this record approves this NV2 record and no other.', first=16, rest=16))
 
 
 def m1_lines(m1):
     """Section 1b of the record of an M1 run: SNAPMON-M1.BIN taken apart (wrapper, padding, monitor), the profile and the NV2 record the monitor was
-    built with, as tools/sp11_stick_bundle_m1.py read them from the build report and checked them against the bytes of the files."""
+    built with, as tools/sp11_stick_bundle_m1.py read them from the build report and checked them against the bytes of the files. The text names no path:
+    the profile's build record holds the NV2 header's absolute path, so its digest is not printed (the approved SHA-256 must not depend on where the
+    monitor was built); the NV2 record's own digest and the header's, which is a function of the record, identify the input."""
     w, m, n, image, reporter, efi = m1['wrapper'], m1['monitor'], m1['nv2'], m1['image'], m1['reporter'], m1['efi']
     lines = ['1b. The monitor entry run (docs/SP11-STICK-MONITOR.md): payload 0 is SNAPMON-M1.BIN, the wrapper plus the monitor',
              '   EFI files    the two that run at EL2 before the wrapper, named by SHA-256 as the builder was given them:',
              *(f'                {name:<23} sha256 {digest}' for name, digest in efi.items()),
-             '                No check at boot compares them with this record: the wrapper sees PIN.DAT and the data, and the',
-             '                runner checks the payloads (INFERRED from the review of the boot path). The operator\'s own check of',
-             '                the stick is the control: the stager\'s verify and every staged file against STICK-FILES.TXT, which',
-             '                these digests are compared with',
+             *m1t.wrap('No check at boot compares them with this record, and the operator cannot on the unit: the wrapper sees PIN.DAT and the data, the runner checks the '
+                       'payloads (INFERRED from the review of the boot path). The control is the coordinator\'s, before the boot: the stager\'s verify and these two '
+                       'digests compared with the entries of STICK-FILES.TXT (section 5c)', first=16, rest=16),
              '   label        PIN.DAT\'s build_label starts with M1RUN-, which only this kind\'s builder writes and the wrapper',
              '                requires: a PIN.DAT of another kind, whose record says that no monitor is called, is refused before',
              '                the call (docs/SP11-STICK-MONITOR.md section 14). The reverse, this PIN.DAT with another wrapper, is',
@@ -203,49 +226,64 @@ def m1_lines(m1):
              f'                sha256 {m["sha256"]}',
              f'   elf sha256   {m["elf_sha256"]}',
              '                (the monitor\'s ELF: tools/sp11_monitor_census.py checks section 3 against it)',
-             f'   build record {m["build_record_sha256"]}',
-             '                (its profile-build.json holds the monitor\'s flags; SNAP_FAIR_TOKEN=1 among them is D10, still open)',
+             *labelled('build record', 'is not named by a digest here. The monitor\'s profile-build.json holds its flags (SNAP_FAIR_TOKEN=1 among them: D10, decided '
+                       '2026-11-17, kept) and names the NV2 header by the absolute path it was built from, so its digest would change with the place of the build and '
+                       'the SHA-256 that the operator approves would depend on a path. What identifies this build is the monitor\'s digest and its ELF\'s above and the '
+                       'NV2 record below, none of which depends on a path.'),
              '   position     the build tool relinked the monitor\'s objects with --emit-relocs; q1n1\'s ELF check found no absolute',
              '                relocation (' + ', '.join(f'{count} {name[10:]}' for name, count in sorted(m['relocations'].items())) + '); the wrapper calls it',
              '                with one bl and hashes it in place against the digest above before the call. That shows',
              '                no absolute relocation and that these objects make these bytes. It cannot show an address',
              '                dependence that is no relocation, an address built from integers, .init_array or TLS; and the',
-             '                build record above was written by the build tool itself: its digests tie the files together,',
+             '                build record of the monitor was written by the build tool itself: its digests tie the files together,',
              '                and nothing authenticates the record',
              f'   NV2 record   sha256 {n["sha256"]}',
+             '                (the 96 bytes that the monitor holds, found once in its image: the record\'s identity)',
+             f'   NV2 header   sha256 {n["header_sha256"]}',
+             '                (tools/nv2_record.py emit_header of those 96 bytes: the file that the profile build read,',
+             '                its path not named)',
              f'                soc {n["soc"]}  tool {n["tool"]}  build_id {n["build_id"]}  evidence {n["evidence"]}',
              f'                vncr_redirect {n["vncr_redirect"]}  negative_control_trapped {n["negative_control_trapped"]}',
-             '                the monitor\'s gate refuses (status -91) on a core that reads other values than these:',
+             '                the monitor\'s gate refuses (MON PREPARE FAILED CODE=-91 NV2_OTHER_CORE) on a core that reads other',
+             '                values than these:',
              f'                MIDR_EL1 {n["midr_el1"]}  REVIDR_EL1 {n["revidr_el1"]}',
              f'                ID_AA64MMFR2_EL1 {n["id_aa64mmfr2_el1"]}  ID_AA64MMFR4_EL1 {n["id_aa64mmfr4_el1"]}']
     if m1['test_record']:
         lines += ['                LOCAL TEST RECORD: made by the host tests (tool wi4b-test-only), synthetic, never measured on a unit. A',
-                  '                monitor built with it is a test artefact and this record must not be approved. D6 (which NV2 record) is',
-                  '                the operator\'s and is open.']
+                  '                monitor built with it is a test artefact and this record must not be approved. It is not the record that D6',
+                  '                embeds.']
     else:
-        lines += ['                D6 (which NV2 record, and whether its regime matters) is the operator\'s decision and is open: approving',
-                  '                this record approves this NV2 record and no other.']
+        lines += m1_regime_lines()
     lines += [f'   reporter     SNAPREP-M1.BIN  {reporter["bytes"]} bytes  sha256 {reporter["sha256"]}',
               '                (payload 1: reads REPORT.DAT, prints, stores to its stack only)']
     return lines
 
 
-def m1_time_lines(box_s, place):
-    """Section 4 of the record of an M1 run: the box, what it does not bound, the time budget with its numbers, and D8. The sum is of the figures as printed."""
+def m1_budget(box_s, place):
+    """The figures of section 4 as printed: the size of the stop's clean in MiB and its bound in s, the wrapper's own time, and the known parts of the run
+    (the low sum with the plan's estimate of the clean, the high one with its bound), the prepare not counted."""
     t = TIME_FACTS
     clean_mib = (place['guest_size'] + place['reserve_size']) // MIB
     clean_s = round(t['verify_s'] * clean_mib / t['verify_mib'], 1)
     wrapper_s = round(t['wrapper_s'], 1)
     low = round(wrapper_s + t['arm_wait_s'] + box_s + t['stop_s'], 1)
     high = round(wrapper_s + t['arm_wait_s'] + box_s + clean_s, 1)
+    return clean_mib, clean_s, wrapper_s, low, high
+
+
+def m1_time_lines(box_s, place, guest_bytes):
+    """Section 4 of the record of an M1 run: the box, what it does not bound, the time budget with its numbers, what UPTIME reads, and D8. The sum is of the figures
+    as printed."""
+    t = TIME_FACTS
+    clean_mib, clean_s, wrapper_s, low, high = m1_budget(box_s, place)
     return [
         f'4. Time box: {box_s} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds, word 24).',
         '   The builder refuses any other PARAMS watchdog (TIME_BOX_MISMATCH). The stop is the monitor\'s own timer',
         '   interrupt (CNTHP, PPI 26), not a wait.',
         '   What the box bounds: the guest, from its first instruction. It does not bound the monitor\'s prepare, which runs',
         '   before the timer is armed (duration UNKNOWN: never run on this unit), nor the stop\'s cache clean, nor a guest',
-        '   that the timer never interrupts (U3: whether PPI 26 reaches EL2 at all is UNKNOWN until the GIC dry run',
-        '   answers): then only the operator\'s power cycle ends the run.',
+        '   that the timer never interrupts (U3: PPI 26 reached EL2 in the GIC dry run, OBSERVED, one unit, one boot, and the',
+        '   monitor\'s own stop path is NOT RUN): then only the operator\'s FORCE OFF (section 5c) ends the run.',
         '   Time, from the wrapper\'s first line to the end of the report:',
         f'      wrapper checks, copy and verify          {wrapper_s} s    OBSERVED once (the dry run: {t["wrapper_s"]} s)',
         f'      GIC arm: the announcement and the wait   {t["arm_wait_s"]} s      SW_GIC_WAIT_S in probes/sp11-stick-gic.h',
@@ -255,12 +293,17 @@ def m1_time_lines(box_s, place):
         f'                                                        at most {clean_s} s (INFERRED bound: the dry run verified',
         f'                                                        {t["verify_mib"]} MiB in {t["verify_s"]} s, re-hash included)',
         f'      the known parts                          at least {low} s ({wrapper_s} + {t["arm_wait_s"]} + {box_s} + {t["stop_s"]}), at most {high} s, plus the prepare',
-        '   The plan\'s budget is a run well under 20 s of UPTIME, a precaution of low weight (docs/SP11-MONITOR-PORT.md',
-        f'   section 10, D5); the known parts alone are at least {low} s, so this run does not meet it, and keeping or relaxing',
-        '   it, with the 8 s wait, is the operator\'s. The earliest restart datum is about UPTIME 17 s (INFERRED: one boot,',
-        '   in a run that started secondary CPUs; the plan, section 10): this run is as long as that by construction. On',
-        '   restarts: a PSCI-only control was alive at UPTIME 224 s and 268 s (OBSERVED, two boots); the restarts seen went',
-        '   with CPU_ON and CPU_OFF (INFERRED) and this run starts no secondary (x4 = 0).',
+        *m1t.wrap(f'The {wrapper_s} s was measured in the dry run with a 144.7 MB GUEST.DAT; this one is {guest_bytes / 1e6:.1f} MB, so the figure is conservative '
+                  '(INFERRED: the copy and the verify take time in proportion to the size).', first=3, rest=3),
+        *m1t.wrap('The plan\'s budget is a run well under 20 s of UPTIME, a precaution of low weight (docs/SP11-MONITOR-PORT.md section 10, D5); the known parts alone '
+                  f'are at least {low} s, so this run does not meet it: APPROVING THIS TEXT RELAXES THE 20 s PRECAUTION OF D5 (the time box of {box_s} s is kept; the 8 s '
+                  'wait of the GIC arm, part of the known parts, stays as built). What UPTIME reads: it is q1n1\'s clock from before the runner loads and hashes the '
+                  f'{guest_bytes / 1e6:.1f} MB of GUEST.DAT, it stays at 0 S while the runner\'s chain runs, and its first heartbeat draws the whole chain, both payloads '
+                  'and the re-hash included (docs/SP11-STICK-LOG.md section 14), so the first heartbeat after STAGE=DONE reads well above 17 s (boot 14: 37 and 38 S, '
+                  'in a run that took about 21 s from its first NEXT line to its verdict; OBSERVED, one unit, one boot). The earliest restart datum is about UPTIME 17 s '
+                  '(INFERRED: one boot, in a run that started secondary CPUs; the plan, section 10): every run of this kind is past it by construction. On restarts: '
+                  'a PSCI-only control was alive at UPTIME 224 s and 268 s (OBSERVED, two boots); the restarts seen went with CPU_ON and CPU_OFF (INFERRED) and this '
+                  'run starts no secondary (x4 = 0).', first=3, rest=3),
         '   Thermal (D8): no thermal guard exists on this path. The monitor\'s own (compat/a16-thermal.c) only loads, from the',
         '   A16\'s sensor addresses: SROT at 0x0c222000 + n * 0x1000, which compat/hamoa-thermal.c gives as this machine\'s TSENS',
         '   SROT (INFERRED there), and TM at 0x0c22c000 + n * 0x1000, where this machine\'s is UNKNOWN. It is closed by',
@@ -272,7 +315,10 @@ def m1_time_lines(box_s, place):
         f'   time of one CPU, {low} to {high} s plus the prepare in all, of which the guest runs at most {box_s} s. No clock, voltage or',
         '   DVFS write is compiled in or reachable by the sources read (INFERRED from the profile\'s gates; the census sees',
         '   system registers only, not MMIO). Approving this record accepts the exception D8 describes',
-        '   (docs/SP11-MONITOR-PORT.md section 15).',
+        f'   (docs/SP11-MONITOR-PORT.md section 15). D8 was decided on 2026-11-17 for ONE CPU, a time box of {box_s} s',
+        '   and AC power REQUIRED: the charger is in before the boot and stays in until the end (section 5c).',
+        *m1t.wrap('If the stop timer never fires (the plan\'s second most likely failure, section 5a) one CPU stays loaded, at worst, until the operator acts: 60 s of '
+                  'silence (section 5) plus about 20 s holding Power, 80 s or more, with no temperature read; approving this text accepts that too.', first=3, rest=3),
         '   PARAMS words: gpu.flags, early_stop.flags and txm_native are zero in the chunk (this builder checked all three);',
         '   the wrapper reads the first two again before the call, not txm_native. That is a snapshot: the monitor reads',
         '   gpu.flags and early_stop.flags again while the guest runs, and the guest can write the RAM that holds them',
@@ -297,17 +343,25 @@ def note_lines(data):
     return lines
 
 
-def real_lines(real):
+def real_lines(real, m1=False):
     """Section 1a of the record of a `real` build: what GUEST.DAT and PIN.DAT were made from, as used and not as decided. `real` holds
     kernelcache_sha256, guest_profile, panel, sptm_hvc_calls, seed, descriptor_sha256, board_id, board_status and ecam_windows (the number of
     config windows the descriptor lists). A descriptor that is EXPERIMENTAL and lists none is the guest view of docs/SP11-STICK-REAL.md
-    section 3: it does not describe the Surface, and the board adapter's equality rule on the MCFG (D11 proper) is not satisfied by it."""
+    section 3: it does not describe the Surface, and the board adapter's equality rule on the MCFG (D11 proper) is not satisfied by it. `m1` is true for the
+    record of a monitor entry run, whose default seed label is the operator's decision N1 of 2026-11-17 and no longer an open note."""
     seed = real['seed']
+    if seed != DEFAULT_SEED:
+        seed_lines = [f'   boot seed    label {seed} (given with --seed)']
+    elif m1:
+        seed_lines = [f'   boot seed    label {seed} (the default label, kept: N1, decided by the operator on 2026-11-17)',
+                      '                boot entropy at run time stays UNIMPLEMENTED']
+    else:
+        seed_lines = [f'   boot seed    label {seed} (a default, not an operator decision; boot entropy UNIMPLEMENTED)']
     lines = ['1a. What this build is (the host-side real path of docs/SP11-STICK-REAL.md: GUEST.DAT is made from a kernelcache)',
              f'   kernelcache  guest profile {real["guest_profile"]}  sha256 {real["kernelcache_sha256"]}',
              f'   D9 as built  panel {real["panel"]}: {PANEL_WORDS[real["panel"]]}',
              f'                SPTM HVC call patch {real["sptm_hvc_calls"]}: {HVC_WORDS[real["sptm_hvc_calls"]]}',
-             f'   boot seed    label {seed} ' + ('(a default, not an operator decision; boot entropy UNIMPLEMENTED)' if seed == DEFAULT_SEED else '(given with --seed)'),
+             *seed_lines,
              f'   descriptor   sha256 {real["descriptor_sha256"]} (PIN.DAT descriptor_sha256)',
              f'                board {real["board_id"]}  status {real["board_status"]}']
     if real['board_status'] == 'EXPERIMENTAL' and real['ecam_windows'] == 0:
@@ -319,7 +373,8 @@ def record_text(r):
     """The text the operator approves (its SHA-256 is PIN.DAT's authorisation_sha256): deterministic, ASCII, no personal name. `r` holds place
     (the interface's placement), stores (the mask), time_box_s, label, monitor and reporter ((size, sha256)), guest (size, sha256, chunks,
     index), note (lines or None), gic_stop (the record of the GIC and stop dry run), m1 (None, else the facts of the monitor entry run that
-    tools/sp11_stick_bundle_m1.py read_report returns: section 1b, the touches of M1_TOUCHES, section 4 with the time budget and two stop rules)
+    tools/sp11_stick_bundle_m1.py read_report returns: section 1b, the touches of M1_TOUCHES, section 4 with the time budget, the stop rules, and the sections of
+    tools/sp11_stick_bundle_record_m1_guide.py: 0 and 0b before section 1, 5a to 5c after section 5)
     and real (None for a synthetic build, else real_lines' argument). gic_quarantine, with gic_stop, chooses the pass 5 text of
     tools/sp11_stick_bundle_record_gic.py in place of GIC_STOP_TOUCHES, and its section 4, the heading of section 2 and the silence rule and the last bullet of
     section 5 in place of the generic lines."""
@@ -331,14 +386,17 @@ def record_text(r):
         'Status: operator decision NOT RECORDED. Hardware: NOT RUN. This text is a template until the operator approves it.',
         'Approval is the operator\'s alone: the SHA-256 of exactly this text, recorded as authorisation_sha256 of PIN.DAT; a changed byte is another',
         'record. It names no person and stays local: it is never committed or published.', '',
+        *((*m1g.reading_lines(), '', *m1g.decision_lines(r.get('real'), r['time_box_s']), '',
+           *m1g.hazard_lines(r.get('real'), r['time_box_s'], *m1_budget(r['time_box_s'], p)[3:]), '') if m1 else ()),
         '1. What may run (named by SHA-256; the runner hashes the payloads before each call)',
         f'   payload 0  SNAPMON.BIN  {r["monitor"][0]} bytes  sha256 {r["monitor"][1]}',
         f'   payload 1  SNAPREP.BIN  {r["reporter"][0]} bytes  sha256 {r["reporter"][1]}',
-        f'   data       GUEST.DAT    {g["size"]} bytes  sha256 {g["sha256"]}  chunks {g["chunks"]}  table sha256 {g["index"]}',
+        *((f'   data       GUEST.DAT    {g["size"]} bytes  sha256 {g["sha256"]}', f'                           chunks {g["chunks"]}  table sha256 {g["index"]}') if m1 else
+          (f'   data       GUEST.DAT    {g["size"]} bytes  sha256 {g["sha256"]}  chunks {g["chunks"]}  table sha256 {g["index"]}',)),
         f'   data       REPORT.DAT   {sb.REPORT_BYTES} bytes, all zero, sha256 {hashlib.sha256(bytes(sb.REPORT_BYTES)).hexdigest()}',
         '   data       PIN.DAT      1024 bytes; it carries this record\'s digest, so its own digest cannot be named here', '']
     if r.get('real'):
-        lines += [*real_lines(r['real']), '']
+        lines += [*real_lines(r['real'], bool(m1)), '']
     if m1:
         lines += [*m1_lines(m1), '']
     lines += [
@@ -353,6 +411,7 @@ def record_text(r):
         lines += gq.HEAD_LINES if r.get('gic_quarantine') else ()
     if m1:
         lines.append('   Record of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10): payload 0 is SNAPMON-M1.BIN.')
+        lines.append('   Approving this text decides D4 for exactly these three classes, ram, el2_sysreg and gic, and no other (section 0).')
     for name in STORES:
         if r['stores'] & STORES[name]:
             first, *rest = touches[name]
@@ -361,16 +420,19 @@ def record_text(r):
     lines += m1t.GIC_FACT_LINES if m1 else ()
     lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.',
               *(m1t.SMC_LINES if m1 else ()), *(('', *m1t.DEVICE_LINES) if m1 else ()), '',
-              *(m1_time_lines(r['time_box_s'], p) if m1 else gq.time_lines(r['time_box_s']) if r.get('gic_quarantine') else
+              *(m1_time_lines(r['time_box_s'], p, g['size']) if m1 else gq.time_lines(r['time_box_s']) if r.get('gic_quarantine') else
                 [f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.']), '',
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
               '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',
+              *(m1g.PRE_CALL_SILENCE if m1 else ()),
               *(M1_SILENCE_RULE if m1 else gq.silence_lines() if r.get('gic_quarantine') else (SILENCE_RULE,)),
-              '   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',
-              *(gq.HARDWARE_LINES if r.get('gic_quarantine') else (
+              *(m1g.RESTART_AND_STAGE2_RULES if m1 else ('   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',)),
+              *(m1g.HARDWARE_RULES if m1 else gq.HARDWARE_LINES if r.get('gic_quarantine') else (
                   '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',
                   '     operator\'s power cycle, which writes nothing.')),
               *(M1_STOP_RULES if m1 else ())]
+    if m1:
+        lines += ['', *m1g.outcome_lines(r.get('real'), r['time_box_s']), '', *m1g.page_lines(m1, r['time_box_s']), '', *m1g.action_lines(r)]
     if r['note']:
         lines += ['', '6. Notes of this build (part of the digest)', *r['note']]
     text = '\n'.join(lines) + '\n'

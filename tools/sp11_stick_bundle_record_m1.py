@@ -47,8 +47,9 @@ SMC_LINES = wrap(
     'and every later write to it changes other bits only (IMO, FMO, NV, NV2, TWE, VI, VF, API, TVM and TRVM: read from the sources, INFERRED), and the '
     'monitor has no handler for the exception class of an SMC from the guest (EC 0x17). An SMC at EL1 would reach firmware without the monitor '
     '(INFERRED). The basis for not expecting one is a read-only scan of the local J700 26A428 kernelcache: its two executable segments, __TEXT_EXEC '
-    '(14,774,272 words) and __TEXT_BOOT_EXEC (8,192), hold 0 SMC and 0 HVC words (OBSERVED on a host file, one kernelcache; the same scan finds 1 SVC, '
-    '1 ERET and 146 WFE words, so it does find instructions). Whether the guest runs SMC code from anywhere else is UNKNOWN.')
+    '(14,774,272 words) and __TEXT_BOOT_EXEC (8,192), hold 0 SMC and 0 HVC words (OBSERVED on a host file, one kernelcache; the same scan finds, in the two '
+    'segments together, 1 SVC, 1 ERET and 148 WFE words, 146 of them in __TEXT_EXEC, so it does find instructions). Whether the guest runs SMC code from anywhere '
+    'else is UNKNOWN.')
 
 DEVICE_LINES = (
     '3b. Device code in the monitor and what closes it (D1; docs/SP11-STICK-MONITOR.md section 14)',
@@ -202,9 +203,11 @@ def gic_lines(pass6=PASS6_LINES):
                'monitor\'s own stop, the interrupt of its timer (CNTHP, PPI 26) at the time box on CNTPCT_EL0, at most 5 s (the wrapper\'s PARAMS check), once the '
                'monitor has armed the timer. Before that comes the monitor\'s prepare, whose duration is UNKNOWN (never run on this unit); after it the stop\'s '
                'cache clean (about 0.6 s, INFERRED, section 4), the wrapper\'s scans and cleans of REPORT.DAT and the put-back\'s polls (each at most 50 ms). '
-               'Whether PPI 26 reaches EL2 at all is UNKNOWN (U3). Nothing in the wrapper bounds the call: a guest that the timer never interrupts, or a monitor '
-               'that does not return, ends only by the operator\'s power cycle, and this stage\'s put-back does not run then (that the firmware sets the GIC up '
-               'again at the restart is INFERRED: two boots found the same enabled set). On a refusal of the arm half the quarantine lasts only as long as the '
+               'That PPI 26 reaches EL2 is OBSERVED in the dry run\'s stage (boot 14, one unit, one boot: four deliveries from EL2 and one from EL1, U3 answered; '
+               'docs/SP11-STICK-GIC.md section 12), and the monitor\'s own stop path is NOT RUN. Nothing in the wrapper bounds the call: a guest that the timer never '
+               'interrupts, or a monitor '
+               'that does not return, ends only by the operator\'s FORCE OFF (section 5c), and this stage\'s put-back does not run then (that the firmware sets the GIC up '
+               'again at the restart is INFERRED: three boots, 12 to 14, found the same enabled set). On a refusal of the arm half the quarantine lasts only as long as the '
                'put-back that follows at once, except in the both-gates case, in which that put-back does not lift it.'),
         *prose('While it is on, SGI 0 and PPIs 23, 25, 27 and 30 cannot be signalled to this CPU. The guest\'s EL1 timers are among them (INTID 27 and 30 in the '
                'unit\'s GTDT, OBSERVED from its ACPI dump), and what the guest does without them inside the time box is UNKNOWN. The monitor stops its run on '
@@ -237,27 +240,40 @@ GIC_LINES = gic_lines()
 GIC_FACT_LINES = (
     '   The arm half since pass 5 and what it rests on (docs/SP11-STICK-GIC.md sections 4 and 12; its labels):',
     *wrap('Changed from the stage that ran in boot 13: the survey (reads), the quarantine (one ICENABLER0 write and the one ISENABLER0 write that undoes it, '
-          'which is not made in the both-gates case above), the check of ICC_HPPIR1_EL1 before the call, record version 3 and two outcomes. Neither the '
-          'quarantine nor the check has run on the unit (hardware NOT RUN). The quarantine\'s writes have run only in the host model, and the check of '
-          'ICC_HPPIR1_EL1 there and under QEMU (docs/SP11-STICK-GIC.md section 9); the both-gates case, only in the host model.', first=6, rest=6, width=GIC_WIDTH + 6),
+          'which is not made in the both-gates case above), the check of ICC_HPPIR1_EL1 before the call, record version 3 and two outcomes. Passes 5 and 6, in the '
+          'dry run\'s own build, RAN in boot 14 and ended GIC VERDICT=IRQ_OK (docs/SP11-STICK-GIC.md section 12, docs/SP11-MONITOR-PORT.md section 13, WI 8): the '
+          'quarantine, the check and the put-back are OBSERVED there (below). This build is the same source built for the monitor entry, and has not run on the '
+          'unit (hardware NOT RUN). The both-gates case was not exercised in boot 14: it stays host model only.', first=6, rest=6, width=GIC_WIDTH + 6),
     *wrap('Outcomes (OUTCOME= on the page, in hex): 0X1 to 0XF a refusal before any store; 0X10 to 0X1F a store that did not hold or a foreign interrupt next, '
           'always after a store and so always followed by the put-back (0X16 Q_NOT_HELD, 0X17 FOREIGN_PENDING); 0X30 NOT_RESTORED.', first=6, rest=6, width=GIC_WIDTH + 6),
     *wrap('OBSERVED, one unit, one boot each, in the dry run\'s own build, not in this one (boot 12 from a photograph of the page, boot 13 from one video read '
-          'frame by frame):', first=6, rest=6, width=GIC_WIDTH + 6),
-    '         the firmware leaves SGI 0 and PPIs 23, 25, 26, 27 and 30 enabled: ISENABLER0 0x4E800001 (boot 12);',
-    '         INTID 27 was pending before any store: ISPENDR0 0x08000000 (boot 13);',
+          'frame by frame, boot 14 from one 60 s video with the final page read at full resolution; the transcription of boot 14 is not CRC-verified and its decodes '
+          'are INFERRED):', first=6, rest=6, width=GIC_WIDTH + 6),
+    '         the firmware leaves SGI 0 and PPIs 23, 25, 26, 27 and 30 enabled: ISENABLER0 0x4E800001 (boots 12 to 14);',
+    '         INTID 27 was pending before any store: ISPENDR0 0x08000000 (boots 13 and 14);',
     '         the unit\'s GTDT, from its ACPI dump, gives Virtual EL1 GSIV 27 (Secure EL1 29, Non-secure EL1 30,',
     '           Non-secure EL2 26);',
-    '         GICD_CTLR written 0x13 read back 0x12 (boot 13);',
+    '         GICD_CTLR written 0x13 read back 0x12 (boots 13 and 14);',
     '         an enabled, pending PPI is delivered to EL2 as an IRQ once group 1 and the CPU interface are on: INTID 27,',
-    '           not 26, was the first interrupt of window 1 in boot 13, and everything was put back clean.',
-    *wrap('INFERRED: that INTID 27 is the EL1 virtual timer asserting (this build does not read CNTV_CTL_EL0; the dry run\'s survey does); that the monitor, '
-          'which stops on any interrupt that is not PPI 26 (probes/xnuboot/async.c), would end a monitor entry run at its first IRQ unmask on the same '
+    '           not 26, was the first interrupt of window 1 in boot 13, and everything was put back clean;',
+    '         PPI 26 itself reached EL2 four times in window 1 of boot 14 (HPPIR1 26 at the vector, latency 0 to 2',
+    '           counter ticks) and once from EL1 (HCR_EL2 0x80000010): U3 answered; the monitor\'s own stop path NOT RUN;',
+    '         the quarantine held: ICENABLER0 written 0x4A800001 left ISENABLER0 0x04000000 (PPI 26 only) and',
+    '           ICC_HPPIR1_EL1 read 1023, so no Q_NOT_HELD and no FOREIGN_PENDING (boot 14);',
+    '         the put-back was whole, the quarantined enables last: ISENABLER0 0x4E800001, GICD_CTLR 0x10,',
+    '           ICC_IGRPEN1_EL1 0 and ICC_PMR_EL1 0xF8, each as found (boot 14);',
+    '         the EL1 virtual timer was asserting: CNTV_CTL_EL0 read 0x5 (ENABLE 1, IMASK 0, ISTATUS 1) with',
+    '           ISPENDR0 0x08000000 (boot 14);',
+    '         the survey of the SPIs counted 3 enabled and 9 pending and none both (SPI LINES=30 EN=3 PEND=9',
+    '           BOTH=0): counts of INTIDs 32 to 991, not which (boot 14).',
+    *wrap('INFERRED: that INTID 27 pending is that timer asserting (the GTDT\'s Virtual EL1 GSIV 27 says so; the interrupt\'s own source register is not read); that '
+          'the monitor, which stops on any interrupt that is not PPI 26 (probes/xnuboot/async.c), would end a monitor entry run at its first IRQ unmask on the same '
           'interrupt; that nothing else runs on this CPU between the first store and the call (the wrapper runs after the runner has left the firmware).',
           first=6, rest=6, width=GIC_WIDTH + 6),
-    *wrap('UNKNOWN: whether PPI 26 itself reaches EL2 (U3); whether INTID 27 is the only foreign source (the SPIs were never read on the unit, and SGI 0 and '
-          'PPIs 23, 25 and 30 are enabled too); whether the quarantine holds on this unit (its non-secure ICENABLER0 write is the first of its kind there, and '
-          'has not been made); what the guest does without INTID 27 and 30 for the call.', first=6, rest=6, width=GIC_WIDTH + 6))
+    *wrap('UNKNOWN: whether an extended SPI or an LPI is enabled and pending (neither is surveyed or quarantined; the one ICC_HPPIR1_EL1 read before window 1 saw '
+          '1023, at one instant); which SPIs are enabled or pending (the page holds counts); the entry with PSTATE.I set (window 2 of the dry run ran with it clear, '
+          'the monitor enters its guest with it set); whether the interrupt state survives a guest, and what the guest does without INTID 27 and 30 for the call.',
+          first=6, rest=6, width=GIC_WIDTH + 6))
 
 # The census placed entries (D3): the first line is the head of the sub-block (six spaces and `placed` once the record module has indented it).
 PLACED_LINES = (

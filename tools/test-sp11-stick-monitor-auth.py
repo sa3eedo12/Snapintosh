@@ -38,6 +38,7 @@ import sp11_stick_bundle_build as bb  # noqa: E402
 import sp11_stick_bundle_chunks as ch  # noqa: E402
 import sp11_stick_bundle_m1 as m1  # noqa: E402
 import sp11_stick_bundle_record as rec  # noqa: E402
+import sp11_stick_bundle_record_m1_guide as m1g  # noqa: E402
 import sp11_stick_wrapper_build as wb  # noqa: E402
 import sp11_stick_wrapper_testlib as T  # noqa: E402
 
@@ -50,7 +51,7 @@ sha = lambda data: hashlib.sha256(data).hexdigest()     # noqa: E731
 LLVM = ('clang', 'ld.lld', 'llvm-objcopy', 'llvm-readelf', 'llvm-nm', 'llvm-objdump')
 OWN = ('tools/sp11_stick_bundle_m1.py', 'tools/sp11_monitor_census.py', 'tools/test-sp11-stick-monitor-auth.py', 'tools/test-sp11-stick-monitor-interlock.py',
        'docs/SP11-STICK-MONITOR.md')
-DOC_CAP = 84300         # raised from 78,100 on purpose (Phase E part 4: section 18; 75,500 before E part 3, 70,000 before E part 2, 60,000 before E, 46,000 before D, 36,000 before C); nothing was cut to make room
+DOC_CAP = 91000         # raised from 88,000 on purpose (draft 3 of the record: section 19; 84,300 before draft 2, 78,100 before E part 4, 75,500 before E part 3, 70,000 before E part 2, 60,000 before E, 46,000 before D, 36,000 before C); nothing was cut to make room
 # The records the operator was shown or approved, regenerated here from the files they were made from (docs/SP11-MONITOR-PORT.md section 15 D4/D7).
 RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e035977bf700e',
            'gic and stop dry run': 'c74f7af0217c507e7738673b9d437d6c76589ef3c243c23eef4837b0ca435b3b',
@@ -58,7 +59,7 @@ RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e03597
 FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=7, time_box_s=5, label='M1-FIXED', monitor=(445935, '1' * 64), reporter=(58463, '2' * 64),
              note=None, gic_stop=False, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
 # The SHA-256 of record_text for FIXED and FABRICATED[...]: the text of an M1 record is what the operator approves, so a changed byte is another record.
-GOLDEN = {'a test record': '1be48063882a005ad5067a6c2d7b90bb646c75cbabbcb70453bf095f416f8f30', 'another record': 'e288dc845a2c26a0626ca44db8e0655be42a48b7eb8f5185921b810c7ae76962'}
+GOLDEN = {'a test record': '89b53194a7da43e710dd673c246aebe4604b1b646930855ade17d85d3c217b00', 'another record': 'b6436d05f47abbaa2270fee7afb2c4dcfe7d5e41ddfc6e2ed2e29c1a74854106'}      # re-pinned on purpose for draft 3 (draft 2: eb757eeb... and ee6d491c...; draft 1: 1be48063... and e288dc84...)
 
 
 def quietly(function, *args):
@@ -218,11 +219,13 @@ class Report(BT.Case):
         for needle in (f'payload 0  SNAPMON.BIN  {len(fx["image"])} bytes  sha256 {sha(fx["image"])}', f'payload 1  SNAPREP.BIN  {len(fx["reporter"])} bytes  sha256 {sha(fx["reporter"])}',
                        f'file         SNAPMON-M1.BIN  {len(fx["image"])} bytes  sha256 {sha(fx["image"])}', f'wrapper      {len(fx["wrapper"])} bytes  sha256 {sha(fx["wrapper"])}',
                        f'then {fx["offset"] - len(fx["wrapper"])} zero bytes up to the monitor', f'xnuboot.bin at offset {fx["offset"]:#x}, {len(fx["monitor"])} bytes, profile sp11-m1',
-                       f'sha256 {sha(fx["monitor"])}', f'elf sha256   {m["elf_sha256"]}', f'build record {m["build_record_sha256"]}', f'NV2 record   sha256 {sha(fx["record"])}',
+                       f'sha256 {sha(fx["monitor"])}', f'elf sha256   {m["elf_sha256"]}', f'NV2 record   sha256 {sha(fx["record"])}',
+                       f'NV2 header   sha256 {sha(NV2.emit_header(fx["record"]).encode())}',
                        f'reporter     SNAPREP-M1.BIN  {len(fx["reporter"])} bytes  sha256 {sha(fx["reporter"])}', '7 CALL26', '3 ADR_PREL_LO21',
                        'soc x1e80100  tool nv2-ingest  build_id 0x00001234  evidence OBSERVED', 'vncr_redirect pass  negative_control_trapped pass',
                        'MIDR_EL1 0x0000000012345678', 'ID_AA64MMFR2_EL1 0x0000000002001234'):
             self.assertIn(needle, text)
+        self.assertNotIn(m['build_record_sha256'], text, 'the build record names the NV2 header by its absolute path, so the approved text must not carry its digest')
 
     def test_a_record_of_another_nv2_record_is_another_record(self):
         other = fabricate(record=nv2_bytes('nv2-ingest', 0x1235))
@@ -234,7 +237,8 @@ class Report(BT.Case):
         self.assertIn('this record must not be approved', ' '.join(test.split()))
         self.assertNotIn('LOCAL TEST RECORD', STATE['text'])
         self.assertIn('approving this record approves this NV2 record and no other', ' '.join(STATE['text'].split()))
-        self.assertIn('D6 (which NV2 record', STATE['text'])
+        self.assertIn('D6, decided by the operator on 2026-11-17: embed this first-image record', ' '.join(STATE['text'].split()))
+        self.assertNotIn('is the operator\'s decision and is open', STATE['text'], 'D6 is decided: the text no longer calls it open')
 
     def test_the_files_come_through_monitor_and_reporter_and_no_other_way(self):
         paths = stage('swapped')
@@ -460,7 +464,7 @@ class Text(BT.Case):
         self.assertIn(f'the known parts alone are at least {low} s', flat)
         self.assertIn('224 s and 268 s', flat)
         self.assertIn('The earliest restart datum is about UPTIME 17 s (INFERRED: one boot, in a run that started secondary CPUs; the plan, section 10)', flat)
-        self.assertIn('keeping or relaxing it, with the 8 s wait, is the operator\'s', flat)
+        self.assertIn('APPROVING THIS TEXT RELAXES THE 20 s PRECAUTION OF D5 (the time box of 5 s is kept;', flat)
 
     def test_the_time_budget_follows_the_time_box_and_the_placement(self):
         three = template(stage('box3'), time_box_s=3)[1]
@@ -485,23 +489,24 @@ class Text(BT.Case):
     def test_what_the_text_cannot_show_is_labelled(self):
         flat = ' '.join(STATE['text'].split())
         for needle in ('Which group is reached when is INFERRED from the sources', 'no write below was run by the monitor on the unit', 'Hardware: NOT RUN', 'operator decision NOT RECORDED',
-                       'The builder does not run it', 'UNKNOWN: never run on this unit', 'U3: whether PPI 26 reaches EL2 at all is UNKNOWN', 'OBSERVED once',
+                       'The builder does not run it', 'UNKNOWN: never run on this unit', 'U3: PPI 26 reached EL2 in the GIC dry run, OBSERVED, one unit, one boot', 'OBSERVED once',
                        'whether the guest reaches any of it inside the time box is UNKNOWN (untried on Oryon)'):
             self.assertIn(needle, flat)
         self.assertNotIn('VERIFIED', STATE['text'], 'no label of a hardware result, and no VERIFIED of anything the host proves only for a binary')
 
-    def test_the_stop_rules_of_the_other_kinds_are_kept_but_for_the_silence_rule_and_this_kind_adds_two(self):
-        after = STATE['text'].split('5. Refusal and stop rules')[1]
-        plain = BT.template()[1].split('5. Refusal and stop rules')[1]
-        replaced = plain.replace(rec.SILENCE_RULE, '\n'.join(rec.M1_SILENCE_RULE))
-        self.assertNotEqual(replaced, plain, 'the plain text holds the rule that this kind replaces')
-        self.assertTrue(after.startswith(replaced.rstrip('\n')), 'the rules of every record come first, unchanged but for the silence rule')
-        for line in rec.M1_STOP_RULES:
-            self.assertIn(line, after)
-        flat = ' '.join(after.split())
-        self.assertIn('No page change for 60 seconds after the MON CALL line: note the last line and power cycle', flat)
+    def test_the_stop_rules_of_the_other_kinds_are_kept_but_for_the_three_that_this_kind_words_for_itself(self):
+        """The first rule of every record is kept. The silence, the touch outside RAM and the hardware rules are this kind's own words: the silence of the monitor
+        makes twice the time box wrong, a stage-2 fault with an IPA is the expected end and not a touch to stop at, and AC power is required for this run (D8)."""
+        rules = lambda text: text.split('5. Refusal and stop rules')[1].split('\n\n')[0].split('\n')[1:]      # noqa: E731
+        mine, plain = rules(STATE['text']), rules(BT.template()[1])
+        self.assertEqual(mine, [plain[0], *m1g.PRE_CALL_SILENCE, *rec.M1_SILENCE_RULE, *m1g.RESTART_AND_STAGE2_RULES, *m1g.HARDWARE_RULES, *rec.M1_STOP_RULES])
+        flat = ' '.join(' '.join(mine).split())
+        self.assertIn('No page change for 60 seconds after the MON CALL line: note the last line and FORCE OFF (section 5c)', flat)
         self.assertIn('an operator-safe wait and not a measurement', flat)
-        self.assertNotIn('twice the time box after ENTER: note the last line', flat, 'the rule of the other kinds would end a legitimate run here')
+        plain_flat = ' '.join(' '.join(plain).split())
+        for old in ('twice the time box after ENTER: note the last line', 'AC power or at least 50% battery', 'a touch outside RAM is a finding, not a retry'):
+            self.assertIn(old, plain_flat, 'the other kinds keep their wording')
+            self.assertNotIn(old, flat, 'the wording of the other kinds would be wrong for this one')
 
     def test_an_m1_record_that_kept_the_rule_of_the_other_kinds_is_another_record(self):
         """The faulty case: with the old rule in place the text is not the pinned one, and it says what the monitor's silence makes wrong."""
@@ -699,7 +704,7 @@ class Regression(BT.Case):
 
 class Hygiene(unittest.TestCase):
     def test_the_new_files_are_ascii_with_an_spdx_line_within_the_size_limits_and_hold_no_machine_data(self):
-        for rel in (*OWN, 'tools/sp11_stick_bundle_record.py', 'tools/sp11_stick_bundle_build.py'):
+        for rel in (*OWN, 'tools/sp11_stick_bundle_record.py', 'tools/sp11_stick_bundle_record_m1_guide.py', 'tools/sp11_stick_bundle_build.py'):
             data = (ROOT / rel).read_bytes()
             with self.subTest(rel):
                 self.assertFalse([b for b in data if b > 127], 'ASCII only')

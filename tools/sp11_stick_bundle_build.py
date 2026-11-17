@@ -52,6 +52,7 @@ record_text, TOUCHES, GIC_STOP_TOUCHES = rec.record_text, rec.TOUCHES, rec.GIC_S
 TAGS = {'EL2_UNREACHABLE': 1, 'DEVICE_OWNED': 2, 'OPERATOR': 3}
 KIND_NAME = {v: k[12:] for k, v in sb.CONSTANTS.items() if k.startswith('SP11SB_KIND_') and k != 'SP11SB_KIND_MAX'}
 DUMMY = b'\x01' * 32        # a nonzero stand-in digest for the early checks, before GUEST.DAT exists
+AUTHORISATION_CAP = 1 << 17     # the approved record, as a file: raised from 64 KiB on purpose when the record of a monitor entry run (about 73 KB) outgrew it; nothing was cut
 BUILDER_REFUSALS = (
     'FACTS_BAD', 'FACTS_DISAGREE', 'NO_DUMPS', 'DUMP_INCOMPLETE', 'FB_UNKNOWN', 'DESCRIPTOR_NOT_READY', 'AUTH_RECORD_MISMATCH', 'Q1N1_TREE_ABSENT',
     'STAGE_REFUSED', 'STAGE_VERIFY_FAILED', 'OUT_DIR_REFUSED', 'OUT_NOT_EMPTY', 'PAYLOAD_BAD', 'REPORT_NOT_ZERO', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING',
@@ -411,7 +412,7 @@ def approve(a, text):
     """The authorisation digest: that of the approved record, which must be the record this build regenerates."""
     need_authorisation(a)
     if a.authorisation:
-        digest = hashlib.sha256(read_regular(a.authorisation, '--authorisation', cap=1 << 16)).digest()
+        digest = hashlib.sha256(read_regular(a.authorisation, '--authorisation', cap=AUTHORISATION_CAP)).digest()
     else:
         if not re.fullmatch(r'[0-9a-fA-F]{64}', a.authorisation_sha256):
             raise Refused('OPTIONS_BAD', '--authorisation-sha256 is 64 hexadecimal digits')

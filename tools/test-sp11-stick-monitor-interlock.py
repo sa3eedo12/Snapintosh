@@ -516,7 +516,7 @@ class Note(unittest.TestCase):
     def test_the_record_states_the_limits_of_the_position_proof_and_the_self_attesting_record(self):
         flat = ' '.join(AUTH.STATE['text'].split())
         for needle in ('It cannot show an address dependence that is no relocation, an address built from integers, .init_array or TLS',
-                       'the build record above was written by the build tool itself: its digests tie the files together, and nothing authenticates the record'):
+                       'the build record of the monitor was written by the build tool itself: its digests tie the files together, and nothing authenticates the record'):
             self.assertIn(needle, flat)
 
     def test_the_record_states_the_stack_filler_and_the_params_snapshot(self):

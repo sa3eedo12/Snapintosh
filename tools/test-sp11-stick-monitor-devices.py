@@ -606,10 +606,12 @@ class Other(unittest.TestCase):
             self.assertNotIn('3b. Device code', text)
 
     def test_the_smc_paragraph_carries_the_scan_and_labels_what_it_is(self):
-        flat = ' '.join(m1t.SMC_LINES)
+        flat = ' '.join(' '.join(m1t.SMC_LINES).split())
         for needle in ('an SMC that the guest executes is not trapped', 'TSC clear', 'EC 0x17', '(INFERRED)', '(OBSERVED on a host file, one kernelcache;', 'hold 0 SMC and 0 HVC words',
-                       'Whether the guest runs SMC code from anywhere else is UNKNOWN', '__TEXT_EXEC (14,774,272 words) and __TEXT_BOOT_EXEC (8,192)'):
+                       'Whether the guest runs SMC code from anywhere else is UNKNOWN', '__TEXT_EXEC (14,774,272 words) and __TEXT_BOOT_EXEC (8,192)',
+                       'in the two segments together, 1 SVC, 1 ERET and 148 WFE words, 146 of them in __TEXT_EXEC'):
             self.assertIn(needle, flat)
+        self.assertNotIn('and 146 WFE words, so it does', flat, 'the 146 are the count of one segment')
         self.assertNotIn('VERIFIED', flat)
 
 
@@ -633,6 +635,7 @@ class KernelcacheScan(unittest.TestCase):
         self.assertEqual(executable, ['__TEXT_EXEC', '__TEXT_BOOT_EXEC'], 'the only two segments with execute permission')
         self.assertEqual({k: (v[0], v[1]['SMC'], v[1]['HVC']) for k, v in counts.items()}, {'__TEXT_EXEC': (14774272, 0, 0), '__TEXT_BOOT_EXEC': (8192, 0, 0)})
         self.assertEqual({k: v for k, v in counts['__TEXT_EXEC'][1].items() if k not in ('SMC', 'HVC')}, {'SVC': 1, 'ERET': 1, 'WFE': 146}, 'the control: it finds instructions')
+        self.assertEqual({k: sum(v[1][k] for v in counts.values()) for k in ('SVC', 'ERET', 'WFE')}, {'SVC': 1, 'ERET': 1, 'WFE': 148}, 'the two segments together: the text says 148')
 
 
 class Hygiene(unittest.TestCase):

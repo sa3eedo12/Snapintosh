@@ -332,12 +332,15 @@ class Text(unittest.TestCase):
                        'set again by the put-back (not in the both-gates case above)', 'as pass 6 left it'):
             with self.subTest(needle):
                 self.assertIn(needle, flat)
-        for needle in ('which is not made in the both-gates case above', 'the both-gates case, only in the host model', 'always followed by the put-back'):
+        for needle in ('which is not made in the both-gates case above', 'The both-gates case was not exercised in boot 14: it stays host model only', 'always followed by the put-back'):
             with self.subTest(needle):
                 self.assertIn(needle, whole, 'the facts block, which follows the classes')
 
-    def test_the_facts_block_still_says_that_neither_the_quarantine_nor_the_check_has_run_on_the_unit(self):
-        self.assertIn('Neither the quarantine nor the check has run on the unit (hardware NOT RUN)', ' '.join(self.text.split()))
+    def test_the_facts_block_says_what_boot_14_showed_and_that_this_build_and_the_both_gates_case_have_not_run(self):
+        flat = ' '.join(self.text.split())
+        self.assertIn('This build is the same source built for the monitor entry, and has not run on the unit (hardware NOT RUN)', flat)
+        self.assertIn('Passes 5 and 6, in the dry run\'s own build, RAN in boot 14 and ended GIC VERDICT=IRQ_OK', flat)
+        self.assertNotIn('Neither the quarantine nor the check has run on the unit', flat, 'boot 14 ran them, in the dry run\'s build')
         self.assertNotIn('VERIFIED', self.text)
 
     def test_the_bit_the_sentence_names_for_isenabler0_is_the_models(self):

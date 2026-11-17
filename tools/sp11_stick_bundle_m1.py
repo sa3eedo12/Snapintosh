@@ -259,9 +259,12 @@ def read_report(data, image, reporter, efi=None):
         raise Refused('M1_NO_MONITOR_CALL', f'the wrapper in --monitor has no BL to the monitor at {offset:#x}: the report describes the files, but this wrapper does not call this monitor')
     if NOT_CALLED_TEXT in wrapper_bytes:
         raise Refused('M1_NO_MONITOR_CALL', 'the wrapper in --monitor says that it calls no monitor, whatever else it holds')
-    fields = found[0][1]
-    return dict(profile=PROFILE, image=listed, wrapper=wrap, monitor=monitor, reporter=rep, nv2=dict(sha256=nv2_digest, **{k: fields[k] for k in NV2_KEYS}),
-                test_record=fields['tool'] == TEST_TOOL, efi=efi)
+    at, fields = found[0]
+    # The digest of the header that the build read, from the record's own 96 bytes: emit_header is a function of them alone. The path of that header is in the
+    # profile's build record and is no part of the facts, so the record's text does not depend on where the monitor was built.
+    header = sha(nv2_record.emit_header(image[offset + at:offset + at + nv2_record.SIZE]).encode())
+    return dict(profile=PROFILE, image=listed, wrapper=wrap, monitor=monitor, reporter=rep,
+                nv2=dict(sha256=nv2_digest, header_sha256=header, **{k: fields[k] for k in NV2_KEYS}), test_record=fields['tool'] == TEST_TOOL, efi=efi)
 
 
 def check_launch(chunks):

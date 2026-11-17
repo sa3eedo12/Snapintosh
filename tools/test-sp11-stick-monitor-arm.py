@@ -309,16 +309,23 @@ class Text(unittest.TestCase):
     def test_each_observation_carries_its_label_and_the_boot_it_comes_from(self):
         flat = ' '.join(self.text.split())
         for needle in ('ISENABLER0 read 0x4E800001 (OBSERVED, boot 12)', 'boot 13 read it back 0x12, OBSERVED', 'it read 0xA0 on the unit, OBSERVED, boot 12', 'INFERRED that the write is ignored',
-                       'ISPENDR0 0x08000000 (boot 13)', 'OBSERVED, one unit, one boot each, in the dry run\'s own build, not in this one', 'Neither the quarantine nor the check has run on the unit (hardware NOT RUN)',
-                       'INFERRED: that INTID 27 is the EL1 virtual timer asserting', 'UNKNOWN: whether PPI 26 itself reaches EL2 (U3)', 'the first of its kind there, and has not been made',
-                       'INFERRED from the GICv3 text as remembered (the specification was not re-read)', 'UNKNOWN (never run on this unit)', 'Whether PPI 26 reaches EL2 at all is UNKNOWN (U3)'):
+                       'ISPENDR0 0x08000000 (boots 13 and 14)', 'OBSERVED, one unit, one boot each, in the dry run\'s own build, not in this one',
+                       'This build is the same source built for the monitor entry, and has not run on the unit (hardware NOT RUN)',
+                       'INFERRED: that INTID 27 pending is that timer asserting', 'PPI 26 itself reached EL2 four times in window 1 of boot 14', 'U3 answered; the monitor\'s own stop path NOT RUN',
+                       'the quarantine held: ICENABLER0 written 0x4A800001 left ISENABLER0 0x04000000 (PPI 26 only)', 'the put-back was whole, the quarantined enables last: ISENABLER0 0x4E800001',
+                       'CNTV_CTL_EL0 read 0x5 (ENABLE 1, IMASK 0, ISTATUS 1)', 'SPI LINES=30 EN=3 PEND=9 BOTH=0', 'three boots, 12 to 14, found the same enabled set',
+                       'That PPI 26 reaches EL2 is OBSERVED in the dry run\'s stage (boot 14, one unit, one boot: four deliveries from EL2 and one from EL1, U3 answered',
+                       'INFERRED from the GICv3 text as remembered (the specification was not re-read)', 'UNKNOWN (never run on this unit)'):
             self.assertIn(needle, flat)
+        for stale in ('Whether PPI 26 reaches EL2 at all is UNKNOWN (U3)', 'UNKNOWN: whether PPI 26 itself reaches EL2 (U3)', 'two boots found the same enabled set',
+                      'Neither the quarantine nor the check has run on the unit', 'the first of its kind there, and has not been made'):
+            self.assertNotIn(stale, flat, 'boot 14 answered it')
 
     def test_the_duration_the_bound_and_what_the_wrapper_cannot_bound_are_said(self):
         flat = ' '.join(self.text.split())
         for needle in ('It is on from Q\'s write until the put-back\'s last write, which comes after the monitor has returned: the whole call',
                        'What bounds it is the monitor\'s own stop, the interrupt of its timer (CNTHP, PPI 26) at the time box on CNTPCT_EL0, at most 5 s',
-                       'Nothing in the wrapper bounds the call', 'ends only by the operator\'s power cycle, and this stage\'s put-back does not run then',
+                       'Nothing in the wrapper bounds the call', 'ends only by the operator\'s FORCE OFF (section 5c), and this stage\'s put-back does not run then',
                        'On a refusal of the arm half the quarantine lasts only as long as the put-back that follows at once, except in the both-gates case, in which that put-back does not lift it'):
             self.assertIn(needle, flat)
 
