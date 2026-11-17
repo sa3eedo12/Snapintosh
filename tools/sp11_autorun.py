@@ -21,6 +21,16 @@ tree is staged: a plan is refused unless the manifest is well formed and lists e
 their sizes and hashes. The data files are recorded in SP11\\PLAN.TXT and re-checked by verify; the script does not
 change for them.
 
+The retention probe's plan `retention-m10` adds a second kind of step, `RETENTION-EXTRACT <three page addresses>` (docs/SP11-RETENTION-PROBE.md). It
+loads and runs nothing: its block of the script dumps the three RAM pages to SP11\\RET<k>.TXT with the Shell's `dmem` as the first commands of the boot
+that change anything, then appends the memory map, the Shell's date and time and an end line, and only then writes its marker; it never overwrites a
+result. Such a step belongs only to the plans `retention-m10` and `retention-m10-auto` (the payload runner's step, then the extract), and such a plan
+stages exactly PAYLOAD.MAN, RETPROBE.BIN and RETPATH.DAT as data: the runner calls every .BIN file its manifest lists. The stager records the time of the
+staging in PLAN.TXT (`staged:`), which the verdict tool compares with the unit's clock to tell a result left by an earlier run. `retention-m10-auto`, with
+no manual restart, is refused unless the operator authorised the stick first in the boot order (build_plan's stick_first_authorised,
+`--stick-first-authorised`). That refusal is real in the builder and the stager, but the `unattended:` line of PLAN.TXT is a record of the operator's
+decision and not an interlock: nothing here touches the boot order, and any PLAN.TXT that carries the line and parses is the same plan.
+
 Evidence (see docs/RUNNING.md): the countdown, the search for startup.nsh in the directory the Shell was loaded from,
 the `homefilesystem` variable, `if exist`, `goto`, `stall`, `@echo` and the `echo ... >a` redirect were OBSERVED with
 the pinned Shell under QEMU (tools/test-sp11-autorun-qemu.py). On the unit's own Shell the countdown, the search, the
@@ -28,6 +38,8 @@ the pinned Shell under QEMU (tools/test-sp11-autorun-qemu.py). On the unit's own
 OBSERVED once (2026-11-14, an operator's photograph); ESC at the countdown and a second boot are not yet.
 """
 from dataclasses import dataclass, replace
+from datetime import datetime
+import hashlib
 import re
 import struct
 
@@ -37,6 +49,25 @@ MARKER_FORMAT = 'DONE{}.TXT'
 MARKER_RE = re.compile(r'DONE[0-9]{1,2}\.TXT', re.IGNORECASE)
 MAX_STEPS = 8
 PAUSE_MICROSECONDS = 5000000
+
+# The retention probe (docs/SP11-RETENTION-PROBE.md): a plan of two steps, the payload runner with the probe and then an
+# extract step that dumps three RAM pages to a result file with the Shell's own `dmem`, before any other command of that
+# boot. The extract step is a different kind of step: it loads and runs nothing.
+EXTRACT_KEYWORD = 'RETENTION-EXTRACT'
+EXTRACT_END = 'RETENTION-EXTRACT-END'
+EXTRACT_PAGES = 3
+EXTRACT_PAGE_BYTES = 0x1000
+EXTRACT_ADDRESS_RE = re.compile(r'0x[1-9A-F][0-9A-F]{0,11}')     # canonical, so that PLAN.TXT has one spelling; 48 bits at most
+RESULT_FORMAT = 'RET{}.TXT'
+RESULT_RE = re.compile(r'RET[0-9]{1,2}\.TXT', re.IGNORECASE)
+RETENTION_PLAN = 'retention-m10'
+RETENTION_UNATTENDED_PLAN = 'retention-m10-auto'
+RETENTION_PLANS = (RETENTION_PLAN, RETENTION_UNATTENDED_PLAN)
+# The data files of a retention plan and no others: the runner calls every file of the manifest whose name ends in .BIN, so a staged
+# OTHER.BIN would run a second payload at EL2 in the same boot (RETENTION_DATA_NAMES, after MANIFEST_NAME below, adds the manifest).
+RETENTION_PAYLOAD, RETENTION_CONFIG = 'RETPROBE.BIN', 'RETPATH.DAT'
+STAGED_FORMAT = '%Y-%m-%d %H:%M:%S'
+UNATTENDED_LINE = 'unattended: stick first in the boot order, authorised by the operator (this tool changes no firmware setting)'
 
 # The reviewed slbounce builds, all from the slbounce fork. `load` of one of these is the first half of a step.
 SLBOUNCE_BUILDS = ('SLBOUNCE.EFI', 'SLBOUNCE-DEVHE.EFI', 'SLBOUNCE-DEVHE-MARK.EFI', 'SLBOUNCE-DRYRUN.EFI')
@@ -68,6 +99,7 @@ SHA256_RE = re.compile(r'[0-9a-f]{64}')
 # that reads any: it opens \SP11\PAYLOAD.MAN on the volume it started from and every file the manifest lists.
 RUNNER = 'Q1N1-PAYLOAD.EFI'
 MANIFEST_NAME = 'PAYLOAD.MAN'
+RETENTION_DATA_NAMES = (MANIFEST_NAME, RETENTION_PAYLOAD, RETENTION_CONFIG)
 MAX_PAYLOAD_FILES = 5           # slbounce takes eight declared ranges and the runner's own allocations use three
 DATA_MAX_BYTES = 256 << 20      # slbounce splits a declared range into at most 256 chunks of 1 MiB
 DATA_NAME_RE = re.compile(r'[A-Z0-9_-]{1,8}\.[A-Z0-9_-]{1,3}')    # capitals and 8.3, so no long-name alias is in question
@@ -103,6 +135,22 @@ class Step:
 
 
 @dataclass(frozen=True)
+class ExtractStep:
+    """The step that dumps three RAM pages to SP11\\RET<k>.TXT. It has no slbounce build and no application, so the two
+    hashes are empty and Plan.files() leaves it out; run_line is its spelling in the plan and in PLAN.TXT."""
+    pages: tuple            # three distinct 4 KiB aligned physical addresses
+    slbounce: str = ''
+    app: str = ''
+    args: tuple = ()
+    slbounce_sha256: str = ''
+    app_sha256: str = ''
+
+    @property
+    def run_line(self) -> str:
+        return ' '.join((EXTRACT_KEYWORD, *(f'0x{page:X}' for page in self.pages)))
+
+
+@dataclass(frozen=True)
 class DataFile:
     name: str       # under SP11\, capitals and 8.3
     size: int       # of the staged bytes
@@ -121,11 +169,15 @@ class Plan:
     name: str
     steps: tuple
     data: tuple = ()        # DataFile entries, the manifest first; empty unless a step runs RUNNER
+    stick_first_authorised: bool = False       # only the unattended retention plan; recorded in PLAN.TXT
+    staged: str = ''        # only a retention plan: the staging computer's local time (STAGED_FORMAT), recorded in PLAN.TXT by stamp_staging
 
     def files(self) -> dict:
         """File name under SP11\\ -> SHA-256, one entry per distinct name (a name always has one hash)."""
         found = {}
         for step in self.steps:
+            if isinstance(step, ExtractStep):
+                continue
             for name, digest in ((step.slbounce, step.slbounce_sha256), (step.app, step.app_sha256)):
                 if found.setdefault(name, digest) != digest:
                     raise PlanError('plan_inconsistent_hash', name)
@@ -152,7 +204,47 @@ def parse_step(text: str):
     return slbounce, app, args
 
 
-def build_plan(name: str, step_texts, hashes: dict) -> Plan:
+def is_extract_text(text: str) -> bool:
+    return text.split()[:1] == [EXTRACT_KEYWORD]
+
+
+def parse_extract(text: str) -> ExtractStep:
+    """The ExtractStep of "RETENTION-EXTRACT 0xA 0xB 0xC": three canonical hexadecimal page addresses, distinct, 4 KiB aligned."""
+    words = text.split()
+    if words[:1] != [EXTRACT_KEYWORD] or len(words) != EXTRACT_PAGES + 1:
+        raise PlanError('extract_malformed', f'{text!r}: {EXTRACT_KEYWORD} and {EXTRACT_PAGES} page addresses')
+    pages = []
+    for word in words[1:]:
+        if not EXTRACT_ADDRESS_RE.fullmatch(word):
+            raise PlanError('extract_page_malformed', f'{word!r}: 0x and 1 to 12 upper-case hexadecimal digits, no leading zero')
+        pages.append(int(word, 16))
+    if any(page % EXTRACT_PAGE_BYTES for page in pages):
+        raise PlanError('extract_page_unaligned', ', '.join(f'0x{page:X}' for page in pages))
+    if len(set(pages)) != len(pages):
+        raise PlanError('extract_pages_not_distinct', ', '.join(f'0x{page:X}' for page in pages))
+    return ExtractStep(tuple(pages))
+
+
+def _retention_shape_problems(name: str, parsed: list, stick_first_authorised: bool) -> None:
+    """The rules of the retention plans, raised as PlanError. An extract step belongs only to a plan named for it, and such a
+    plan is exactly the payload runner's step and then the extract step: the extract is step 2, so that it writes RET2.TXT."""
+    extracts = [item for item in parsed if isinstance(item, ExtractStep)]
+    if name not in RETENTION_PLANS:
+        if extracts:
+            raise PlanError('extract_outside_retention_plan', f'{EXTRACT_KEYWORD} is only a step of the plans {", ".join(RETENTION_PLANS)}')
+        if stick_first_authorised:
+            raise PlanError('stick_first_flag_not_for_this_plan', f'only the plan {RETENTION_UNATTENDED_PLAN} records that the operator authorised it')
+        return
+    if len(parsed) != 2 or isinstance(parsed[0], ExtractStep) or parsed[0][1] != RUNNER or not isinstance(parsed[1], ExtractStep):
+        raise PlanError('retention_plan_shape', f'{name} is two steps: a step that runs {RUNNER}, then {EXTRACT_KEYWORD} with its three pages')
+    if name == RETENTION_UNATTENDED_PLAN and not stick_first_authorised:
+        raise PlanError('unattended_not_authorised', f'{name} has no manual restart, so it needs the stick first in the boot order, a persistent '
+                                                     'firmware setting that only the operator may decide: pass --stick-first-authorised once they did')
+    if name == RETENTION_PLAN and stick_first_authorised:
+        raise PlanError('stick_first_flag_not_for_this_plan', f'{name} is the plan with the operator starting the stick twice; the flag belongs to {RETENTION_UNATTENDED_PLAN}')
+
+
+def build_plan(name: str, step_texts, hashes: dict, stick_first_authorised: bool = False) -> Plan:
     """A validated plan. `hashes` maps every file name the steps use to its expected SHA-256, and nothing else."""
     if not NAME_RE.fullmatch(name or '') or any(token in name.lower() for token in _BANNED_TOKENS):
         raise PlanError('plan_name_invalid', f'{name!r}: 1 to 24 of letters, digits, ".", "_" and "-", starting with a letter or digit, '
@@ -161,8 +253,9 @@ def build_plan(name: str, step_texts, hashes: dict) -> Plan:
         raise PlanError('plan_has_no_steps')
     if len(step_texts) > MAX_STEPS:
         raise PlanError('plan_has_too_many_steps', f'{len(step_texts)} > {MAX_STEPS}')
-    parsed = [parse_step(text) for text in step_texts]
-    used = {file_name for step in parsed for file_name in step[:2]}
+    parsed = [parse_extract(text) if is_extract_text(text) else parse_step(text) for text in step_texts]
+    _retention_shape_problems(name, parsed, stick_first_authorised)
+    used = {file_name for step in parsed if not isinstance(step, ExtractStep) for file_name in step[:2]}
     for given in hashes:
         if given.upper() in BANNED_NAMES:
             raise PlanError('file_banned', given)
@@ -174,7 +267,8 @@ def build_plan(name: str, step_texts, hashes: dict) -> Plan:
             raise PlanError('file_hash_missing', f'{needed}: give --file {needed} PATH SHA256')
         if not SHA256_RE.fullmatch(digest):
             raise PlanError('file_hash_malformed', f'{needed}: {digest!r} is not 64 lower-case hex digits')
-    plan = Plan(name, tuple(Step(s, a, g, hashes[s], hashes[a]) for s, a, g in parsed))
+    plan = Plan(name, tuple(step if isinstance(step, ExtractStep) else Step(step[0], step[1], step[2], hashes[step[0]], hashes[step[1]])
+                            for step in parsed), stick_first_authorised=stick_first_authorised)
     plan.files()
     return plan
 
@@ -195,12 +289,17 @@ def check_data_names(plan: Plan, hashes: dict) -> None:
     for name, digest in sorted(hashes.items()):
         if not DATA_NAME_RE.fullmatch(name):
             raise PlanError('data_name_invalid', f'{name!r}: 1 to 8 capitals, digits, "_" or "-", a dot, and 1 to 3 more')
+        if RESULT_RE.fullmatch(name):
+            raise PlanError('data_name_collides', f'{name} is a result file name of the retention extract step')
         if name in taken or MARKER_RE.fullmatch(name):
             raise PlanError('data_name_collides', f'{name} is already a name of the plan, the tables, the tool or the base tree')
         if not SHA256_RE.fullmatch(digest):
             raise PlanError('data_hash_malformed', f'{name}: {digest!r} is not 64 lower-case hex digits')
     if len(hashes) - (MANIFEST_NAME in hashes) > MAX_PAYLOAD_FILES:
         raise PlanError('data_too_many_files', f'{len(hashes) - 1} files besides {MANIFEST_NAME}, at most {MAX_PAYLOAD_FILES}')
+    if plan.name in RETENTION_PLANS and set(hashes) != set(RETENTION_DATA_NAMES):
+        raise PlanError('retention_data_names', f'{plan.name} stages exactly {", ".join(RETENTION_DATA_NAMES)} and not {", ".join(sorted(hashes))}: the runner '
+                                                'calls every .BIN file its manifest lists, so any other would run in the same boot')
 
 
 def attach_data(plan: Plan, files, manifest: bytes = None) -> Plan:
@@ -244,6 +343,17 @@ def _manifest_path(raw: bytes, index: int) -> str:
     if parts[1].upper() == MANIFEST_NAME:
         raise PlanError('manifest_lists_itself', f'entry {index}: {path}')
     return path
+
+
+def render_payload_manifest(files) -> bytes:
+    """The Q1N1PLD1 manifest that lists `files` ((NAME, bytes) pairs, capitals and 8.3) as \\SP11\\NAME in the order given: the bytes that
+    tools/sp11_payload_manifest.py of the q1n1 fork writes for the same files, and what parse_payload_manifest reads back. The first file is
+    the payload the runner calls (a name that ends in .BIN), every other name that ends in .BIN would be called after it."""
+    files = tuple(files)
+    blob = _HEADER.pack(MANIFEST_MAGIC, 1, len(files), _ENTRY.size) + b''.join(
+        _ENTRY.pack(len(data), hashlib.sha256(data).digest(), f'\\SP11\\{name}'.encode('ascii')) for name, data in files)
+    parse_payload_manifest(blob)
+    return blob
 
 
 def parse_payload_manifest(blob: bytes) -> tuple:
@@ -329,6 +439,31 @@ def _step_lines(plan: Plan, k: int) -> list:
     return lines
 
 
+def _extract_lines(plan: Plan, k: int) -> list:
+    """The block of an extract step. It skips ahead when its marker exists, refuses to overwrite a result, and then the three `dmem`
+    dumps are the first commands that change anything: no stall, no load and no run, nothing that waits or runs code, comes before
+    them, because the dump is the experiment and the pages are only as good as the time they are read at. The memory map of that boot
+    follows (it says whether firmware took a page for itself), then the Shell's `date` and `time` (the unit's clock at the extraction: the
+    verdict tool compares it with the staging time of PLAN.TXT, to tell a result left by an earlier run), then the line that ends the
+    file, and only then the marker: a result that has no end line is a truncated one, and a marker never claims a dump that was not
+    finished. The console lines come last."""
+    step, count = plan.steps[k - 1], len(plan.steps)
+    result, marker = f'SP11\\{RESULT_FORMAT.format(k)}', f'SP11\\{MARKER_FORMAT.format(k)}'
+    follow = f'step{k + 1}' if k < count else 'done'
+    lines = [':step' + str(k), 'if exist ' + marker + ' then', f'  goto {follow}', 'endif',
+             'if exist ' + result + ' then', *_refuse(f'{result} exists and is never overwritten')]
+    for index, page in enumerate(step.pages):
+        lines.append(f'dmem 0x{page:X} 0x{EXTRACT_PAGE_BYTES:X} {">a" if index == 0 else ">>a"} {result}')
+    return lines + [f'memmap >>a {result}',
+                    f'date >>a {result}',
+                    f'time >>a {result}',
+                    f'{_say(f"{EXTRACT_END} plan={plan.name} step={k} pages={EXTRACT_PAGES}")} >>a {result}',
+                    f'{_say(f"AUTORUN {plan.name} STEP {k} EXTRACTED")} >a {marker}',
+                    'if not exist ' + marker + ' then', *_refuse('cannot write ' + marker),
+                    _say(f'AUTORUN {plan.name} STEP {k} OF {count}: {result} is written, power off and take the stick to the Mac'),
+                    'goto end']
+
+
 def script_lines(plan: Plan) -> list:
     count = len(plan.steps)
     lines = ['# SP11 autorun script, generated by tools/stage-sp11-boot-media.py (autorun).',
@@ -340,7 +475,7 @@ def script_lines(plan: Plan) -> list:
              'if not exist SP11\\PLAN.TXT then',
              *_refuse('SP11\\PLAN.TXT not found on the Shell volume')]
     for k in range(1, count + 1):
-        lines += _step_lines(plan, k)
+        lines += _extract_lines(plan, k) if isinstance(plan.steps[k - 1], ExtractStep) else _step_lines(plan, k)
     return lines + [':done', _say('ALL STEPS DONE, run --clear to repeat'), ':end']
 
 
@@ -362,6 +497,10 @@ _FORMS = (
     ('echo_mode', re.compile(r'@echo -(on|off)')),
     ('home', re.compile(r'%homefilesystem%')),
     ('marker', re.compile(rf'echo "{_WORDS}" >a SP11\\DONE([1-9])\.TXT')),
+    ('extract_end', re.compile(rf'echo "{EXTRACT_END} plan=({NAME_RE.pattern}) step=([1-9]) pages={EXTRACT_PAGES}" >>a SP11\\RET([1-9])\.TXT')),
+    ('dmem', re.compile(rf'dmem ({EXTRACT_ADDRESS_RE.pattern}) 0x{EXTRACT_PAGE_BYTES:X} (>>?a) SP11\\RET([1-9])\.TXT')),
+    ('memmap', re.compile(r'memmap >>a SP11\\RET([1-9])\.TXT')),
+    ('clock', re.compile(r'(date|time) >>a SP11\\RET([1-9])\.TXT')),
     ('echo', re.compile(rf' {{0,2}}echo "{_WORDS}"')),
     ('if', re.compile(rf'if (not )?exist SP11\\({_FILE}) then')),
     ('endif', re.compile(r'endif')),
@@ -408,13 +547,50 @@ def script_problems(text: str) -> list:
             current = found.group(1) if found.group(1).startswith('step') else None
             segments.setdefault(current, [])
         segments[current].append((kind, found))
-    for kind in ('load', 'run', 'marker', 'stall'):
+    for kind in ('load', 'run', 'marker', 'stall', 'extract_end', 'dmem', 'memmap', 'clock'):
         if any(k == kind for k, _ in segments[None]):
             problems.append(f'a {kind} line outside any step')
     if any(kind == 'goto' and found.group(1) != 'end' for kind, found in segments[None]):
         problems.append('a goto outside the steps that does not go to end')
     for label in steps:
-        problems += _step_problems(label, len(steps), segments[label])
+        check = _extract_problems if any(kind == 'dmem' for kind, _ in segments[label]) else _step_problems
+        problems += check(label, len(steps), segments[label])
+    return problems
+
+
+# The kinds of the lines of an extract block, in order: nothing but the dumps stands between the guards and the memory map.
+_EXTRACT_KINDS = ['label', 'if', 'goto', 'endif', 'if', 'echo', 'goto', 'endif', *['dmem'] * EXTRACT_PAGES, 'memmap', 'clock', 'clock', 'extract_end',
+                  'marker', 'if', 'echo', 'goto', 'endif', 'echo', 'goto']
+
+
+def _extract_problems(label: str, count: int, segment: list) -> list:
+    """The lines of one extract block (see _extract_lines): skip when the marker exists, refuse an existing result, three dumps that
+    are the first and only commands before the memory map, then the date and the time, the end line, the marker, its check and the exit.
+    Any other command in the block, before the dumps most of all, is a problem, and so is a different order."""
+    k = int(label[4:])
+    kinds = [kind for kind, _ in segment]
+    if kinds != _EXTRACT_KINDS:
+        return [f'{label} is not the lines of an extract block (the dumps must come right after the guards, then the memory map, the date and the time, '
+                'the end line and the marker)']
+    problems = []
+    follow = f'step{k + 1}' if k < count else 'done'
+    if segment[1][1].group(1) or segment[1][1].group(2) != MARKER_FORMAT.format(k) or segment[2][1].group(1) != follow:
+        problems.append(f'{label} does not begin by skipping ahead when its marker exists')
+    if segment[4][1].group(1) or segment[4][1].group(2) != RESULT_FORMAT.format(k) or segment[6][1].group(1) != 'end':
+        problems.append(f'{label} does not refuse to overwrite an existing result')
+    dumps = [found for kind, found in segment if kind == 'dmem']
+    if [found.group(2) for found in dumps] != ['>a'] + ['>>a'] * (EXTRACT_PAGES - 1):
+        problems.append(f'{label} does not start its result file with the first dump and append the others')
+    if len({found.group(1) for found in dumps}) != EXTRACT_PAGES or any(int(found.group(1), 16) % EXTRACT_PAGE_BYTES for found in dumps):
+        problems.append(f'{label} does not dump three distinct 4 KiB aligned pages')
+    if [segment[12][1].group(1), segment[13][1].group(1)] != ['date', 'time']:
+        problems.append(f'{label} does not write the date and then the time')
+    ends = {found.group(3) for found in dumps} | {segment[11][1].group(1), segment[12][1].group(2), segment[13][1].group(2), segment[14][1].group(2),
+                                                  segment[14][1].group(3)}
+    if ends != {str(k)} or segment[15][1].group(1) != str(k):
+        problems.append(f'{label} writes the result or the marker of another step')
+    if not segment[16][1].group(1) or segment[16][1].group(2) != MARKER_FORMAT.format(k) or segment[18][1].group(1) != 'end' or segment[-1][1].group(1) != 'end':
+        problems.append(f'{label} does not check its marker and leave the script')
     return problems
 
 
@@ -469,11 +645,30 @@ _PLAN_STEP = re.compile(r'step (\d+)\r\n  load  (\S+)\r\n        sha256 (\S+)\r\
                         r'        sha256 (\S+)\r\n  marker  SP11\\DONE(\d+)\.TXT, written before the step runs\r\n')
 _PLAN_DATA_HEAD = 'data files (read by Q1N1-PAYLOAD.EFI from this volume at run time; the script never names them)'
 _PLAN_DATA = re.compile(r'  file (\S+)\r\n        size (\d+)\r\n        sha256 (\S+)\r\n')
+_PLAN_EXTRACT = re.compile(rf'step (\d+)\r\n  extract  ({EXTRACT_KEYWORD}(?: 0x[0-9A-F]+){{{EXTRACT_PAGES}}})\r\n'
+                           r'  marker  SP11\\DONE(\d+)\.TXT, written after the dump, once it is complete\r\n'
+                           r'  result  SP11\\RET(\d+)\.TXT, never overwritten\r\n')
+_PLAN_ANY_STEP = re.compile(f'(?:{_PLAN_STEP.pattern})|(?:{_PLAN_EXTRACT.pattern})')
+
+
+def stamp_staging(plan: Plan, now: datetime = None) -> Plan:
+    """A retention plan with the staging computer's local time to the second, which PLAN.TXT records and the verdict tool compares with the
+    unit's clock: a result or a marker that is not later than it was left by an earlier run. Any other plan comes back as it was, so that its
+    PLAN.TXT does not change."""
+    if plan.name not in RETENTION_PLANS:
+        return plan
+    return replace(plan, staged=(now or datetime.now()).strftime(STAGED_FORMAT))
 
 
 def render_plan_text(plan: Plan) -> bytes:
-    lines = [*_PLAN_HEAD, f'plan: {plan.name}', f'steps: {len(plan.steps)}', '']
+    lines = [*_PLAN_HEAD, f'plan: {plan.name}', f'steps: {len(plan.steps)}', *([UNATTENDED_LINE] if plan.stick_first_authorised else []),
+             *([f'staged: {plan.staged}'] if plan.staged else []), '']
     for k, step in enumerate(plan.steps, 1):
+        if isinstance(step, ExtractStep):
+            lines += [f'step {k}', f'  extract  {step.run_line}',
+                      f'  marker  SP11\\{MARKER_FORMAT.format(k)}, written after the dump, once it is complete',
+                      f'  result  SP11\\{RESULT_FORMAT.format(k)}, never overwritten', '']
+            continue
         lines += [f'step {k}', f'  load  {step.slbounce}', f'        sha256 {step.slbounce_sha256}',
                   f'  run   {step.run_line}', f'        sha256 {step.app_sha256}',
                   f'  marker  SP11\\{MARKER_FORMAT.format(k)}, written before the step runs', '']
@@ -493,11 +688,18 @@ def parse_plan_text(data: bytes) -> Plan:
     except UnicodeDecodeError as exc:
         raise PlanError('plan_text_unparseable', 'not ASCII') from exc
     head = re.search(r'^plan: (\S+)\r\nsteps: (\d+)\r\n', text, re.MULTILINE)
-    blocks = _PLAN_STEP.findall(text)
+    blocks = list(_PLAN_ANY_STEP.finditer(text))
     if head is None or int(head.group(2)) != len(blocks):
         raise PlanError('plan_text_unparseable', 'no plan line, or a step count that disagrees with the step blocks')
     texts, hashes = [], {}
-    for index, (number, slbounce, slbounce_hash, app, args, app_hash, marker) in enumerate(blocks, 1):
+    for index, block in enumerate(blocks, 1):
+        if block.group(1) is None:              # an extract step: the groups after the seven of a load and run step
+            number, extract, marker, result = block.groups()[7:]
+            if not int(number) == int(marker) == int(result) == index:
+                raise PlanError('plan_text_unparseable', f'step {number} is not step {index}')
+            texts.append(extract)
+            continue
+        number, slbounce, slbounce_hash, app, args, app_hash, marker = block.groups()[:7]
         if int(number) != index or int(marker) != index:
             raise PlanError('plan_text_unparseable', f'step {number} is not step {index}')
         for name, digest in ((slbounce, slbounce_hash), (app, app_hash)):
@@ -505,7 +707,14 @@ def parse_plan_text(data: bytes) -> Plan:
                 raise PlanError('plan_inconsistent_hash', name)
         texts.append(f'{slbounce} {app}{args}')
     data_files = [DataFile(name, int(size), digest) for name, size, digest in _PLAN_DATA.findall(text)]
-    plan = attach_data(build_plan(head.group(1), texts, hashes), data_files)
+    unattended = re.search(rf'^{re.escape(UNATTENDED_LINE)}\r\n', text, re.MULTILINE) is not None
+    plan = attach_data(build_plan(head.group(1), texts, hashes, stick_first_authorised=unattended), data_files)
+    staged = re.search(r'^staged: (.*)\r\n', text, re.MULTILINE)
+    if staged is not None:
+        try:
+            plan = stamp_staging(plan, datetime.strptime(staged.group(1), STAGED_FORMAT))
+        except ValueError as exc:
+            raise PlanError('plan_text_unparseable', f'the staged line is not a time: {staged.group(1)!r}') from exc
     if render_plan_text(plan) != data:
         raise PlanError('plan_text_not_canonical', 'differs from what the tool writes for this plan')
     return plan

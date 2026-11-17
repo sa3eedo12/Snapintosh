@@ -261,7 +261,8 @@ def typed(text: str, prompt: str = 'Shell>') -> tuple:
 
 
 def boot_stick(image: Path, shell: Path, workdir: Path, *, keys=(), until=None, timeout: float = 150.0,
-               settle: float = 5.0, decoy=None, read_only: bool = False) -> Boot:
+               settle: float = 5.0, decoy=None, read_only: bool = False, el2: bool = False, reboot: bool = False,
+               memory: str = '') -> Boot:
     """Boots the stick image in `image` once and returns what the console showed and what the stick holds after.
 
     `keys` is a sequence of (text, monitor key name): each key is sent once, the first time `text` shows in the
@@ -270,6 +271,9 @@ def boot_stick(image: Path, shell: Path, workdir: Path, *, keys=(), until=None, 
     `timeout`. The image is modified in place by the guest, so two boots of the same file are two boots of one stick.
     `decoy` is another image, presented on a PCI slot ahead of the stick's USB controller so that it, not the stick,
     is the first file system the Shell maps (the stick is then FS1:). `read_only` presents the stick write-protected.
+    `el2` starts the guest at EL2 (virtualization=on, which the stick payload runner needs). `reboot` lets the guest
+    reset itself and boot again inside the same emulator run, with its RAM kept (the default exits at a guest reset).
+    `memory` is the emulator's -m value (default 1G), for a test that needs RAM above 4 GiB.
     """
     assets = qemu_probe.find_assets()
     workdir.mkdir(parents=True, exist_ok=True)
@@ -279,8 +283,10 @@ def boot_stick(image: Path, shell: Path, workdir: Path, *, keys=(), until=None, 
     for path in (image, serial_path, vars_copy, Path(assets.code_fd), *([decoy] if decoy else [])):
         if not path.is_file():
             raise RuntimeError(f'{path} is not a regular file')
-    cfg = qemu_probe.RunConfig(name='autorun', efi=shell, workdir=workdir, el2=False)
+    cfg = qemu_probe.RunConfig(name='autorun', efi=shell, workdir=workdir, el2=el2, **({'memory': memory} if memory else {}))
     command = qemu_probe.qemu_command(cfg, assets, vars_copy, image, serial_path) + ['-device', 'usb-kbd']
+    if reboot:
+        command.remove('-no-reboot')
     if read_only:
         at = next(i for i, word in enumerate(command) if word.startswith('if=none,id=stick,'))
         command[at] += ',readonly=on'

@@ -845,7 +845,7 @@ def autorun_stage(dest: Path, args) -> dict:
         if name in data_sources:
             raise autorun.PlanError('data_given_twice', name)
         data_sources[name], data_hashes[name] = Path(path), digest
-    plan = autorun.build_plan(args.name, args.step, hashes)
+    plan = autorun.build_plan(args.name, args.step, hashes, getattr(args, 'stick_first_authorised', False))
     autorun.check_data_names(plan, data_hashes)         # the rules that need no file, before any file is read
     for name, path in {**sources, **data_sources}.items():
         if path.name.upper() in autorun.BANNED_NAMES:
@@ -877,6 +877,7 @@ def autorun_stage(dest: Path, args) -> dict:
         fresh[f'SP11/{name}'] = blob
         staged_data.append(autorun.DataFile(name, info['size'], info['sha256']))
     plan = autorun.attach_data(plan, staged_data, fresh.get(f'SP11/{autorun.MANIFEST_NAME}'))
+    plan = autorun.stamp_staging(plan)
     readme = read_staged_bytes(dest / README_REL, AUTORUN_TEXT_MAX)
     if readme != build_readme_text().encode('ascii'):
         raise Refusal('autorun_readme_unexpected', 'SP11/README.TXT is not the text this tool stages')
@@ -1018,6 +1019,8 @@ def build_argparser() -> argparse.ArgumentParser:
     auto.add_argument('--data', nargs=3, action='append', default=[], metavar=('NAME', 'PATH', 'SHA256'),
                       help='a file Q1N1-PAYLOAD.EFI reads, not runs (PAYLOAD.MAN and the files it lists): SP11/NAME '
                            'comes from PATH, which must hash to SHA256; only with a step that runs it (with --step)')
+    auto.add_argument('--stick-first-authorised', action='store_true',
+                      help='the operator authorised the stick first in the boot order (only the plan retention-m10-auto)')
     add_pin_options(auto)
 
     return ap
