@@ -728,8 +728,8 @@ class Hygiene(unittest.TestCase):
         build = (ROOT / 'docs/SP11-STICK-BUILD.md').read_text()
         self.assertIn('`--m1-run BUILD_REPORT`', build)
         self.assertIn('docs/SP11-STICK-MONITOR.md', build)
-        self.assertLessEqual(len(build.encode()), 33200)
-        self.assertIn('33200', (TOOLS / 'test-sp11-stick-bundle-build.py').read_text(), 'the cap of docs/SP11-STICK-BUILD.md in its own test')
+        self.assertLessEqual(len(build.encode()), 35500)
+        self.assertIn('35500', (TOOLS / 'test-sp11-stick-bundle-build.py').read_text(), 'the cap of docs/SP11-STICK-BUILD.md in its own test')
 
     def test_the_flag_is_documented_where_the_options_are(self):
         done = quietly(bb.main, ['authorisation-template', 'synthetic', '--help'])

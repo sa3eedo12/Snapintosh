@@ -680,7 +680,7 @@ def build_opts(p, kind, template=False):
                      ('--reporter', dict(required=True, help='SNAPREP.BIN: payload 1, the reporter')),
                      ('--stores', dict(required=True, help='ram,el2_sysreg[,gic]: the store classes authorised (D4)')),
                      ('--gic-stop', dict(action='store_true', help='the record of the GIC and stop dry run (docs/SP11-STICK-GIC.md); needs gic in --stores')),
-                     (gq.OPTION, dict(action='store_true', help='with --gic-stop: the text for pass 5 of the stage, the quarantine; --monitor must be a pass 5 wrapper')),
+                     (gq.OPTION, dict(action='store_true', help='with --gic-stop: the text for passes 5 and 6 of the stage, the quarantine; --monitor must be a pass 5 or 6 wrapper')),
                      ('--m1-run', dict(metavar='BUILD_REPORT', help='the record of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10): the build-report.json of '
                                                                    'tools/sp11_stick_wrapper_build.py --monitor, which made the SNAPMON-M1.BIN and SNAPREP-M1.BIN given '
                                                                    'as --monitor and --reporter; needs ram, el2_sysreg and gic in --stores and a time box of 1 to 5 s')),

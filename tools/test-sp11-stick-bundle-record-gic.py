@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Tests of the record text for pass 5 of the GIC and stop stage and of its coupling to the wrapper it describes (tools/sp11_stick_bundle_record_gic.py;
-the builder option --gic-quarantine; docs/SP11-STICK-GIC.md sections 4, 7, 8 and 12): the decision of the two named refusals, the signal in the REAL
-binaries (the pass 5 pair built here, the dry-run pair built here, and the pairs of the first two attempts where their files exist), the builder with
-those files in both directions, the text itself (what it says, its numbers against the stage's headers, its labels, its width), and the census of the pass 5
-wrapper's ELF against the text in both directions, with a text that lacks a name, a text that has one too many, and ELF copies with one more instruction.
+"""Tests of the record text for the final stage of the GIC and stop dry run (passes 5 and 6: the quarantine and the rule for its last write; the record module
+tools/sp11_stick_bundle_record_gic.py; the builder option --gic-quarantine; docs/SP11-STICK-GIC.md sections 4, 7, 8 and 12) and of its coupling to the wrapper it
+describes: the decision of the two named refusals, the signal in the REAL binaries (the final pair built here, the dry-run pair built here, and the pairs of the first
+two attempts where their files exist), the builder with those files in both directions, the text itself (what it says, its numbers against the stage's headers,
+its section 4 against the wrapper's sources, its section 5 silence rule against the document's 15 s and the silence of an orderly run, its labels, its width, a pin
+of its digest), the census of the final wrapper's ELF against the text in both directions,
+with a text that lacks a name, a text that has one too many, and ELF copies with one more instruction, and a pin of the template that the local facts and the
+local run note give. The register-by-register account of the stores and reads against the host model of the stage is in
+tools/test-sp11-stick-bundle-record-gic-model.py.
 
     python3 tools/test-sp11-stick-bundle-record-gic.py
 
 The fixtures of tools/test-sp11-stick-bundle-build.py are loaded here with a scratch directory of their own (build/sp11-record-gic-test-scratch/, deleted at
-the end). The decision, the text and the hygiene need no toolchain. The pass 5 and dry-run binaries are built here with tools/sp11_stick_wrapper_build.py
+the end). The decision, the text and the hygiene need no toolchain. The final and dry-run binaries are built here with tools/sp11_stick_wrapper_build.py
 and need clang, ld.lld, the llvm tools and a q1n1 checkout ($Q1N1_SP11_TREE); the pairs of the first two attempts are local files (build/sp11-gic/bin and
-$SP11_GICDRY2_DIR/binA, each held to the digests of the builds that ran). What cannot run is SKIPPED, which is not a pass. No hardware: NOT RUN."""
+$SP11_GICDRY2_DIR/binA, each held to the digests of the builds that ran); the template pin needs build/sp11-gic/facts-gicdry3.local.json and the run note
+build/sp11-gic/note-gicdry3.txt, local files that are not committed. What cannot run is SKIPPED, which is not a pass. No hardware: NOT RUN."""
 import collections
 import hashlib
 import importlib.util
@@ -48,6 +53,17 @@ EARLIER = {'first attempt': ('build/sp11-gic/bin', '444329eedee71e680dba2db53a62
                              'c05bc954c8e051d1dd3e7ca10c1f535a16cc0ad1789ee841697a6f45ec755d15'),
            'second attempt': ('$SP11_GICDRY2_DIR/binA', '784d5275398c8150db60e67f9fe34b50c9f6a749fb9a567cc2d3d280a0c1e33a',
                               'f8df06a6f389eae58a4bd86b5f55dcd6371025d9755c085c08ce360c95eba9be')}
+# The final pair of the stage (pass 6): what tools/sp11_stick_wrapper_build.py --gic builds, byte for byte. This text was read against it and the census below is of its
+# ELF, so another pair is a changed stage: the text has to be read again against it, and this pin is the reminder.
+FINAL = {'wrapper': (98236, 'ebac8675a246dfdbe1f0707e66b04b24e6d0b6fbdec383fdfebfee9eb6a960c2'),
+         'reporter': (62000, '89b8fab1f6dadd72b39bdd07016b6436864af40551a2665074fbb2de2600b6d9')}
+# LOCAL TEST record, not the authorised one: the template that the local facts of the third attempt and the local run note (version 4: 40 lines, 4,504 bytes) give
+# with the final pair. A pin of the text for the note as it is now. The operator authorises a record that is generated after the line "built from commit" is added
+# to the note, which is another digest. The pin applies only to the facts file and the note it names by digest and size; with any other it is skipped, which is not a
+# pass.
+LOCAL = dict(facts=('build/sp11-gic/facts-gicdry3.local.json', '6d278ac6837c96cc5125819e909a7fddb823ed6f83e5cd80577686218a8a5952'),
+             note=('build/sp11-gic/note-gicdry3.txt', '414cb3a8a391008782e120287d2a7664593e0f691b7071667675ed158d903997', 4503), size=18208,
+             template='3a101a6399fc908e7b620d41c1a029b7081aa3967e10777c7f61ff9d1b2ed867')
 # The census of the pass 5 wrapper: the 26 MSR instructions of 15 registers that docs/SP11-STICK-GIC.md section 8 lists, and what else it executes.
 MSR_COUNTS = {'VBAR_EL2': 5, 'SPSR_EL2': 4, 'ELR_EL2': 4, 'DAIFSet': 2, 'DAIFClr': 1, 'ICC_PMR_EL1': 1, 'ICC_BPR1_EL1': 1, 'ICC_IGRPEN1_EL1': 1, 'ICC_EOIR1_EL1': 1,
               'ICC_DIR_EL1': 1, 'CNTHP_CVAL_EL2': 1, 'CNTHP_CTL_EL2': 1, 'HCR_EL2': 1, 'VBAR_EL1': 1, 'SCTLR_EL1': 1}
@@ -63,7 +79,7 @@ EXTRA = {'msr tpidr_el2': (0xD51CD040, 'TPIDR_EL2'), 'tlbi vmalle1': (0xD508871F
 FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=7, time_box_s=5, label='GICDRY-C', monitor=(98236, '1' * 64), reporter=(62000, '2' * 64),
              note=None, gic_stop=True, gic_quarantine=True, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
 # The SHA-256 of record_text for FIXED: the text is what the operator approves by its digest, so a changed byte is another record.
-GOLDEN = '16bcbe619c72c1730f85dcf16537aeb983e0fee52cc1c7cef8cafdb9fe5e7165'
+GOLDEN = '93602c1b9f497e3d58ecabb67879f4bdfb68d2e02376ae791926ab6c5ef13610'
 LOOKALIKES = ('ASSUMED CONFIRMED MEASURED PROVEN PROVED TESTED VALIDATED ESTABLISHED HYPOTHESIS GUESSED LIKELY SUSPECTED UNVERIFIED PRESUMED PROBABLE CERTAIN '
               'DEMONSTRATED QUALIFIED ASSERTED CLAIMED OBVIOUS TRIVIAL').split()
 
@@ -142,6 +158,81 @@ def patched(elf, word, name):
     at = next(i for i in range(0, len(data) - 4, 4) if data[i:i + 4] == ISB)
     data[at:at + 4] = struct.pack('<I', word)
     return BT.write(SCRATCH / 'mutants' / name, bytes(data))
+
+
+def header_text():
+    """The two headers of the stage that hold the numbers the text states."""
+    return (ROOT / 'probes/sp11-stick-gic-record.h').read_text() + (ROOT / 'probes/sp11-stick-gic.h').read_text()
+
+
+def pair_problems(wrapper, reporter):
+    """What differs between the files `wrapper` and `reporter` and FINAL: [str]."""
+    problems = []
+    for label, path in (('wrapper', wrapper), ('reporter', reporter)):
+        data = Path(path).read_bytes()
+        if (len(data), sha(data)) != FINAL[label]:
+            problems.append(f'the {label} is {len(data)} bytes sha256 {sha(data)}, not the final pair\'s {FINAL[label][0]} bytes sha256 {FINAL[label][1]}')
+    return problems
+
+
+# Pass 6's rule for the last ISENABLER0 write, as the text says it, and the sentence of pass 5 that it made false.
+EXCEPTION_SAYS = ('the last register write of the stage, except that it is NOT made when the put-backs of both ICC_IGRPEN1_EL1 and GICD_CTLR failed (both group 1 gates left open): '
+                  'ISENABLER0 is then only read and named in FAILED, the foreign interrupts stay disabled and the run ends NOT_RESTORED (OUTCOME=0X30). The pending state of those '
+                  'interrupts is never written: a source that asserts through the run is pending, and, except in that case, enabled again, when the run ends.')
+PASS_5_SAID = ('the last register write of the stage. The pending state of those interrupts is never written: a source that asserts through the run is pending, '
+               'and enabled again, when the run ends.')
+
+
+def exception_problems(flat):
+    """What is wrong with `flat` (the text, white space collapsed) about pass 6's exception: [str]."""
+    problems = [] if EXCEPTION_SAYS in flat else ['the pass 6 sentence is not there']
+    return problems + [f'still says: {PASS_5_SAID}'] * (PASS_5_SAID in flat)
+
+
+# The paragraph that says what the stage never touches, as it must say it (the quarantine writes the enable bits of the other interrupts), and what it said before.
+NEVER_SAYS = ('Never the ITS, SMMU, PCIe, USB or the framebuffer. No SPI is written (the SPIs are only read) and no other redistributor (only its GICR_TYPER is read). '
+              'Of the interrupts but PPI 26 only the enable bits that Q cleared are written, by Q and its put-back (SGI 0 and PPIs 23, 25, 27 and 30 where ISENABLER0 read '
+              '0x4E800001): no priority, group, trigger or pending state of any of them is written.')
+NEVER_SAID = ('Never the ITS, another interrupt\'s configuration, an SPI (read only), another redistributor (GICR_TYPER read only), SMMU, PCIe, USB or the framebuffer.')
+
+
+def never_problems(flat):
+    return ([] if NEVER_SAYS in flat else ['the paragraph is not there']) + [f'still says: {NEVER_SAID[:60]}'] * ('another interrupt\'s configuration' in flat)
+
+
+def silence_problems(section, doc, worst_s):
+    """What is wrong with section 5 (`section`, the text from "5. " on) of a --gic-quarantine record against the document's stop rule and the longest silence that an
+    orderly run of the stage has (`worst_s`): [str]. The rule must be the document's figure ("no page change for N s") for a NEXT line or ENTER, above that silence,
+    must not be the rule of the other records, and NOT_RESTORED must stop the series."""
+    flat, problems = ' '.join(section.split()), []
+    rule = re.search(r'No page change for (\d+) s after a NEXT line or after ENTER', flat)
+    doc_s = int(re.search(r'no page change for (\d+) s', ' '.join(doc.split())).group(1))
+    if not rule:
+        problems.append('there is no rule of seconds for a NEXT line or ENTER')
+    else:
+        if int(rule.group(1)) != doc_s:
+            problems.append(f'the rule says {rule.group(1)} s and the document {doc_s} s')
+        if int(rule.group(1)) <= worst_s:
+            problems.append(f'{rule.group(1)} s is not above the {worst_s} s that an orderly run is silent for')
+    if rec.SILENCE_RULE.strip() in flat:
+        problems.append('the rule of the other records is still there')
+    if 'NOT_RESTORED stops the series' not in flat:
+        problems.append('NOT_RESTORED does not stop the series')
+    return problems
+
+
+def twenty_problems(text):
+    """Every sentence of sections 3 to 5 of a record (`text`) that says "20 s" must be about the whole stage (two windows and two 8 s waits) and none about the quarantine,
+    which lasts about 12 s on a passing run: [str]."""
+    flat = ' '.join(text.split('3. Store classes', 1)[1].split('\n6. ', 1)[0].split())
+    problems = []
+    for sentence in re.split(r'(?<=\.)\s+', flat):
+        if re.search(r'\b20 s\b', sentence):
+            if re.search(r'quarantin|\bQ\b|\boff\b|disabled', sentence):
+                problems.append(f'20 s for the quarantine: {sentence[:70]}')
+            if not re.search(r'two windows and the two 8 s waits|in all on a passing run', sentence):
+                problems.append(f'20 s that is not the whole stage: {sentence[:70]}')
+    return problems
 
 
 class Need(BT.Case):
@@ -294,7 +385,8 @@ class Text(unittest.TestCase):
                           number(r'SG_OUT_IS_VERDICT\(o\) \(\(o\) >= (\d+)')), (1, 15, 32))
         self.assertEqual((q, f, ok, last), (22, 23, 32, 48))
         for needle in (f'Q_NOT_HELD ({q}, OUTCOME=0X{q:X})', f'FOREIGN_PENDING ({f}, OUTCOME=0X{f:X})', f'Q_NOT_HELD 0X{q:X}, FOREIGN_PENDING 0X{f:X}', f'IRQ_OK 0X{ok:X}',
-                       f'NOT_RESTORED 0X{last:X}', '0X1 to 0XF a refusal', '0X10 to 0X1F', '0X20 to 0X2F', 'version 3', '1456 bytes', 'offset 0x11000', '2 s in the default build',
+                       f'NOT_RESTORED 0X{last:X}', f'the run ends NOT_RESTORED (OUTCOME=0X{last:X})', '0X1 to 0XF a refusal', '0X10 to 0X1F', '0X20 to 0X2F', 'version 3', '1456 bytes',
+                       'offset 0x11000', '2 s in the default build',
                        'and 8 s', 'ICC_PMR_EL1 0xF0, ICC_BPR1_EL1 0, ICC_IGRPEN1_EL1 1', 'IPRIORITYR byte (0x80 if it differs)', 'the IPRIORITYR byte of INTID 26',
                        'the IPRIORITYR bytes of INTIDs 23, 25, 27 and 30'):
             self.assertIn(needle, self.flat)
@@ -327,6 +419,105 @@ class Text(unittest.TestCase):
         with self.assertRaises(AssertionError):
             render(gic_stop=False)
         self.assertNotIn('Q_NOT_HELD', render(gic_stop=False, gic_quarantine=False))
+
+    def test_pass_6_s_exception_replaces_the_sentence_that_pass_6_made_false(self):
+        self.assertEqual(exception_problems(self.flat), [])
+        self.assertEqual(exception_problems(self.flat.replace(EXCEPTION_SAYS, PASS_5_SAID)), ['the pass 6 sentence is not there', f'still says: {PASS_5_SAID}'],
+                         'the sentence of pass 5 fails the check')
+        self.assertTrue(exception_problems(self.flat.replace('is NOT made', 'is made')), 'a text without the exception fails it')
+        for needle in ('by ONE write of ISENABLER0', 'the last register write of the stage'):
+            self.assertIn(needle, self.flat)
+
+    def test_the_never_paragraph_says_what_the_quarantine_writes_and_nothing_wider(self):
+        self.assertEqual(never_problems(self.flat), [])
+        self.assertTrue(never_problems(self.flat.replace(NEVER_SAYS, NEVER_SAID)), 'the wording of the first version fails the check')
+        self.assertEqual([i for i in range(32) if 0x4A800001 >> i & 1], [0, 23, 25, 27, 30], 'SGI 0 and PPIs 23, 25, 27 and 30 are the bits of the value Q writes')
+        self.assertIn('PPI 26\'s own are the stage\'s: it sets them as the writes above say, and undoes them.', self.flat)
+
+    def test_the_unknown_paragraph_names_the_extended_spis_and_the_lpis_in_the_documents_words(self):
+        said = ('whether any extended SPI (GICD_TYPER.ESPI is 1, range 31) or LPI (GICR_TYPER.PLPIS is 1) is enabled and pending: neither is surveyed or quarantined; only the '
+                'one ICC_HPPIR1_EL1 read before window 1 sees one, at one instant (the decode of the two registers is INFERRED)')
+        unknown = self.flat.split('UNKNOWN: ', 1)[1].split(' Not authorised', 1)[0]
+        self.assertIn(said, unknown)
+        self.assertNotIn(said, ' '.join(self.old.split()))
+        doc = (ROOT / 'docs/SP11-STICK-GIC.md').read_text()
+        typer, rtyper = (int(re.search(rf'{name} (?:low word )?(0x[0-9A-F]+)', doc).group(1), 16) for name in ('GICD_TYPER', 'GICR_TYPER'))
+        self.assertEqual((typer >> 8 & 1, typer >> 27 & 31, rtyper & 1), (1, 31, 1), 'ESPI 1, range 31 and PLPIS 1 in the values that the document records (INFERRED bit positions)')
+        self.assertEqual(32 * ((typer & 31) + 1) - 1, 991)
+        self.assertIn('which reads INTIDs 32 to 991 on the unit', self.flat)
+
+    def test_section_4_of_the_variant_says_what_the_wrapper_does_with_the_time_box_and_the_other_records_keep_the_generic_line(self):
+        generic = '4. Time box: 5 s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.'
+        for other in (render(gic_quarantine=False), render(gic_stop=False, gic_quarantine=False)):
+            self.assertIn(generic, other)
+        self.assertNotIn(generic, self.new)
+        section = ' '.join(self.new.split('\n4. ', 1)[1].split('\n5. ', 1)[0].split())
+        for needle in ('Time box: watchdog_seconds, 5 s, is carried in the PARAMS chunk of GUEST.DAT', '(TIME_BOX_MISMATCH)', 'the GIC wrapper does not read it and calls no monitor'):
+            self.assertIn(needle, section)
+        self.assertNotIn('the monitor\'s own', section)
+        self.assertIn('TIME_BOX_MISMATCH', ch.KNOWN_REFUSALS)
+        self.assertIn('watchdog_seconds, 9 s,', ' '.join(gq.time_lines(9)), 'the PARAMS word named is the time box of the record')
+
+    def test_the_times_in_section_4_are_computed_from_the_stage_s_own_constants(self):
+        number = lambda pattern: int(re.search(pattern, header_text()).group(1), 0)       # noqa: E731
+        constants = tuple(number(pattern) for pattern in (r'SP11_STICK_GIC_TIME_BOX_S (\d+)u', r'SP11_STICK_GIC_CYCLE_US (\d+)u', r'#define SG_CYCLES (\d+)u', r'SW_GIC_WAIT_S (\d+)u'))
+        self.assertEqual(constants, (2, 10000, 3, 8))
+        self.assertIn('2 * r->timebox_ticks + (w == SG_WIN_EL2 ? 2 * (SG_CYCLES + 1) * r->cycle_ticks : 0)', (ROOT / 'probes/sp11-stick-gic-dry.c').read_text(),
+                      'where the 4 s and the 4.08 s of window 1 come from')
+
+        def says(box, cycle_us, cycles, wait):
+            bound, extra_ms = 2 * box, 2 * (cycles + 1) * cycle_us // 1000
+            return (f'arms CNTHP {box} s ahead and is bounded at {bound} s', f'(window 1: {bound + extra_ms / 1000:.2f} s, with {extra_ms} ms for its re-arms of {cycle_us // 1000} ms)',
+                    f'and the two {wait} s waits', f'about {2 * wait + 2 * box} s in all on a passing run', f'{wait + 2 * box} s if window 1 sees no interrupt',
+                    f'{2 * wait + 3 * box} s if window 2 sees none')
+        section = ' '.join(self.new.split('\n4. ', 1)[1].split('\n5. ', 1)[0].split())
+        self.assertEqual([needle for needle in says(*constants) if needle not in section], [])
+        self.assertEqual(len([needle for needle in says(3, *constants[1:3], 9) if needle not in section]), 6, 'other constants fail every needle')
+
+    def test_the_gic_wrapper_has_no_watchdog_word_and_no_monitor_and_the_monitor_entry_build_has_both(self):
+        gic, m1 = wb.SOURCES['SNAPMON-GIC.BIN'], wb.SOURCES['SNAPMON-M1.BIN']
+        probes = lambda sources: [s for s in sources if s.startswith('probes/')]       # noqa: E731
+        found = lambda sources: sorted((s, w) for s in probes(sources) for w in ('watchdog', 'SM_PARAMS') if w.lower() in (ROOT / s).read_text().lower())       # noqa: E731
+        self.assertGreaterEqual(len(probes(gic)), 6)
+        self.assertEqual(found(gic), [])
+        self.assertNotIn('probes/sp11-stick-monitor.c', gic)
+        self.assertIn(('probes/sp11-stick-monitor.c', 'watchdog'), found(m1))
+
+    def test_section_5_of_the_variant_has_the_documents_15_s_above_the_silence_of_an_orderly_run_and_the_other_records_keep_the_generic_rule(self):
+        number = lambda pattern: int(re.search(pattern, header_text()).group(1), 0)       # noqa: E731
+        wait, box = number(r'SW_GIC_WAIT_S (\d+)u'), number(r'SP11_STICK_GIC_TIME_BOX_S (\d+)u')
+        healthy, worst = wait + box, wait + 2 * box         # after NEXT GIC EL1 EXCURSION AFTER 8 S: the wait, then window 2 (about the box, at most twice it)
+        doc = (ROOT / 'docs/SP11-STICK-GIC.md').read_text()
+        section = self.new.split('\n5. ', 1)[1]
+        self.assertEqual(silence_problems(section, doc, worst), [])
+        for needle in (f'silent for {wait} s after NEXT GIC STORES AFTER {wait} S', f'about {healthy} s after NEXT GIC EL1 EXCURSION AFTER {wait} S', f'at most {worst} s: section 4'):
+            self.assertIn(needle, ' '.join(section.split()))
+        self.assertLessEqual(2 * 5, worst, 'twice the time box of 5 s, the rule of the other records, is not above what an orderly run is silent for')
+        self.assertIn(rec.SILENCE_RULE, self.old)
+        self.assertNotIn(rec.SILENCE_RULE, self.new)
+        for bullet in ('A wrapper REFUSED line ends the boot', 'Two resets at the same last line stop the series', 'One hardware client'):
+            self.assertIn(bullet, section)
+            self.assertIn(bullet, self.old)
+        self.assertIn('NOT_RESTORED stops the series', ' '.join(doc.split()))
+
+    def test_a_record_with_10_s_or_12_s_without_the_not_restored_rule_or_with_the_generic_rule_or_against_another_figure_in_the_document_fails_the_silence_check(self):
+        doc = (ROOT / 'docs/SP11-STICK-GIC.md').read_text()
+        section, worst = self.new.split('\n5. ', 1)[1], 12
+        for seconds in (10, 12):
+            with self.subTest(seconds):
+                problems = silence_problems(section.replace('No page change for 15 s after', f'No page change for {seconds} s after'), doc, worst)
+                self.assertEqual(len(problems), 2, problems)
+                self.assertIn(f'the rule says {seconds} s and the document 15 s', problems)
+        self.assertEqual(silence_problems(section.replace(gq.SILENCE_LINES[-1] + '\n', ''), doc, worst), ['NOT_RESTORED does not stop the series'])
+        self.assertEqual(len(silence_problems(self.old.split('\n5. ', 1)[1], doc, worst)), 3, 'the generic rule: no rule of seconds, the old rule, no NOT_RESTORED')
+        self.assertEqual(silence_problems(section, doc.replace('no page change for 15 s', 'no page change for 20 s'), worst), ['the rule says 15 s and the document 20 s'])
+
+    def test_no_sentence_of_sections_3_to_5_gives_the_quarantine_20_s_and_the_20_s_that_it_has_are_the_whole_stage(self):
+        self.assertEqual(twenty_problems(self.new), [])
+        self.assertIn('about 20 s', self.flat)
+        quarantine = self.new.replace('Total time of the two windows and the two 8 s waits: about 20 s.', 'The quarantine is on for about 20 s.')
+        self.assertEqual(len(twenty_problems(quarantine)), 2, 'a quarantine of 20 s is neither the whole stage nor 12 s')
+        self.assertEqual(len(twenty_problems(self.new.replace('about 20 s in all on a passing run', 'about 20 s'))), 1)
 
 
 # ---- the census ------------------------------------------------------------------------------------------------------------------------
@@ -400,6 +591,44 @@ class Census(Need):
                 self.assertTrue(set(NEW_READS) - {'ICC_IAR1_EL1', 'ICC_HPPIR1_EL1'} <= set(self.cen['mrs']) - set(old['mrs']), 'the survey reads are the new ones')
         extra = msr_counts(patched(self.elf, EXTRA['msr tpidr_el2'][0], 'compare.elf'))
         self.assertNotEqual(extra, now[0], 'the comparison can fail')
+
+
+# ---- the final pair and the local template ----------------------------------------------------------------------------------------------------
+class Final(Need):
+    def generate(self, note):
+        facts = ROOT / LOCAL['facts'][0]
+        return BT.cli(['authorisation-template', 'synthetic', '--facts', str(facts), '--base', '0x880000000', '--guest-mib', '384', '--monitor', str(self.wrapper),
+                       '--reporter', str(self.reporter), '--stores', 'ram,el2_sysreg,gic', '--gic-stop', gq.OPTION, '--time-box-s', '5', '--note', str(note)])
+
+    def test_the_pair_built_here_is_the_final_pair_the_census_is_of_its_wrapper_and_a_changed_file_is_not_the_pair(self):
+        self.assertEqual(pair_problems(self.wrapper, self.reporter), [])
+        self.assertEqual(C.flat_bytes(self.elf), self.wrapper.read_bytes(), 'the ELF that the census reads is the flat wrapper of the pair')
+        data = bytearray(self.wrapper.read_bytes())
+        data[100] ^= 1
+        changed = BT.write(SCRATCH / 'mutants' / 'wrapper-one-bit.bin', bytes(data))
+        self.assertEqual(len(pair_problems(changed, self.reporter)), 1)
+        self.assertEqual(len(pair_problems(self.reporter, self.wrapper)), 2)
+
+    def test_the_template_of_the_local_facts_and_run_note_is_the_pinned_one_twice(self):
+        (facts, facts_sha), (note, note_sha) = ((ROOT / LOCAL[key][0], LOCAL[key][1]) for key in ('facts', 'note'))
+        if not (facts.is_file() and note.is_file()):
+            self.skipTest('the local facts of the third attempt or its run note are absent (build/sp11-gic/facts-gicdry3.local.json, note-gicdry3.txt)')
+        if (sha(facts.read_bytes()), sha(note.read_bytes()), len(note.read_bytes())) != (facts_sha, note_sha, LOCAL['note'][2]):
+            self.skipTest('the local facts or the run note is not the file that the pin was made for')
+        first, second = self.generate(note), self.generate(note)
+        self.assertEqual(first[0], 0, first[2])
+        self.assertEqual(first, second, 'two runs, the same bytes')
+        self.assertEqual((len(first[1].encode()), sha(first[1].encode())), (LOCAL['size'], LOCAL['template']))
+        self.assertIn(note.read_text().splitlines()[0], first[1], 'the note is part of the record')
+        number = lambda pattern: int(re.search(pattern, header_text()).group(1), 0)       # noqa: E731
+        wait, box = number(r'SW_GIC_WAIT_S (\d+)u'), number(r'SP11_STICK_GIC_TIME_BOX_S (\d+)u')
+        flat_note = ' '.join(note.read_text().split())
+        self.assertIn(f'(about {wait + 2 * box} s on a passing run', flat_note)       # window 1, the second wait, window 2: the first wait is before the first store
+        self.assertIn(f'is bounded at about {2 * box} s', flat_note)
+        self.assertNotIn('about 20 s', flat_note, 'the 20 s is the whole stage, and the note gives it to nothing')
+        other = self.generate(BT.write(SCRATCH / 'mutants' / 'note-edited.txt', note.read_bytes().replace(b'THIRD ATTEMPT', b'3RD ATTEMPT', 1)))
+        self.assertEqual(other[0], 0, other[2])
+        self.assertNotEqual(sha(other[1].encode()), LOCAL['template'], 'another note is another record: the pin can fail')
 
 
 # ---- hygiene ---------------------------------------------------------------------------------------------------------------------------

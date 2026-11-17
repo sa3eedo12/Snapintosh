@@ -56,11 +56,12 @@ section 12). A QEMU run proves the sequence and the assembly, never the unit's E
     export Q1N1_SP11_TREE=<q1n1 checkout>      (the fork: runner headers, sha256.c, the payload recipe; absent: REFUSED)
     python3 tools/sp11_stick_wrapper_build.py --out build/sp11-gic --gic       SNAPMON-GIC.BIN, SNAPREP-GIC.BIN, build-report.json
     python3 tools/sp11_stick_bundle_build.py authorisation-template real ... --monitor SNAPMON-GIC.BIN --reporter SNAPREP-GIC.BIN \
-        --stores ram,el2_sysreg,gic --gic-stop                                  the record the operator approves, on stdout
+        --stores ram,el2_sysreg,gic --gic-stop --gic-quarantine                 the record the operator approves, on stdout (passes 5 and 6)
     python3 tools/test-sp11-stick-gic.py | -gic-quarantine.py | -gic-putback.py | -gic-hppir.py | -gic-doc.py | -gic-record.py | -gic-build.py | -gic-qemu.py     the tests of section 9
+    python3 tools/test-sp11-stick-bundle-record-gic.py | -bundle-record-gic-model.py     the tests of the record text of passes 5 and 6 (section 9)
 
 The bundle builder writes the two payloads into the bundle as SNAPMON.BIN and SNAPREP.BIN (the frozen file roles); the record names their
-sizes and digests. `--gic-stop` needs `gic` in `--stores` and changes only the three class texts of section 3 of the record.
+sizes and digests. `--gic-stop` needs `gic` in `--stores` and changes only section 3 of the record: one line that says what the record is, and the three class texts. `--gic-quarantine`, which needs `--gic-stop`, chooses the text for passes 5 and 6 (`tools/sp11_stick_bundle_record_gic.py`) and changes more: section 3 (its head, the class texts register by register, and the facts they rest on), section 4 (the wrapper times itself and uses no PARAMS watchdog) and the silence rule of section 5 (15 s after a NEXT line or ENTER, and NOT_RESTORED stops the series). The builder refuses a wrapper that carries the outcome names of pass 5 (`Q_NOT_HELD`, `FOREIGN_PENDING`) under a `gic` record without the option (`GIC_QUARANTINE_REQUIRED`) and the option with any other wrapper (`GIC_QUARANTINE_ABSENT`); the records of the dry run and of the first two attempts are byte for byte as they were (`tools/test-sp11-stick-monitor-auth.py`).
 
 ## 4. The stage, step by step
 
@@ -256,6 +257,8 @@ the end of interrupt, the re-arm, the final acknowledge, IMO, the EL1 restore, t
 | `tools/test-sp11-stick-gic-hppir.py` | pass 6, over the same model in BOTH variants of what ICC_HPPIR1_EL1 does with PMR (it honours it; or `HPPIR_IGNORES_PMR`): an enabled, pending SPI at, below and above PMR (the stage's decision in each, so that the over-acceptance and the over-refusal are on record; the rule is not changed), the special INTIDs 1020 to 1022 and the LPI range (8192, INTIDs whose low ten bits are 26 and 1023, the largest) refused FOREIGN_PENDING with their INTID and nothing unmasked, and an interrupt that asserts after the one read (`SPI_LATE`: window 1 takes it, so the check is one read at one instant). Three mutants: the specials accepted, the LPIs accepted, the INTID cut to ten bits |
 | `tools/test-sp11-stick-gic-doc.py` | pass 6, text only (no model): what this note and the comments of the sources say about the put-back rule and its limit, the limits of the check of ICC_HPPIR1_EL1, the extended SPIs and the LPIs, and the numbers pass 6 corrected; each needed statement is shown to be needed by a copy without it, each corrected statement is refused when put back, and the longest NEXT WINDOW line (99 characters, 103 for an eight-digit INTID) and the 29 line ids of the reporter's page are computed from the sources |
 | `tools/test-sp11-stick-gic-record.py` | the record round trip, the check (version 3: each rule of the survey isolated), damaged and extreme records through the reporter, line widths, the authorisation record (`--gic-stop`) |
+| `tools/test-sp11-stick-bundle-record-gic.py` | the authorisation record of passes 5 and 6 (`--gic-stop --gic-quarantine`, `tools/sp11_stick_bundle_record_gic.py`) and what couples it to the wrapper: the two named refusals with the real binaries of every attempt; the text (its numbers against the headers, its labels, its width, a pin of its digest; section 4 against the wrapper's sources; the silence rule of section 5 against the 15 s of section 11 and the silence of an orderly run, with a rule of 10 s and a rule without NOT_RESTORED as faulty cases); the census of the final wrapper's ELF against the text in both directions; the digests of the final pair; a pin of the template that the local facts and the local run note give (a LOCAL TEST record, not the authorised one) |
+| `tools/test-sp11-stick-bundle-record-gic-model.py` | the same text against the host model of the stage, register by register: every register the model writes or reads (the memory-mapped ones and the RWP polls, which the census cannot see) is named in the text and every register the text claims to write is written in some scenario; the exception of pass 6 is what the model does; the silence after each NEXT line in the model (8 s, about 2 s, about 10 s, at most 12 s) is below the rule's 15 s; each rule has a faulty case. The model's `GICACC` lines (reads and writes by register) were added for it |
 | `tools/test-sp11-stick-gic-build.py` | section 8, the core object alone, the gate, hygiene, this note |
 | `tools/test-sp11-stick-gic-qemu.py` | the real runner and the real binaries at EL2 under QEMU/EDK2, both windows, the survey lines and the check of ICC_HPPIR1_EL1 |
 
@@ -317,7 +320,7 @@ window 1's page is already filmed).
 
 One boot, one autorun step, one hardware client; AC power or at least 50% battery; thermal guard as the other runs; the operator present
 and filming. Manifest, exactly: `\SP11\SNAPMON.BIN` (from SNAPMON-GIC.BIN), `\SP11\SNAPREP.BIN` (from SNAPREP-GIC.BIN), `GUEST.DAT`,
-`PIN.DAT`, `REPORT.DAT`, built with `--stores ram,el2_sysreg,gic --gic-stop`; the record's SHA-256 is the authorisation, named by the
+`PIN.DAT`, `REPORT.DAT`, built with `--stores ram,el2_sysreg,gic --gic-stop --gic-quarantine` (passes 5 and 6); the record's SHA-256 is the authorisation, named by the
 operator. Read the page: up to `NEXT GIC STORES AFTER 8 S` it is read-only evidence; the stores follow 8 s later, the EL1 writes 8 s after
 `NEXT GIC EL1 EXCURSION AFTER 8 S`. Total window time: about 20 s from the first NEXT line to the last (section 4). Stop rules: a refusal
 ends the boot; freeze on a NEXT line or no page change for 15 s: note the
@@ -377,7 +380,7 @@ UNIMPLEMENTED: the monitor entry, the real M1 stop, secondaries, waking a redist
 PPI 26, whether the quarantine holds, the foreign sources the survey will find, the I-set EL1 entry (ICC and CNTHP access at EL2 held in boot 13, OBSERVED,
 one unit). Risks: the stub's fetch depends on the identity map and on
 cache maintenance that QEMU cannot show; a stuck-high line, or a foreign timer whose deadline passed during the run and is put back, can never clear
-its pending bit, so it ends NOT_RESTORED (loud; the series stops; model only); the quarantine switches SGI 0 and four PPIs of this CPU off for about 20 s
+its pending bit, so it ends NOT_RESTORED (loud; the series stops; model only); the quarantine switches SGI 0 and four PPIs of this CPU off from its first store to the put-back's last write, for about 12 s on a passing run (window 1, the second 8 s wait and window 2; the first 8 s wait comes before the first store, and the whole stage takes about 20 s), about 4 s when window 1 sees no interrupt, at most about 14 s when window 2 sees none and well under a second when a check after the stores refuses
 (nothing else runs on this CPU then: INFERRED, the wrapper runs after the runner has left the firmware; no other CPU's redistributor is written), and the
 pending state of those interrupts is never written, so a source that asserts through the run is pending, and enabled again, when the run ends (not when both
 group 1 gates stay open: the quarantined interrupts then stay disabled and the run is NOT_RESTORED, section 4).
@@ -411,6 +414,7 @@ Change requests (the frozen files are untouched): (1) GIC_NOT_READY (82) says "d
 section 5. (3) The text of the authorisation record that `--gic-stop` prints (`tools/sp11_stick_bundle_record_gic.py`, another owner's) says that the ISENABLER0 write is the
 last register write of the stage and that the quarantined interrupts are enabled again when the run ends: both are incomplete since pass 6, because the write is withheld
 when the put-backs of both ICC_IGRPEN1_EL1 and GICD_CTLR failed (ISENABLER0 is then only read and named in FAILED, and the run ends NOT_RESTORED). The pass 6 reply has the
-replacement sentence.
+replacement sentence. Done: the text of `--gic-stop --gic-quarantine` has it (`tools/test-sp11-stick-bundle-record-gic.py` pins the sentence and `tools/test-sp11-stick-bundle-record-gic-model.py`
+holds it to the model); the text of `--gic-stop` alone is that of the first two attempts and is not changed.
 
 Hardware status: NOT RUN.

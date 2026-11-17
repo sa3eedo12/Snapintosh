@@ -28,7 +28,8 @@
  *   into the run) | MAXITER n | CNTHCTL v | HCR_INIT v | VBAR1 v | SCTLR1 v | HCR_IGNORE_IMO |
  *   EL1_LOST | EL1_VECTOR n | EL1_SYNC esr | EL1_INTID v | SPSR_KEPT v | MUTATE offset hexbytes (between two RUNs: bytes of the record)
  * At END the harness prints GICREC (the record in REPORT.DAT), GICLOG (every write, every system register read and every window event, with
- * the number of page lines and the counter at that point), GICSTATE and GICVIOL. Hardware: NOT RUN; nothing here touches a device. */
+ * the number of page lines and the counter at that point), GICACC (for each register the stage read or wrote, by name: its reads, the memory-mapped ones
+ * GICLOG leaves out included, and its writes), GICSTATE and GICVIOL. Hardware: NOT RUN; nothing here touches a device. */
 #define _DARWIN_C_SOURCE
 #include <ctype.h>
 #include <setjmp.h>
@@ -116,6 +117,7 @@ static struct {
     /* the logs */
     struct gic_event ev[GIC_MAX_EVENTS];
     unsigned nev, nviol;
+    unsigned acc[2][GR_COUNT + 1];      /* GICACC: reads (0) and writes (1) of each modelled register; the last slot counts the writes to anything unmodelled */
     char viol[GIC_MAX_VIOL][96];
     unsigned line_seen;
     uint64_t line_tick[256];
@@ -178,6 +180,7 @@ static void gic_reset_live(void)
 
 static void log_ev(int kind, int reg, uint64_t value)
 {
+    if ((kind == EV_R || kind == EV_W) && reg >= 0 && reg <= GR_COUNT) G.acc[kind == EV_W][reg]++;
     if (G.nev >= GIC_MAX_EVENTS) return;
     G.ev[G.nev++] = (struct gic_event){kind, reg, value, W.tick, W.nlines};
 }
@@ -209,6 +212,7 @@ uint64_t sp11hw_read_currentel(void)
 uint64_t sp11hw_read_hcr_el2(void)
 {
     uint64_t v = base_read_hcr_el2();
+    G.acc[0][GR_HCR]++;                 /* GICACC; the read is not in GICLOG */
     if (!G.hcr_init) {
         G.hcr = G.hcr0 ? G.hcr0 : v;
         G.hcr_first = G.hcr;
@@ -358,6 +362,12 @@ static void enable_write(int set, uint32_t value)
     G.rwp_left_gicr = G.rwp_gicr;
 }
 
+static uint64_t gic_read_counted(int reg, uint64_t value)      /* GICACC: a read GICLOG leaves out (log_ev counts the others) */
+{
+    G.acc[0][reg]++;
+    return value;
+}
+
 static uint64_t mmio_read(uint64_t pa, unsigned size)
 {
     unsigned frame;
@@ -368,8 +378,8 @@ static uint64_t mmio_read(uint64_t pa, unsigned size)
             log_ev(EV_R, GR_GICD_CTLR, 0);
             return G.gicd_ctlr | rwp_read(&G.rwp_left_gicd, SG_GICD_CTLR_RWP);
         }
-        if (off == SG_GICD_TYPER) return G.gicd_typer;
-        if (off == SG_GICD_IIDR) return G.gicd_iidr;
+        if (off == SG_GICD_TYPER) return gic_read_counted(GR_GICD_TYPER, G.gicd_typer);
+        if (off == SG_GICD_IIDR) return gic_read_counted(GR_GICD_IIDR, G.gicd_iidr);
         if ((off >= SG_GICD_ISENABLER && off < SG_GICD_ISENABLER + 0x80) || (off >= SG_GICD_ISPENDR && off < SG_GICD_ISPENDR + 0x80)) {
             int pend = off >= SG_GICD_ISPENDR;
             unsigned n = (unsigned)((off - (pend ? SG_GICD_ISPENDR : SG_GICD_ISENABLER)) / 4);
@@ -387,7 +397,7 @@ static uint64_t mmio_read(uint64_t pa, unsigned size)
         violation("MMIO read outside the GIC frames", pa);
         return 0;
     }
-    if (off == SG_GICR_TYPER && size == 8) return (G.aff[frame] << 32) | (frame + 1 == G.nframes ? SG_GICR_TYPER_LAST : 0) | G.rtyper_lo;
+    if (off == SG_GICR_TYPER && size == 8) return gic_read_counted(GR_GICR_TYPER, (G.aff[frame] << 32) | (frame + 1 == G.nframes ? SG_GICR_TYPER_LAST : 0) | G.rtyper_lo);
     if (!mine(frame)) {
         violation("read of a redistributor that is not this CPU's", pa);
         return 0;
@@ -395,17 +405,17 @@ static uint64_t mmio_read(uint64_t pa, unsigned size)
     if (off == SG_GICR_CTLR) {
         uint32_t v = rwp_read(&G.rwp_left_gicr, SG_GICR_CTLR_RWP);
         if (!v) enable_flush();         /* RWP is clear: a write of an enable register has gone through */
-        return v;
+        return gic_read_counted(GR_GICR_CTLR, v);
     }
-    if (off == SG_GICR_WAKER) return G.waker;
+    if (off == SG_GICR_WAKER) return gic_read_counted(GR_GICR_WAKER, G.waker);
     if (off >= SG_SGI_FRAME) {
         off -= SG_SGI_FRAME;
-        if (off == SG_IGROUPR0) return G.igroupr0;
-        if (off == SG_ISENABLER0) return G.isenabler0;
-        if (off == SG_ISPENDR0) return ((timer_asserted() && !G.hide_pend) ? prio_bit() : 0) | G.ispendr0_0;
-        if (off == SG_ISACTIVER0) return (G.active ? prio_bit() : 0) | (G.f_active && G.f_active <= 32 ? 1u << (G.f_active - 1) : 0) | G.isactiver0_0;
-        if (off == SG_ICFGR1) return G.icfgr1;
-        if (off >= SG_IPRIORITYR && off < SG_IPRIORITYR + 32) return off - SG_IPRIORITYR == SNAP_TIMER_INTID ? G.prio : G.fprio[off - SG_IPRIORITYR];
+        if (off == SG_IGROUPR0) return gic_read_counted(GR_IGROUPR0, G.igroupr0);
+        if (off == SG_ISENABLER0) return gic_read_counted(GR_ISENABLER0, G.isenabler0);
+        if (off == SG_ISPENDR0) return gic_read_counted(GR_ISPENDR0, ((timer_asserted() && !G.hide_pend) ? prio_bit() : 0) | G.ispendr0_0);
+        if (off == SG_ISACTIVER0) return gic_read_counted(GR_ISACTIVER0, (G.active ? prio_bit() : 0) | (G.f_active && G.f_active <= 32 ? 1u << (G.f_active - 1) : 0) | G.isactiver0_0);
+        if (off == SG_ICFGR1) return gic_read_counted(GR_ICFGR1, G.icfgr1);
+        if (off >= SG_IPRIORITYR && off < SG_IPRIORITYR + 32) return gic_read_counted(GR_IPRIORITYR, off - SG_IPRIORITYR == SNAP_TIMER_INTID ? G.prio : G.fprio[off - SG_IPRIORITYR]);
     }
     violation("read of an unmodelled redistributor register", pa);
     return 0;
@@ -846,6 +856,8 @@ static void gic_dump(void)
         printf("GICLOG %u %c %s %llx %u %llu\n", i, e->kind, name, (unsigned long long)e->value, e->lines, (unsigned long long)e->tick);
     }
     for (i = 0; i < 256 && i < G.line_seen; i++) printf("GICLINE %u %llu\n", i, (unsigned long long)G.line_tick[i]);
+    for (i = 0; i <= GR_COUNT; i++)
+        if (G.acc[0][i] || G.acc[1][i]) printf("GICACC %s %u %u\n", i < GR_COUNT ? gr_names[i] : "UNMODELLED", G.acc[0][i], G.acc[1][i]);
     printf("GICSTATE gicd_ctlr=%x/%x waker=%x/%x igroupr0=%x/%x isenabler0=%x/%x icfgr1=%x/%x prio=%x/%x pmr=%llx/%llx bpr1=%llx/%llx "
            "igrpen1=%llx/%llx rpr=%llx/%llx ctl=%llx/%llx cval=%llx/%llx vbar=%llx/%llx masked=%d/%d active=%d fact=%u eoi=%d hang=%d deliveries=%d phase=%d "
            "hcr=%llx/%llx vbar1=%llx/%llx sctlr1=%llx/%llx acks=%u excursions=%u resume=%llx\n",

@@ -404,6 +404,7 @@ class Gic:
     state: dict = dataclasses.field(default_factory=dict)     # name -> (initial, final) or value
     viol: list = dataclasses.field(default_factory=list)
     nviol: int = 0
+    acc: dict = dataclasses.field(default_factory=dict)       # register name -> (reads, writes), from GICACC: the memory-mapped reads GICLOG leaves out included
 
     def r(self):
         return decode(self.rec)
@@ -430,6 +431,9 @@ def parse_gic(text):
         elif word == 'GICLINE':
             index, tick = rest.split()
             cur.line_ticks[int(index)] = int(tick)
+        elif word == 'GICACC':
+            name, reads, writes = rest.split()
+            cur.acc[name] = (int(reads), int(writes))
         elif word == 'GICSTATE':
             for item in rest.split():
                 key, _, value = item.partition('=')

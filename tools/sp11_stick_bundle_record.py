@@ -321,7 +321,7 @@ def record_text(r):
     index), note (lines or None), gic_stop (the record of the GIC and stop dry run), m1 (None, else the facts of the monitor entry run that
     tools/sp11_stick_bundle_m1.py read_report returns: section 1b, the touches of M1_TOUCHES, section 4 with the time budget and two stop rules)
     and real (None for a synthetic build, else real_lines' argument). gic_quarantine, with gic_stop, chooses the pass 5 text of
-    tools/sp11_stick_bundle_record_gic.py in place of GIC_STOP_TOUCHES."""
+    tools/sp11_stick_bundle_record_gic.py in place of GIC_STOP_TOUCHES, and its section 4 and silence rule in place of the generic lines."""
     p, g, m1 = r['place'], r['guest'], r.get('m1')
     assert not (m1 and r.get('gic_stop')), 'a record is of one kind'
     assert not r.get('gic_quarantine') or r.get('gic_stop'), 'the pass 5 text is a variant of the GIC and stop record'
@@ -360,11 +360,11 @@ def record_text(r):
     lines += m1t.GIC_FACT_LINES if m1 else ()
     lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.',
               *(m1t.SMC_LINES if m1 else ()), *(('', *m1t.DEVICE_LINES) if m1 else ()), '',
-              *(m1_time_lines(r['time_box_s'], p) if m1 else
+              *(m1_time_lines(r['time_box_s'], p) if m1 else gq.time_lines(r['time_box_s']) if r.get('gic_quarantine') else
                 [f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.']), '',
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
               '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',
-              *(M1_SILENCE_RULE if m1 else (SILENCE_RULE,)),
+              *(M1_SILENCE_RULE if m1 else gq.silence_lines() if r.get('gic_quarantine') else (SILENCE_RULE,)),
               '   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',
               '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',
               '     operator\'s power cycle, which writes nothing.',
