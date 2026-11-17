@@ -58,7 +58,7 @@ REFUTED = (
     (r'first code (?:ever )?(?:run )?below EL2|no code (?:has |had |ever )*run below EL2|no code below EL2 (?:has|had) (?:ever )?run',
      'X2 T02 ran an EL1 stub first: el1trap is the first runner payload below EL2'),
     (r'ECVEn`?\s+(?:is|was)\s+set|confirm\w*[^.|;]{0,25}ECVEn', 'whether the traps need ECVEn is UNKNOWN'),
-    (r'E2H (?:= )?1\b', 'D6: the record has no regime field; an E2H 1 origin is not a fact'),
+    (r'(?<!INFERRED )E2H (?:= )?1\b', 'D6: an E2H 1 origin of the record is INFERRED (run 4 printed no HCR_EL2), never a fact'),
     (r'stop by polling|or a polling stop|polling stop in the wrapper|polling fallback',
      'D2: a polling stop cannot exist once the monitor owns the CPU'),
     (r'`real`\s+(?:is\s+)?(?:written and\s+)?(?:NOT RUN|UNIMPLEMENTED)|`real`[^|]{0,200}is written and NOT RUN|U9 stands',
@@ -165,7 +165,7 @@ D2 Stop: DECIDED 2026-11-16 with D5
 D5 The M1 time box: DECIDED 2026-11-16 (with D2): 5 s
 N2 Descriptor policy (new): DECIDED 2026-11-16 ("Approve")
 five devices (debug UART, keyboard, touchpad, touchscreen, NVMe) absent
-is a DEFAULT, not an operator decision
+N1 Boot seed: DECIDED 2026-11-17 ("Accept all four (Recommended)")
 D11 proper stays OPEN
 U9 kernelcache (answered, WI 3)
 WI 4b, the monitor entry: a plan, UNIMPLEMENTED, hardware NOT RUN.
@@ -173,7 +173,12 @@ WI 4b, the monitor entry: a plan, UNIMPLEMENTED, hardware NOT RUN.
 Gaps G1 to G9
 8 -> 4b -> 6 -> 11
 its MMFR4 is 0 as read in X2 run 4 T01, but the gate has not run with it: a pass is INFERRED
-D6 NV2 record: which record, and whether its regime matters: UNKNOWN
+D6 NV2 record: DECIDED 2026-11-17 ("Accept all four (Recommended)")
+so INFERRED E2H = 1 for the record
+NV2 at E2H = 0 is OBSERVED in X2 runs 6 and 7
+Whether a record from an INFERRED E2H = 1 image describes the E2H = 0 regime is UNKNOWN
+D8 Thermal: DECIDED 2026-11-17 ("Accept all four (Recommended)")
+as an SP11-only opt-in: DECIDED 2026-11-17 ("Accept all four (Recommended)")
 APPROVED for the GIC dry run only, by SHA-256, three times
 for the monitor entry OPEN, asked by SHA-256 with the M1 record
 nor does the GIC dry run, WI 8, which ran three times, boots 12 to 14
@@ -797,7 +802,7 @@ DONE (q1n1 b875620; boot 11 => BUILT, NOT RUN (q1n1 b875620; boot 11
 O1, the A16 recipe => O1 is decided, the A16 recipe
 the first runner payload to run code => the first code
 neither confirmed nor refuted by boot 11 => wrong: `SCR_EL3.ECVEn` is set
-D6 NV2 record: which record, and whether its regime matters: UNKNOWN. => D6 NV2 record: the local one is from the first X2 image (E2H = 1).
+so INFERRED E2H = 1 for the record => so E2H = 1 for the record
 the GIC timer interrupt; a polling stop cannot exist once the monitor owns the CPU. => the GIC timer interrupt, or stop by polling.
 `real` RAN end to end on the real kernelcache, host only, not a hardware result => `real` NOT RUN
 D9 Panel and kernel: DECIDED => D9 Panel and kernel: still undecided
@@ -862,7 +867,11 @@ U3 answered by boot 14 => U3 open
 PPI 26's own delivery was OBSERVED in boot 14 => PPI 26's own delivery is UNKNOWN
 D2 Stop: DECIDED 2026-11-16 with D5 => D2 Stop: OPEN with D5
 N2 Descriptor policy (new): DECIDED => N2 Descriptor policy (new): proposed
-is a DEFAULT, not an operator decision => is the operator's decision
+N1 Boot seed: DECIDED 2026-11-17 => N1 Boot seed: proposed
+D6 NV2 record: DECIDED 2026-11-17 => D6 NV2 record: OPEN
+NV2 at E2H = 0 is OBSERVED in X2 runs 6 and 7 => NV2 at E2H = 0 is OBSERVED in X2 run 4
+D8 Thermal: DECIDED 2026-11-17 => D8 Thermal: OPEN
+as an SP11-only opt-in: DECIDED 2026-11-17 => as an SP11-only opt-in: OPEN
 D11 proper stays OPEN => D11 proper is settled
 U9 kernelcache (answered, WI 3) => U9 kernelcache
 a plan, UNIMPLEMENTED, hardware NOT RUN. => built, hardware PASS.

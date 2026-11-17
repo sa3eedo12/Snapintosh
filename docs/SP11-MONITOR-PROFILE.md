@@ -71,8 +71,8 @@ OBSERVED, ID registers that do not advertise NV2). What it cannot check, it prin
 `HCR_EL2.E2H` was 0 or 1 when it was measured, and the monitor runs with E2H = 0. The launch gate also compares MIDR, REVIDR and both ID
 registers with the CPU it runs on, at launch, which no host tool can know.
 
-The local record under `build/nv2-record` came from the first X2 image (E2H = 1). The tests use it, if present, only to show that the builder
-prints a record's own identity; it is not a decision, and no value of it is written into a tracked file.
+The local record under `build/nv2-record` came from the first X2 image (INFERRED E2H = 1: run 4's page printed no `HCR_EL2`; see D6 in [SP11-MONITOR-PORT.md](SP11-MONITOR-PORT.md) section 15). The tests use it, if present, only to show that the builder
+prints a record's own identity, and no value of it is written into a tracked file. Which record the M1 build embeds is decision D6, decided 2026-11-17: this one.
 
 ## 5. Building
 
@@ -156,6 +156,6 @@ A test that lacks clang, `llvm-objdump` or a q1n1 checkout prints SKIP with the 
 - `CNTHCTL_EL2` bits 13 and 14 on the unit: OBSERVED once (T-HW1, T-HW2, 2026-11-16, E67): they stick and an EL1 stub's counter and virtual-timer reads trap
   with them set. Still UNKNOWN: the traps in the monitor's own guest regime (`HCR_EL2` with `VM` and `TVM`), on a secondary CPU and with the conversion; `SCR_EL3.ECVEn`
   (never read; whether the two bits depend on it is UNKNOWN too).
-- Which NV2 record to embed, and whether any record measured at E2H = 1 describes the E2H = 0 regime the monitor runs in: UNKNOWN (D6).
+- Which NV2 record to embed: DECIDED 2026-11-17 (D6: the first-image record, INFERRED E2H = 1). Whether a record measured at E2H = 1 describes the E2H = 0 regime the monitor runs in: UNKNOWN.
 - Whether the NV2 gate passes on the unit's boot CPU, which needs a record that equals its live MIDR, REVIDR and ID registers: UNKNOWN.
 - Whether M1 starts: the audit's expected first failures still stand. Hardware: NOT RUN.

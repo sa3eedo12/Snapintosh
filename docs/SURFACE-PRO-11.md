@@ -1119,8 +1119,7 @@ replaced by q1n1's page, were not photographed, so nothing is claimed about them
 
 What it does not show: repeatability (one boot, one unit); that the page stays up (one photograph, at 4 s; attempt 4's
 heartbeat ran for about 40 minutes, in the VHE state); the other CPUs (PSCI `CPU_ON` arrival, M4); FEAT_NV2 in this regime
-(M8: X2's functional test kept the firmware's `E2H`, which was 1, in the stub's `HCR_EL2`, so NV2 has never been exercised on
-this unit with `E2H` clear); the functional probe M5 (no `CNTKCTL_EL1` redirection); timers and `DC ZVA` here.
+(M8: X2's functional test kept the firmware's `E2H`, INFERRED to have been 1 because its page printed no `HCR_EL2`, in the stub's `HCR_EL2`, so NV2 had not been exercised on this unit with `E2H` clear; the second X2 image later did, on 2026-11-14); the functional probe M5 (no `CNTKCTL_EL1` redirection); timers and `DC ZVA` here.
 
 **The de-VHE gate and its progress markers (EXPERIMENTAL; runs A and B OBSERVED once each, run C not needed).** The slbounce fork's
 `SLBOUNCE_SP11_DEVHE` build converts the saved EL1 images to the non-VHE layouts and enters EL2 with `E2H` clear. It is
