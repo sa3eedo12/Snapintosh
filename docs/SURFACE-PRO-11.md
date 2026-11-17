@@ -11,7 +11,7 @@ a third X2 image (on 2026-11-15 T06 passed: the NVMe's place and state at EL2), 
 payload that started and stopped the eleven secondary cores through PSCI (three boots; the board restarted by itself
 after two of them, operator reports, cause and times UNKNOWN; a read-only payload through the same runner stayed up to
 `UPTIME 224 S` and `268 S` in two later boots; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 14), and two read-only payloads that
-read the memory attributes and the ID registers at EL2 and hashed a 144 MiB file (2026-11-16, two boots; E65), the stick wrapper's dry run, which passed (2026-11-16, one boot; E66), and two payloads that set the `CNTHCTL_EL2` counter and timer traps and saw an EL1 stub's counter reads trap to EL2 (2026-11-16, one boot; E67), and three boots of the wrapper's GIC and stop variant, the first refused before any store, the second took one interrupt at EL2, INTID 27 and not PPI 26 (2026-11-16; E68, E69), and the third took PPI 26 as an IRQ at EL2 and from EL1 and ended `IRQ_OK` with every register put back (2026-11-17; E70), and two boots of the xHCI stage S1 No-Op DMA test, authorisation point A1, the first xHC register stores at EL2 (2026-11-17): in the filmed boot the screen went off at the end of the wait before the first RUN store and the unit stayed dark (cause UNKNOWN, no restart seen) and no No-Op completed in it; boot 15 is from memory only ([SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 16).**
+read the memory attributes and the ID registers at EL2 and hashed a 144 MiB file (2026-11-16, two boots; E65), the stick wrapper's dry run, which passed (2026-11-16, one boot; E66), and two payloads that set the `CNTHCTL_EL2` counter and timer traps and saw an EL1 stub's counter reads trap to EL2 (2026-11-16, one boot; E67), and three boots of the wrapper's GIC and stop variant, the first refused before any store, the second took one interrupt at EL2, INTID 27 and not PPI 26 (2026-11-16; E68, E69), and the third took PPI 26 as an IRQ at EL2 and from EL1 and ended `IRQ_OK` with every register put back (2026-11-17; E70), and four boots of the xHCI stage S1 No-Op DMA test, authorisation point A1, the first xHC register stores at EL2 (2026-11-17, boots 15, 16, 17 and 19): in each filmed boot (16, 17 and 19) the screen went off at the end of the wait before the first RUN store and stayed off to the end of the video (cause UNKNOWN, no restart seen) and no No-Op completed; boot 15 is from memory only; a read-only snapshot of both USB controllers (boot 18A) ran to its end with no black-out ([SP11-STICK-LOG.md](SP11-STICK-LOG.md) sections 16 and 17).**
 Everything
 else in this
 document has not run on a Surface Pro. It records what the rest of a port
@@ -1210,9 +1210,9 @@ plugged in directly, both USB controllers read as unstarted at EL2: no firmware
 xHCI state is left to adopt and the link is down. A stick writer would have to
 bring the controller and the link up from reset, which needs the PHY and
 repeater work above (UNIMPLEMENTED) and the first xHC register write (A1, NOT
-granted when this was written; granted for the No-Op test that ran in boots 15 and 16 and did not complete in the filmed one, below).
+granted when this was written; granted for the No-Op test that ran in boots 15, 16, 17 and 19 and did not complete in any filmed boot, below).
 
-**Fewer boots: autorun, the declared X2 image, stage S0, the second and third X2 images and the stick payload runner (each OBSERVED on the unit, boots 1 to 5 of 2026-11-14, boots 6 and 7 and the three restart-probe steps of 2026-11-15 and the two restart-control, two memhash, one dry-run, one timers and two GIC dry-run steps of 2026-11-16 and one more GIC dry-run step of 2026-11-17 and the two A1 steps of 2026-11-17 (boot 15 from memory only), one unit, one boot each; the rest host side only, EXPERIMENTAL, hardware NOT RUN).**
+**Fewer boots: autorun, the declared X2 image, stage S0, the second and third X2 images and the stick payload runner (each OBSERVED on the unit, boots 1 to 5 of 2026-11-14, boots 6 and 7 and the three restart-probe steps of 2026-11-15 and the two restart-control, two memhash, one dry-run, one timers and two GIC dry-run steps of 2026-11-16 and one more GIC dry-run step of 2026-11-17 and the four A1 steps and the read-only snapshot step (boots 15, 16, 17, 18A and 19) of 2026-11-17 (boot 15 from memory only), one unit, one boot each; the rest host side only, EXPERIMENTAL, hardware NOT RUN).**
 Typing `fsN:`, `load` and the image names by hand cost boots, so
 `tools/stage-sp11-boot-media.py autorun` can stage a `startup.nsh` that runs one allow-listed step per boot
 ([RUNNING.md](RUNNING.md)). **On the unit (2026-11-14, one boot, photographs): the Shell ran the script with nothing typed**
@@ -1227,17 +1227,17 @@ Boot 2 adds weak support (INFERRED): q1n1 itself stayed up for at least 20 s at 
 12 s after the earlier T03 freezes is not an unconditional timeout.**
 [SP11-STICK-LOG.md](SP11-STICK-LOG.md) designs an EL2 writer that puts results on the stick
 (B3, the first step of B2) with stop criteria and two authorizations that nobody had granted when it was written: A1, the first write to an
-xHCI register at EL2, and A2, the first sector written to the stick. The operator has since approved A1 for one
-supervised test, the xHCI stage S1 No-Op DMA test ([SP11-XHCI-S1.md](SP11-XHCI-S1.md)), which ran twice on 2026-11-17 (boots 15 and 16)
-and did not complete a No-Op in the filmed boot: the screen went off at the end of the wait before the first RUN store and the unit stayed dark (cause UNKNOWN; the A1 paragraph
-below and [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 16); A2 stays not granted.
+xHCI register at EL2, and A2, the first sector written to the stick. The operator has since approved A1 for a
+supervised test, the xHCI stage S1 No-Op DMA test ([SP11-XHCI-S1.md](SP11-XHCI-S1.md)), which ran four times on 2026-11-17 (boots 15 and 16 under the record,
+boots 17 and 19 each under a later approval of one boot) and did not complete a No-Op in any filmed boot: the screen went off at the end of the wait before the first RUN store and stayed off to the end of the video (cause UNKNOWN; the A1 paragraphs
+below and [SP11-STICK-LOG.md](SP11-STICK-LOG.md) sections 16 and 17); A2 stays not granted.
 Its stage S0 is built in the q1n1 fork as an opt-in,
 read-only survey (`Q1N1_SP11_STK_SURVEY`, branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`; its own image
 `q1n1-stk.efi`, run with `--el2`). Before ExitBootServices it prints the stick's device path and the firmware's USB facts;
 after the bounce it reads, with loads only through the recoverable-fault guard, the clock controller, the two Denali
 controllers (only when powered and clocked) and the SMMU stream mappings. **S0 ran on the unit (2026-11-14, one boot,
 photographs, OBSERVED): the stick is on `usb_1_ss0` behind an active hub (a hub function on each root port, the stick on hub
-port 3, route string 3); both controllers are powered, clocked and readable at EL2 with no fault and no hang; the xHC is halted
+port 3, route string 3; which controller the stick uses follows the port it is in, INFERRED: [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 17); both controllers are powered, clocked and readable at EL2 with no fault and no hang; the xHC is halted
 with its host controller error flag (HCE) set, which appeared between ExitBootServices and the survey and whose cause is
 UNKNOWN, so a reset and a full enumeration are needed and adopting the firmware's slot state is unlikely to work (INFERRED);
 the firmware's rings and slot contexts are intact in RAM; both USB streams translate through SMMU context bank 3, whose
@@ -1373,9 +1373,20 @@ about 30 minutes later (operator report); boot 15 also ended with the screen off
 display subsystem, a dead display with a live SoC, a SoC reset that failed to boot, and an action of the embedded controller or the PMIC are open hypotheses, none tested), and so
 is whether the SoC was alive or a watchdog armed. The Mac logger saw no USB or network change. By the runbook (O10, an SC1 candidate) the sequence stops: no `XHCI0.BIN`, no retry,
 no further xHC write until it is understood. The No-Op did not complete in the filmed boot, so whether the xHC's DMA reaches the runner's RAM (SC2) is still UNKNOWN and no USB DMA or live link has been
-demonstrated. A2 was not exercised.
+demonstrated. A2 was not exercised. (Boots 17 and 19 later ran, each by the operator's waiver of that stop for one boot: next paragraph.)
 
-**Stick payload runner (EXPERIMENTAL; ran on the unit in boots 4 and 5 of 2026-11-14, in boot 7 and steps 2 and 3 of the restart probe of 2026-11-15, and on 2026-11-16 in the two steps each of the restart control and the memhash plan and in the one step each of the dry run, the timers plan, `GICDRY-A` and `GICDRY-B`, and on 2026-11-17 in the one step of `GICDRY-C` and the one step each of the two boots of the A1 plan (boot 15 from memory only), OBSERVED, one unit, one boot each; the `state` payload NOT RUN).** The fork's third image, `Q1N1-PAYLOAD.EFI` (gate
+**Boots 17, 18A and 19 (2026-11-17; each OBSERVED on video, one unit, one boot each; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 17).** Boot 17 ran `XHCI0.BIN` on `usb_1_ss0` (plan
+`a1-xhci-s1-ss0`; the first arena the firmware's own memory) and boot 19 `XHCI1.BIN` again on `usb_1_ss1`, with the stick in the top port and no Mac cable. Both pages ended at `NEXT RUN AFTER 8 S` with the controller
+halted at EL2 (`CMD`, `CRCR`, `DCBAAP` and `CONFIG` 0), and the screen went off about 8 s later, at the end of the wait before the first RUN-group store, and stayed off to the end of the video (boot 17: the
+operator moved the Mac's cable into the stick's port afterwards and the Mac saw no device and no pop-up, and he found the unit "normal warm"; boot 19: the Mac, with its cable in the free port after the black-out,
+saw no USB or network event). Boot 18A, a read-only snapshot payload (a q1n1 worktree, not committed), read both controllers, the clocks and the SMMU with no fault and no black-out (334 loads): the NoC clocks, the PHY clock and domain words and the power domains of both controllers read on (the PHY registers themselves were not read), so the earlier lead of a stopped NoC clock is refuted for that wiring, and the controllers read alike except for `USBSTS` and port 2. The Shell's map line
+(`Pci(0x80,0x0)` in boot 16, `Pci(0x81,0x0)` in boots 17, 18A and 19) and the latched port word follow the port that holds the stick: INFERRED, the top port is `usb_1_ss1` and the second port `usb_1_ss0`, and the
+firmware starts the controller whose port holds the stick. Then the tested controller was without the stick in boots 15 to 17 and with it in boot 19, and the Mac's cable in boot 16 sat in the free port, on the `usb_1_ss1` side;
+the ending was the same in all four: INFERRED, the black-out is not specific to `usb_1_ss1`, not an unstarted controller, not the stick's absence and not the cable. SC3 of the stick log stands at 4 of 5 (3 if boot 15 does
+not count). The cause is UNKNOWN (the SMMU's context bank 3, the port state machines, an event of the embedded controller or the PMIC and the display subsystem are open hypotheses, none tested), whether the xHC's DMA reaches
+the runner's RAM (SC2) is still UNKNOWN and no USB DMA or live link has been demonstrated. A2 was not exercised; nothing further is authorised, and a payload that writes an SMMU register would need its own named authorisation.
+
+**Stick payload runner (EXPERIMENTAL; ran on the unit in boots 4 and 5 of 2026-11-14, in boot 7 and steps 2 and 3 of the restart probe of 2026-11-15, and on 2026-11-16 in the two steps each of the restart control and the memhash plan and in the one step each of the dry run, the timers plan, `GICDRY-A` and `GICDRY-B`, and on 2026-11-17 in the one step of `GICDRY-C` and the one step each of the four boots of the A1 plans (boot 15 from memory only) and of the read-only snapshot boot 18A, OBSERVED, one unit, one boot each; the `state` payload NOT RUN).** The fork's third image, `Q1N1-PAYLOAD.EFI` (gate
 `Q1N1_SP11_PAYLOAD`; `docs/SP11-PAYLOAD.md` there; commits `4a01c31` to `2e50548` on `sa3eedo12-sp11-boot`; the unit ran build `A9F00F9CCBB5`, commit `a9f00f9`), loads reviewed
 EL2 test code from the volume it started from before ExitBootServices, checks each file against a manifest, declares the
 pages to slbounce's scoped sweep, and after the bounce hashes the payload again and calls it at EL2 through a small ABI
@@ -1887,9 +1898,12 @@ that a run answered it, or answered it in part, and which run.
     is UNKNOWN; PHY and repeater state: UNKNOWN. The A1 test (boots 15 and 16,
     2026-11-17; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 16) added the unit's
     `DBOFF` `0x2000`, `RTSOFF` `0x1000` and 2 scratchpad buffers (OBSERVED) and the
-    plug watch (the cable's port is `usb_1_ss1` port 2, link Inactive with no
+    plug watch (in boot 16 the cable's port was `usb_1_ss1` port 2, link Inactive with no
     connection: INFERRED), but its No-Op did not complete in the filmed boot (the screen went off at the
-    first RUN store and the unit stayed dark, cause UNKNOWN), so whether the xHC's
+    first RUN store and the unit stayed dark, cause UNKNOWN). Boots 17 and 19 (2026-11-17; section 17 of the same log) repeated the ending on
+    `usb_1_ss0` (boot 17) and, with the stick on the tested controller (INFERRED), on `usb_1_ss1` (boot 19), and the read-only snapshot of
+    boot 18A found the clock and power-domain words of both controllers and of their PHYs on (OBSERVED, one boot; the PHY registers themselves were not read); the cable's port follows the
+    stick's (INFERRED). So whether the xHC's
     DMA reaches DRAM is still UNKNOWN.
 18. `ID_AA64MMFR4_EL1.E2H0`, the hand-off registers, the identity map and TTBR1
     use, the arrival registers of a PSCI secondary, and the functional de-VHE

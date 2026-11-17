@@ -1482,6 +1482,8 @@ LINUX_REF_LINES = (
     ('arm-smmu.h', 203, r'ARM_SMMU_CB_FSR_FORMAT\s+GENMASK\(10, 9\)'), ('arm-smmu.h', 218, r'ARM_SMMU_CB_FSR_FAULT\s+\(ARM_SMMU_CB_FSR_MULTI'),
     ('arm-smmu.h', 219, r'ARM_SMMU_CB_FSR_SS'), ('arm-smmu.h', 220, r'ARM_SMMU_CB_FSR_UUT'), ('arm-smmu.h', 221, r'ARM_SMMU_CB_FSR_EF'),
     ('arm-smmu.h', 222, r'ARM_SMMU_CB_FSR_PF'), ('arm-smmu.h', 223, r'ARM_SMMU_CB_FSR_TF'), ('arm-smmu.h', 224, r'ARM_SMMU_CB_FSR_IGN\)'),
+    ('arm-smmu.h', 147, r'ARM_SMMU_SCTLR_CFCFG\s+BIT\(7\)'), ('arm-smmu.h', 149, r'ARM_SMMU_SCTLR_CFIE\s+BIT\(6\)'),
+    ('arm-smmu.h', 150, r'ARM_SMMU_SCTLR_CFRE\s+BIT\(5\)'), ('arm-smmu.h', 154, r'ARM_SMMU_SCTLR_M\s+BIT\(0\)'),
     ('core.h', 102, r'DWC3_GCTL\s+0xc110'), ('core.h', 104, r'DWC3_GSTS\s+0xc118'), ('core.h', 106, r'DWC3_GSNPSID\s+0xc120'),
     ('core.h', 110, r'DWC3_GBUSERRADDR0\s+0xc130'), ('core.h', 138, r'DWC3_GUSB2PHYCFG'), ('core.h', 143, r'DWC3_GUSB3PIPECTL'),
     ('core.h', 264, r'DWC3_GCTL_PRTCAPDIR'), ('core.h', 265, r'DWC3_GCTL_PRTCAP_HOST\s+1'),
@@ -1606,6 +1608,44 @@ class Document(unittest.TestCase):
         self.assertEqual(sorted(cited - known), [], 'cited, but not read back by this test')
         self.assertIsNone(re.search(r'`:\d+`', self.text), 'an abbreviated citation cannot be read back')
         self.assertGreater(len(cited), 60)
+
+    def test_section_17_keeps_the_facts_of_boots_17_18a_and_19(self):
+        """Section 17 transcribes three pages read from videos and counts on them in sections 1 and 9: a drifted value or count fails here."""
+        body = self.text.split('## 17. Result of boots 17, 18A and 19', 1)[1].split('## Appendix A.', 1)[0]
+        flat = ' '.join(body.split())
+        pages = re.findall(r'```text\n(.*?)```', body, re.S)
+        self.assertEqual([len(page.splitlines()) for page in pages], [21, 33, 19], 'the pages of boots 17, 18A and 19')
+        snapshot = pages[1]
+        payload_lines = [line for line in snapshot.splitlines() if line.startswith('PAYLOAD USBSNAP ')]
+        self.assertEqual(len(payload_lines), 28)
+        self.assertEqual(int(re.search(r' END .*LINES=(\d+)', snapshot).group(1)), len(payload_lines), 'END counts the lines of the page')
+        for phrase in (
+                # boot 19: the pre-flight read of usb_1_ss1, the base reading, the ignored cue and arena 2
+                'PAYLOAD XHCI U1 CMD=0X0 STS=0X11:HCH,PCD CRCR=0X0 DCBAAP=0X0 CFG=0X0',
+                'PAYLOAD XHCI BASE U0P1=0X20002A0 U0P2=0X20002A0 U1P1=0X20002A0 U1P2=0X24002C0',
+                'PAYLOAD XHCI WATCH DONE CHANGED=NONE N=0', 'PAYLOAD XHCI NEXT ARENA 2 STACK 0XCE5D9000 PAGES 3 AFTER 8 S',
+                # boot 17: the cable's port and arena 1
+                'PAYLOAD XHCI WATCH DONE CHANGED=U0P2 N=2', 'PAYLOAD XHCI NEXT ARENA 1 FW 0XCF412000 PAGES 3 AFTER 8 S',
+                # the stick's firmware path: boot 16, then boots 17, 18A and 19
+                'Pci(0x80,0x0)/USB(0x1,0x0)', 'Pci(0x81,0x0)/USB(0x1,0x0)',
+                # boot 18A: the NoC clock words, the drift check and the end of the page
+                'PAYLOAD USBSNAP NOC AHB=0.ON NAXI=1.ON SAXI=1.ON', 'PAYLOAD USBSNAP DRIFT NONE CMP=84',
+                'PAYLOAD USBSNAP END LOADS=334 FAULTS=0 SKIPS=0 BLK=0 CUTS=0 GAP_MS=8004 LINES=28',
+                # SC3 after boots 15, 16, 17 and 19
+                'the count is 4 of 5 (3 if boot 15 does not count'):
+            self.assertIn(phrase, flat, phrase)
+        self.assertIsNone(re.search(r'\b[0-9a-fA-F]{32,}\b', body), 'section 17 gives no record digest')
+        self.assertEqual([pages[i].rstrip().splitlines()[-1] for i in (0, 2)], ['PAYLOAD XHCI NEXT RUN AFTER 8 S'] * 2, 'boots 17 and 19 end at NEXT RUN')
+
+    def test_the_sentences_about_usb_1_ss1_not_being_started_carry_the_section_17_caveat(self):
+        """Sections 1, 12, 13 and 14.2 say that usb_1_ss1 was never started by firmware, or untouched by it; they were read with the stick in the second
+        port, and each keeps saying so where it stands (its words are unchanged)."""
+        earlier = ' '.join(self.text.split('## 17. Result of boots 17, 18A and 19', 1)[0].split())
+        for sentence in ('firmware never started it', 'was never started by firmware', 'untouched by firmware', 'is not among them'):
+            places = [m.start() for m in re.finditer(re.escape(sentence), earlier, re.I)]
+            self.assertTrue(places, sentence)
+            for start in places:
+                self.assertIn('section 17', earlier[start:start + 450], f'{sentence!r} lost its caveat')
 
     def test_q1n1_facts_exist(self):
         q1n1 = os.environ.get('Q1N1_DIR') or str(ROOT.parent / 'q1n1')

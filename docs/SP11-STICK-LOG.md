@@ -5,12 +5,12 @@ the read-only survey S0 ran once on the unit (section 12), and its follow-up S0b
 Two later boots (6 and 7 of 2026-11-15, section 14) ran the third X2 test image and a payload that starts and stops the
 secondary cores, a three-step restart probe the same evening (section 14.1) ran a plain q1n1 page and that payload
 twice more, and a two-step restart control the next night ran only a read-only payload through the same runner; none
-of them read or wrote the stick's USB controller at EL2. Boot 14 (2026-11-17, section 15) ran the wrapper's GIC and stop variant and did not touch it either. Boots 15 and 16 (2026-11-17, section 16) ran the A1 No-Op DMA test, the first xHC register stores at EL2, on `usb_1_ss1`: in the filmed boot the screen went off at the end of the wait before the first RUN store, the unit stayed dark and no No-Op completed (cause UNKNOWN, no restart seen; boot 15 is from the operator's memory only).**
+of them read or wrote the stick's USB controller at EL2. Boot 14 (2026-11-17, section 15) ran the wrapper's GIC and stop variant and did not touch it either. Boots 15 and 16 (2026-11-17, section 16) ran the A1 No-Op DMA test, the first xHC register stores at EL2, on `usb_1_ss1`: in the filmed boot the screen went off at the end of the wait before the first RUN store, the unit stayed dark and no No-Op completed (cause UNKNOWN, no restart seen; boot 15 is from the operator's memory only). Boots 17 and 19 (2026-11-17, section 17) ran it again, on `usb_1_ss0` (boot 17) and on `usb_1_ss1` (boot 19, with the stick in the top port and no cable), and ended the same way; boot 18A, a read-only snapshot of both controllers, the clocks and the SMMU, ran to its end with no fault and no black-out (OBSERVED, one unit, one boot each; SC3 stands at 4 of 5).**
 Nothing of the writer ran on a Surface Pro 11 beyond that test, a stand-alone payload of the q1n1 fork. When the study
 was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as an opt-in, read-only survey in
 the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`) and has run
 once on the unit: its results are OBSERVED (one unit, one boot) and are recorded in section 12. S0b is a payload for the
-fork's payload runner (`docs/SP11-PAYLOAD.md` there); its results are in section 13. Stage S1 exists only as the stand-alone test of A1 (section 16); S2 and later do not
+fork's payload runner (`docs/SP11-PAYLOAD.md` there); its results are in section 13. Stage S1 exists only as the stand-alone test of A1 (sections 16 and 17); S2 and later do not
 exist. It answers plan item B3 (a persistent log sink) and the
 first deliverable of B2 (EL2 USB host bring-up) of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) and
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) as far as public sources and a host can: which controller the boot stick
@@ -54,8 +54,11 @@ guarded log writer, and their tests (section 8).
    topology S0b found no firmware xHCI state at EL2 and the link down (section 13), so S1a has nothing to adopt there.
 4. **The stick's controller is `usb_1_ss0` at `0x0a600000` (OBSERVED by S0, section 12).** The survey prints its baseline line
    only for the host controller whose BAR 0 equals that window, and it printed. `usb_1_ss1` at `0x0a800000` had nothing
-   connected and firmware never started it. Which physical USB-C port `usb_1_ss0` is on the unit is not recorded (Q2,
-   section 11). Before S0 this was UNKNOWN: neither the path nor any pinned fact said.
+   connected and firmware never started it. **Caveat (section 17, 17.3):** that was read with the stick in the port the operator usually uses, which boots
+   16 to 19 suggest is the second port, the one wired to `usb_1_ss0` (INFERRED); with the stick in the top port the stick's firmware path is `Pci(0x81,0x0)`
+   and the latched port word is on `usb_1_ss1`, so the firmware appears to start whichever controller holds the stick (INFERRED), and the sentences above hold
+   for the second port only. Which physical USB-C port `usb_1_ss0` is on the unit is not recorded (Q2,
+   section 11; section 17 infers the second port). Before S0 this was UNKNOWN: neither the path nor any pinned fact said.
 5. **One boot can answer M1, M2 and the SMMU half of M6 without a single device write** (sections 3.5 and 3.6, Appendix A),
    plus two sub-measurements this study adds: the walk of the firmware's own slot contexts (M1b) and the xHCI supported
    protocol walk (M1c). M3 stays deferred because no PHY register offset is pinned. M4, M5, M6b, M7, M8 and M10 write.
@@ -101,6 +104,18 @@ guarded log writer, and their tests (section 8).
     a clean restore: PPI 26 reached EL2 as an IRQ (four times in window 1, once from EL1 in window 2), the quarantine of the
     other enabled interrupts held, and the monitor was not called. The panel was again the only log channel, and A1 and A2 were
     not exercised. Boots 8 to 13 are recorded elsewhere (section 15). Boots 15 and 16, the A1 test (granted for them), are in section 16: the screen went off at the end of the wait before the first RUN store and the unit stayed dark (cause UNKNOWN; A2 not exercised).
+13. **Boots 17, 18A and 19 (2026-11-17; section 17; each on video; OBSERVED, one unit, one boot each): two more A1 runs ended as boot 16 did, and a
+    read-only snapshot ran to its end.** Boot 17 (`XHCI0.BIN` on `usb_1_ss0`) and boot 19 (`XHCI1.BIN` on `usb_1_ss1`, the stick in the top port, no cable)
+    both ended with the page at `NEXT RUN AFTER 8 S` and the screen off about 8 s later, to the end of the video; no No-Op completed and the cause is
+    UNKNOWN. SC3 stands at 4 of 5 (boots 15, 16, 17 and 19; 3 if boot 15 does not count). Boot 18A, a read-only snapshot payload of both controllers, the
+    clocks and the SMMU (a q1n1 worktree, not committed), made 334 loads with no fault and no black-out; the NoC clocks, the PHY clock and domain words and
+    the power domains of both controllers read on, and the controllers read alike except for `USBSTS` and port 2. The Shell's map line (`Pci(0x80,0x0)` in boot 16,
+    `Pci(0x81,0x0)` in boots 17, 18A and 19) and the latched port word follow the port that holds the stick: INFERRED, the top port is `usb_1_ss1` and the
+    second port `usb_1_ss0`, and the firmware starts the controller whose port holds the stick. Then the tested controller was without the stick in boots
+    15 to 17 and with it in boot 19, and the screen went off in all of them: INFERRED, not an unstarted controller, not `usb_1_ss1` alone, not the Mac's
+    cable. The hypotheses (the SMMU's context bank 3, the port state machines, an event of the embedded controller or the PMIC, the display subsystem) are
+    untested and nothing further is authorised. The sentences of this log that say `usb_1_ss1` was never started by firmware were read with the stick in the
+    second port and hold for that wiring only (item 4, section 17.3).
 
 ## 2. The problem and the requirements
 
@@ -166,7 +181,7 @@ INFERRED for the unit; [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) sectio
 | Cache coherent DMA | `dma-coherent` (`hamoa.dtsi:5320`) | `dma-coherent` (`hamoa.dtsi:5411`) |
 
 **Before S0, which one the stick uses was UNKNOWN; S0 answered it on the unit: `usb_1_ss0` (section 12).** The path carries
-no controller identity (3.1). The Denali description says which
+no controller identity (3.1). Section 17 adds that this answer was for the port the stick was in then: the controller follows the port (INFERRED, 17.3). The Denali description says which
 connector each controller serves, not which connector the operator used. Hamoa has three more DWC3 controllers that Denali
 leaves disabled, and nothing excludes that firmware uses one of them (UNKNOWN). Three discriminators exist, cheapest first:
 
@@ -398,7 +413,7 @@ All of it uses boot services and writes nothing. Any failure prints a reason and
 - **S0b outcome (OBSERVED once, section 13).** S0b read context bank 3: it is nested (stage 1 followed by stage 2) with stage 1
   off and no table base, so its walk is `UNSUPPORTED NESTED`, which is UNKNOWN. The SMMU condition is still not decided and
   SC2 is neither triggered nor cleared. What would decide it: a read-only stage-2 walker payload (it must first find the
-  stage-2 context, UNKNOWN how, with NUMS2CB 0), or the S1 No-Op, which needs A1 (NOT granted then; granted for boots 15 and 16, section 16). S1 had not started then.
+  stage-2 context, UNKNOWN how, with NUMS2CB 0), or the S1 No-Op, which needs A1 (NOT granted then; granted for boots 15, 16, 17 and 19, sections 16 and 17). S1 had not started then.
 - **NO-GO** for (iv). (iii) only as the M10 experiment. (v) yes, in parallel.
 
 **Stop criteria.** Each is a point at which work on the stick writer stops and the plan is reviewed, not retried.
@@ -649,7 +664,7 @@ any claim in section 3 about the unit is true beyond what section 12 records. Ha
 | --- | --- | --- |
 | The stick's path has two USB nodes and a hub is in front of it (slots 1 and 2 are hub-shaped, the stick has route string 3) | OBSERVED (S0; that slots 1 and 2 are hub functions is INFERRED from the endpoint shape) | 3.1, 12 |
 | With the stick plugged in directly, the UEFI path has one USB node | OBSERVED (X2 run 6, one boot) | 1, 13 |
-| Which of the two Denali controllers the stick uses | OBSERVED (S0): `usb_1_ss0` | 3.2, 12 |
+| Which of the two Denali controllers the stick uses | OBSERVED (S0): `usb_1_ss0`, for the port the stick was in then; the controller follows the port (INFERRED, section 17) | 3.2, 12, 17 |
 | The xHC is halted at EL2 | OBSERVED (S0); that firmware's ExitBootServices handler halted it is INFERRED | 3.3, 12 |
 | The xHC reports HCE (USBSTS bit 12) at EL2, which it did not before ExitBootServices | OBSERVED (S0); cause UNKNOWN | 12 |
 | GDSC and clocks of both controllers at EL2 | OBSERVED (S0): on | 3.3, 12 |
@@ -665,6 +680,9 @@ any claim in section 3 about the unit is true beyond what section 12 records. Ha
 | A real stick has a BOT interface and answers like the fake | UNKNOWN / not shown | 4.6, 8 |
 | Effort and boot counts | INFERRED (estimates, no data) | 6 |
 | q1n1 can address a device behind a hub | VERIFIED false (G03) | 7 |
+| The first xHC register stores at EL2 (the A1 No-Op test, boots 15, 16, 17 and 19, on both controllers, with the stick and the Mac's cable in several places): the page ended at `NEXT RUN` and the screen went off about 8 s later, and no No-Op completed | OBSERVED (boots 16, 17 and 19 on video; boot 15 from memory); that the RS store is the cause is INFERRED; the cause is UNKNOWN | 16, 17 |
+| A read-only snapshot of both controllers, the NoC and PHY clocks and the SMMU (boot 18A): 334 loads, no fault, no black-out; the clocks and power domains read on | OBSERVED (one unit, one boot) | 17 |
+| The stick's port decides which controller the firmware starts: the top port is `usb_1_ss1` (`Pci(0x81)`), the second port `usb_1_ss0` (`Pci(0x80)`) | INFERRED (the Shell's map line and the latched port word of four boots; the wiring was not traced) | 17 |
 | Any behaviour of the writer on the unit | not established | NOT RUN |
 
 ## 10. Pinned sources
@@ -709,7 +727,11 @@ The first two need the operator.
    fallback, and S1a has nothing to adopt in the direct topology (section 13).
 2. **Q2. Which port.** Which of the unit's USB-C ports is the stick in, so that D3 of 3.2 has a starting point? S0 says
    `usb_1_ss0` carries it now (section 12). The path node was `Pci(0x81,0x0)` in the earlier report of 3.1, which suggests
-   (INFERRED) that the stick was then in the other port. The operator can say which physical port is which.
+   (INFERRED) that the stick was then in the other port. The operator can say which physical port is which. **Answered in part by section 17 (INFERRED):** the
+   operator put the stick in the top port in boots 17, 18A and 19 (his statements; the Shell's map line read `Pci(0x81,0x0)` each time), and in boot 16, where
+   the map line read `Pci(0x80,0x0)`, it was by his habit in the port he usually uses, the second (not recorded for that boot); the top port is then
+   `usb_1_ss1` and the second port `usb_1_ss0` (D3 of 3.2, moving the stick to the other port and comparing, was in effect done with the map line and the
+   port words). The wiring itself was not traced.
 3. **Q3. Imaging.** Can the operator write a disk image to the stick (W1b), or must the log region be created by copying files
    (W2, which needs a q1n1 FAT walker)? Will the operator keep the stick on an MBR disk (GPT is refused)?
 4. **Q4. Authorization.** May A1 (the first write to an xHC register at EL2, S1) and A2 (the first sector write to the stick,
@@ -737,7 +759,7 @@ re-read against enlarged crops. This is one boot of one unit, not a distribution
 
 | # | Question | Survey lines | What the unit showed | Label | Consequence |
 | --- | --- | --- | --- | --- | --- |
-| 1 | The stick's controller | P2 `U0` | The baseline line, which is printed only for the host controller whose BAR 0 equals the `usb_1_ss0` window `0x0a600000`, appeared. Firmware lists four xHCI handles; the survey shows three (BAR 0 `0x0a000000`, `0x0a400000`, `0x0a200000`) | OBSERVED | S1 targets `usb_1_ss0`. `usb_1_ss1` (`0x0a800000`) was never started by firmware |
+| 1 | The stick's controller | P2 `U0` | The baseline line, which is printed only for the host controller whose BAR 0 equals the `usb_1_ss0` window `0x0a600000`, appeared. Firmware lists four xHCI handles; the survey shows three (BAR 0 `0x0a000000`, `0x0a400000`, `0x0a200000`) | OBSERVED | S1 targets `usb_1_ss0`. `usb_1_ss1` (`0x0a800000`) was never started by firmware (caveat, section 17: read with the stick in the second port, INFERRED; with the stick in the top port the firmware appears to start `usb_1_ss1` instead) |
 | 2 | The path | `SELF`, `HUB` | `Pci(0x80,0x0)/USB(0x1,0x0)/USB(0x2,0x0)`: two USB nodes (root port index 1, hub port index 2). The report in 3.1 had `Pci(0x81,0x0)` | OBSERVED | The shape is as 3.1 says. INFERRED: the PCI-style node number follows the controller, so the stick was then in the other port (Q2) |
 | 3 | The hub | `SLOT` | Firmware slot 1: high speed, root port 1, interrupt IN with a 1-byte packet. Slot 2: SuperSpeed, root port 2, interrupt IN with a 2-byte packet. Slot 3: SuperSpeed, route string 3, bulk OUT and bulk IN with 1024-byte packets, the stick. The Hub flag reads 0 in all three slot contexts | OBSERVED; that slots 1 and 2 are the two halves of one hub is INFERRED from the endpoint shape | An active hub (a USB 2 and a USB 3 hub function, one per root port) is in front of the stick: the adapter is not passive. q1n1 has no route string or hub code (G03), so S1.5 is needed unless the stick can go in directly (Q1) |
 | 4 | The stick | `BLK`, `USBIO` | 512-byte blocks, removable, not read-only, partition at sector `0x800`; `bcdUSB` `0x310`; interface class 8, subclass 6, protocol `0x50` (mass storage, SCSI, Bulk-Only); bulk IN `0x82`, bulk OUT `0x01`, 1024-byte packets | OBSERVED | Firmware drives it as BOT, not UAS: the UAS clause of SC4 is not triggered, and BOT at SuperSpeed is what S2 to S5 must carry |
@@ -746,7 +768,7 @@ re-read against enlarged crops. This is one boot of one unit, not a distribution
 | 7 | xHC run state | `OP`, P2 `U0` | At EL2: `USBCMD` 0, `USBSTS` `0x1019` = HCH, EINT, PCD and **HCE (bit 12)**; HSE 0, CNR 0; `DCBAAP` (`0xCF412000`) and `CONFIG` (`0x40`) still firmware's. At P2, before ExitBootServices, the same controller ran (`USBCMD` 1, `USBSTS` `0x18`, command ring running) and HCE was clear | OBSERVED | Halted, as 3.3 expected (INFERRED: by firmware's handler). HCE appeared between P2 and P3; its cause is UNKNOWN (firmware's ExitBootServices handler, the hypervisor swap, or a DMA failure; the DWC3 latched no bus error, which weakly argues against the last). The survey decodes HSE but not HCE, so HCE is visible only in the raw value. A controller with HCE set needs a host controller reset, which clears all slots and the root hub: S1a is unlikely to work (INFERRED) and S1 starts with a reset and a full enumeration |
 | 8 | Ports | `PORT` | Port 1 `PORTSC` `0xE03` (connected, enabled, powered, high speed, link state U0). Port 2 `0x81203` (the same at SuperSpeed, warm-reset-change flag set). Both equal the values at P2 | OBSERVED | The links stayed in U0 through the halt and the bounce, so the PHYs and the hub kept their state (INFERRED). No PHY register was read (M3 stays UNIMPLEMENTED) |
 | 9 | Firmware's rings | `FWRINGS`, `SLOT` | `DCBAAP` `0xCF412000`, event ring segment table `0xCF415240`, event dequeue pointer `0xCF414CB8`, all RAM; three slot contexts decode sanely (configured, addresses 1 to 3). `CRCR` reads 0 on a halted controller | OBSERVED | Nothing reused or freed the firmware's xHCI memory by P3, and CPU reads of it after the sweep decode (INFERRED: coherent enough) |
-| 10 | The other controller | `OP`, `PORT` | `USBSTS` `0x1` (halted, no error), `DCBAAP` 0, `CONFIG` 0, both ports in RxDetect, nothing connected | OBSERVED | Untouched by firmware |
+| 10 | The other controller | `OP`, `PORT` | `USBSTS` `0x1` (halted, no error), `DCBAAP` 0, `CONFIG` 0, both ports in RxDetect, nothing connected | OBSERVED | Untouched by firmware (caveat, section 17: with the stick in the second port, INFERRED) |
 | 11 | SMMU | `SMMU` | `ID0` `0x7C017E9A` (154 stream match registers); `sCR0` `0x230406` (unmatched streams fault, client port enabled); no global fault. Stream `0x1420` matches register 3 and stream `0x1460` register 4; both translate into context bank 3 | OBSERVED | Neither bypass nor fault. What context bank 3 maps was not read: this is the SC2 question and it is open |
 
 The verdict line was `VERDICT U0=STICK-PRESENT-HALTED U1=IDLE SMMU=TRANS`.
@@ -812,7 +834,7 @@ has no store (213 loads, 0 faults, 0 refused in boot 5): no write to an xHC regi
 | # | Question | Panel line | What the unit showed | Label | Consequence |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `usb_1_ss0` (`U0`, window `0x0a600000`) at EL2, stick plugged in directly | `U0` | `IDLE`: `CAPL` `0x20`, `USBCMD` 0, `USBSTS` `0x11` (HCH and PCD; HCE clear), `DCBAAP` 0, port 1 `PORTSC` `0x20002A0` (RxDetect, port power, WCE). The rule for `IDLE` is `DCBAAP` 0 and CCS clear on both ports, so port 2 has no connection; its raw value is not on the page (the payload drops a field that does not fit the 100-character line) | OBSERVED | In S0, behind a hub, this controller still held the firmware's rings: `DCBAAP` `0xCF412000`, three slots, `USBSTS` `0x1019` with HCE, port 1 `0xE03` in U0. Here nothing is started and nothing is connected |
-| 2 | `usb_1_ss1` (`U1`, `0x0a800000`) | `U1` | `IDLE`: `USBSTS` `0x1` (HCH), `DCBAAP` 0, port 1 `0x20002A0` | OBSERVED | As in S0: untouched by firmware |
+| 2 | `usb_1_ss1` (`U1`, `0x0a800000`) | `U1` | `IDLE`: `USBSTS` `0x1` (HCH), `DCBAAP` 0, port 1 `0x20002A0` | OBSERVED | As in S0: untouched by firmware (caveat, section 17: with the stick in the second port, INFERRED) |
 | 3 | The DWC3 of `U0` | `DWC3` | `GSNPSID` `0x33313130` (as in S0), `GCTL` `0x101005`, `GSTS` `0x7E800001`, no bus error latched, `GDBGLTSSM` `0x9CC20026` (raw, not decoded here) | OBSERVED | The same core, readable, no fault |
 | 4 | The event ring and the slots | `RINGS`, `TRB`, `U0 SLOTS` | `ERSTSZ`, `ERSTBA` and `ERDP` all 0 (`SEG0=NO_ERST`), so the TRB and slot groups were skipped (`NO_SEG0`, `NO_DCBAAP`) | OBSERVED | There are no firmware rings to read in this topology: S0b item 1 (the last event TRBs, to look for the cause of HCE) could not be done. HCE is clear here, so its cause in S0 stays UNKNOWN |
 | 5 | The apps SMMU (`0x15000000`), global registers | `SMMU` | `ID0` `0x7C017E9A` (154 stream match registers), `ID1` `0x6000005F` (95 context banks, `NUMS2CB` 0, 4 KiB pages, `NUMPAGENDXB` 6), `ID2` `0x5222` (IAS, OAS and UBS 40 bits; 4 KiB and 64 KiB granules), `sCR0` `0x230406`, `sGFSR` 0, context bank base `0x15080000`; streams `0x1420` and `0x1460` match SMR3 and SMR4, S2CR `TRANS` into context bank 3 | OBSERVED | As S0 row 11, plus the identification registers. `NUMS2CB` is 0 |
@@ -1120,7 +1142,9 @@ board does not come back to the stick (14.1; section 13), so each boot of the st
 controller instances, with BAR0 `0x0A000000`, `0x0A400000`, `0x0A200000` and `0x0A600000`, and no PCI location.
 Section 12 recorded that firmware lists four xHCI handles and that the survey showed three of them (BAR0 `0x0a000000`,
 `0x0a400000`, `0x0a200000`): those three are in this list, so the fourth is the one at `0x0A600000`, the `usb_1_ss0`
-window (INFERRED by elimination). `0x0A800000`, the window of `usb_1_ss1`, is not among them. Nothing was read from any
+window (INFERRED by elimination). `0x0A800000`, the window of `usb_1_ss1`, is not among them. (Caveat, section 17: the list was taken with the stick in the
+port the operator usually uses, INFERRED to be the second port; with the stick in the top port the firmware appears to start `usb_1_ss1`, and what its
+listing shows then was not read, UNKNOWN.) Nothing was read from any
 of them at EL2 in these boots.
 
 **What these runs do not show.** The cause of the restarts and their times (UNKNOWN for boot 7 and step 2; the
@@ -1273,7 +1297,8 @@ with one payload, `XHCI1.BIN` (19,798 bytes; the page prints `SHA=989324B52E66C2
 loaded at `0xCEAB1000` in boot 16). The payload reads the controller and the SMMU, watches the PORTSC of both controllers for 30 s while the
 operator plugs the Mac's cable at an on-screen cue, then runs five groups of stores, each announced by a `NEXT ... AFTER 8 S` line and
 started after that wait: ARENA (RAM only), RESET, PROGRAM, RUN, NOOP. The stick was plugged straight into the unit; which port held it is not
-in the readings, so whether `usb_1_ss1` was the stick's controller is UNKNOWN (`usb_1_ss0` is the likely one, INFERRED, section 13).
+in the readings, so whether `usb_1_ss1` was the stick's controller is UNKNOWN (`usb_1_ss0` is the likely one, INFERRED, section 13). Section 17, written later,
+reads boot 16's Shell map line, `Pci(0x80,0x0)`, as the `usb_1_ss0` side: INFERRED, `usb_1_ss1` did not hold the stick in boot 16.
 
 | Boot | Evidence | What is known |
 | --- | --- | --- |
@@ -1359,10 +1384,11 @@ rests on the operator's memory for boot 15 and on one video for boot 16; whether
   those two readings the hang fits (INFERRED); a dead display with a live SoC is a third, which the runbook does not list. The runbook
   marks O10 an SC1 candidate; nothing is authorised by that, and the clock, GDSC and PHY writes it would lead to stay UNIMPLEMENTED.
 - SC3 (five boots at S1 without a No-Op completing, or two boots with an unexplained Host System Error): boot 16 is one boot at S1 without
-  a No-Op completing; boot 15 is a second if it ended the same way, which is UNKNOWN (its page was not read): the count is 1 or 2 of 5.
+  a No-Op completing; boot 15 is a second if it ended the same way, which is UNKNOWN (its page was not read): the count is 1 or 2 of 5 (4 of 5, or 3, after
+  boots 17 and 19: section 17).
   No HSE was read in either boot, so the second limb is not counted.
 - The runbook's own rules (4.3, 4.4): no `XHCI0.BIN` boot, no retry in the same boot, the unit is power-cycled before any further boot,
-  and no further xHC write until the screen-off is understood.
+  and no further xHC write until the screen-off is understood (the operator waived the stop for boots 17 and 19, one boot each: section 17).
 - The restarts of 14.1 (after two of three `cpuon` boots) are not this event: the firmware's normal boot followed them, and here the screen
   never came back. Their question, what restarts the board after `cpuon`, is untouched.
 
@@ -1396,7 +1422,348 @@ effect of `HCRST` on port power (the page read PORTSC only before it).
 **What follows.** By the runbook's rules (4.3, 4.4, O10) the sequence stops. No next step is decided or requested here, and any further xHC
 write needs the screen-off understood first and its own named authorisation. For this log the panel is still the only channel and could not
 show what followed the RUN store; the writer stays UNIMPLEMENTED, no completed No-Op has been seen (boot 16 ended at the wait before the first RUN store; boot 15's
-page is UNKNOWN), no USB DMA or live link has been demonstrated (cause UNKNOWN), and A2 was not exercised.
+page is UNKNOWN), no USB DMA or live link has been demonstrated (cause UNKNOWN), and A2 was not exercised. (Boots 17 and 19 later ran, each by the operator's
+waiver of that stop for one boot, and ended the same way: section 17.)
+
+## 17. Result of boots 17, 18A and 19, two more runs of the A1 xHCI S1 No-Op DMA test (`XHCI0.BIN` on `usb_1_ss0`, then `XHCI1.BIN` on `usb_1_ss1` again) and a read-only snapshot, on the unit: the screen went off at the end of the wait before the first RUN store both times, and the snapshot ran to its end (OBSERVED, one unit, one boot each; every boot on video)
+
+Boots 17, 18A and 19 (2026-11-17) followed boots 15 and 16 (section 16). Boot 17 ran the other A1 payload, `XHCI0.BIN`, on `usb_1_ss0` (the plan
+`a1-xhci-s1-ss0`); boot 18A ran a read-only snapshot payload of both controllers, the clocks and the SMMU (`usbsnap`, version 1; its source and its
+document are in a q1n1 worktree and are not committed, so no q1n1 commit is cited here); boot 19 ran `XHCI1.BIN` again (the plan `a1-xhci-s1`), with
+the stick in the top port and no Mac cable. Boots 17 and 19 are A1 boots like boots 15 and 16 (section 16: the first xHC register stores at EL2, the
+stage-S1 No-Op DMA test of [SP11-XHCI-S1.md](SP11-XHCI-S1.md)). The page of boot 16 had ended at a `NEXT` line, which by rule 9 of the A1 record stops
+the sequence; the operator waived that stop for one boot at a time, for boot 17 by approving a supplement record and for boot 19 by approving a short
+authorisation note (each by its SHA-256, which this log does not repeat), and neither approved anything else. A2 was neither granted nor exercised, and
+boot 18A only loads: it is not an A1 boot. The runbook is still not edited (the A1 record pins it by digest), so the remark of section 16 holds here too:
+where the runbook reads a page that stops after a `NEXT` line as a hang or a reset, or says that the unit's `DBOFF`, `RTSOFF` or scratchpad count are not
+recorded, this log is the later word. Everything below is OBSERVED (one unit, one boot each, each from one video) unless a label says otherwise; the
+decodes (what a value means) are INFERRED.
+
+| Boot | What ran | Evidence | What is known |
+| --- | --- | --- | --- |
+| 17 | `XHCI0.BIN` (19,870 bytes; the page prints `SHA=63B11F901ACBB430`, the first 16 digits of its SHA-256; loaded at `0xCE5E8000`) on `usb_1_ss0`, the Mac's cable plugged at the cue | one video (78 s) | The page below; the screen went off about 8 s after `NEXT RUN AFTER 8 S`; no `R1` line, VERDICT, END or fault page; the unit stayed dark, and the steps after the black-out found nothing (17.1) |
+| 18A | `usbsnap` version 1 (9,973 bytes; `SHA=6C783E7B6DBAF990`; loaded at `0xCE200000`), read-only, the stick in the top port, no cable | one video (33 s) | The page of 28 lines below; `END LOADS=334 FAULTS=0`; no black-out; the screen stayed lit for 2 minutes and more after the video |
+| 19 | `XHCI1.BIN` (19,798 bytes; `SHA=989324B52E66C212`; loaded at `0xCE5EA000`) on `usb_1_ss1`, the stick in the top port, no cable at the cue | one video (73 s) | The page below; the screen went off about 8 s after `NEXT RUN AFTER 8 S`; no `R1` line, VERDICT, END or fault page; the video ends dark |
+
+### 17.1 Boot 17: `XHCI0.BIN` on `usb_1_ss0`, the first arena the firmware's own
+
+The record of boot 17 changed two things from boot 16: the controller, and the first arena (arena 1, the firmware's own xHCI memory at `0xCF412000`, the
+DCBAAP address that S0 read in the hub run (section 12), instead of the runner's stack). It chose `XHCI0.BIN` because the firmware had initialised
+`usb_1_ss0` and used it for the stick in S0 (INFERRED, section 12), so that the controller under test would be the stick's. That premise did not hold
+(17.3): the operator said afterwards that the stick was in the top port and the Mac's cable, at the cue, in the second port (OBSERVED: his later statement; the
+map line of 17.3 agrees with it).
+
+**The page of boot 17** as read at 62 to 67.5 s of the video, its last lit frames (capital letters only; the addresses are one boot's allocations, not
+constants):
+
+```text
+PAYLOAD LOADED INDEX=0 BASE=0XCE5E8000 BYTES=19870 SHA=63B11F901ACBB430 TYPE=1
+PAYLOAD READY FILES=1 RANGES=4 CODE=1
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 0 63B11F901ACBB430
+PAYLOAD XHCI U0 ID=0X33313130 CAPL=0X20 VER=0X110 HCS1=0X2000340 HCS2=0X140000F1 HCC1=0X110FFC5
+PAYLOAD XHCI U0 SCRATCH=2 PAGESZ=0X1 AC64=1 CSZ=64 DBOFF=0X2000 RTSOFF=0X1000
+PAYLOAD XHCI U0 CMD=0X0 STS=0X1:HCH CRCR=0X0 DCBAAP=0X0 CFG=0X0
+PAYLOAD XHCI SMMU STREAM=0X1420 SMR=3 TRANS CB=3 NCB=0X5F
+PAYLOAD XHCI SMMU0 GFSR=0X0 FSR=0X400 FAR=0X15379FF8FFF7 FSYNR0=0X460D5D
+PAYLOAD XHCI ARENAS 1=OK 2=OK 3=OK 4=OK
+PAYLOAD XHCI WATCH 30 S: CONNECT THE MAC USB-C CABLE TO THE FREE PORT NOW
+PAYLOAD XHCI BASE U0P1=0X20002A0 U0P2=0X20002A0 U1P1=0X20002A0 U1P2=0X24002C0
+PAYLOAD XHCI CHG T=5.7 U0P2 FROM 0X20002A0 TO 0X20002E0:POLL
+PAYLOAD XHCI CHG T=6.0 U0P2 FROM 0X20002E0 TO 0X2C002C0:INACT
+PAYLOAD XHCI WATCH 20 S LEFT
+PAYLOAD XHCI WATCH 10 S LEFT
+PAYLOAD XHCI WATCH DONE CHANGED=U0P2 N=2
+PAYLOAD XHCI NEXT ARENA 1 FW 0XCF412000 PAGES 3 AFTER 8 S
+PAYLOAD XHCI NEXT RESET AFTER 8 S
+PAYLOAD XHCI NEXT PROGRAM AFTER 8 S
+PAYLOAD XHCI NEXT RUN AFTER 8 S
+```
+
+Nothing follows: no `R1` line, no VERDICT, no END, no fault page.
+
+**The video, in time (OBSERVED).**
+
+| Video, time | What is on the panel |
+| --- | --- |
+| 60 s | the page ends at `NEXT PROGRAM AFTER 8 S` (a full frame) |
+| by 62 s | `NEXT RUN AFTER 8 S` is on the page (read at 2 frames per second from 62 s) |
+| 67.5 to 68.0 s | the screen goes dark |
+| to 78.05 s | still dark: no further line |
+
+The screen went dark about 8 s after `NEXT RUN AFTER 8 S` was drawn (the frames bound the interval between 5.5 s and 8 s, because the line was drawn between
+60 s and 62 s; boot 16, read at 10 frames per second, gave 8.15 s): the end of the 8 s wait before the first store of the RUN group, a single store, `USBCMD`
+with RS. That the screen followed that store is INFERRED from the payload's nominal wait.
+
+**What it answers.**
+
+| # | Question | Page lines | What the unit showed | Label |
+| --- | --- | --- | --- | --- |
+| 1 | What does the xHC of `usb_1_ss0` report? | the three `U0` lines | The same words as `usb_1_ss1` in boot 16: `DBOFF` `0x2000`, `RTSOFF` `0x1000`, 2 scratchpad buffers, `HCS1` `0x2000340`, `HCS2` `0x140000F1`, `HCC1` `0x110FFC5`, 64-byte contexts; halted (`STS` `0x1`, `HCH`) with `CMD`, `CRCR`, `DCBAAP` and `CONFIG` all 0 | OBSERVED |
+| 2 | Is the SMMU state the one S0b and boot 16 read? | `SMMU`, `SMMU0` | Stream `0x1420` is `TRANS` through context bank 3 (`SMR=3`, `NCB=0x5F`); `GFSR` 0; `FSR` `0x400` is the FORMAT field and records no fault (section 16, row 3). `FAR` `0x15379FF8FFF7` and `FSYNR0` `0x460D5D` differ from S0b's and boot 16's (`FAR` `0x953FDF7CF7F7` and `0x153F9FF8F7F3`, `FSYNR0` `0x46005D` and `0x660D5D`); with no fault recorded they are not fault records (INFERRED), and their meaning stays UNKNOWN | OBSERVED (the values); INFERRED (what they mean) |
+| 3 | Which controller serves the free connector? | `BASE`, `CHG`, `WATCH DONE` | After the cable was plugged `U0P2`, port 2 of the payload's own controller, went from `0x20002A0` to `0x20002E0` at T=5.7 s (POLL) and to `0x2C002C0` at T=6.0 s (INACT: link state 6 with the link-state-change flag and, beyond boot 16's word, the config-error-change flag); no other port changed. In boot 16 the cable changed `U1P2`. `BASE` showed `U1P2` at `0x24002C0` before the cable, the latched word that `U0P2` held in boot 16 | OBSERVED (the values); INFERRED (the decode: the PORTSC layout is from memory) |
+| 4 | How far did the sequence get? | `ARENAS`, `NEXT ARENA` to `NEXT RUN` | As in boot 16, but with arena 1: `ARENAS 1=OK 2=OK 3=OK 4=OK` (the payload's own arena check printed OK for each of the four), then `NEXT ARENA 1 FW`, `NEXT RESET`, `NEXT PROGRAM` and `NEXT RUN`, 8 s apart, with no `R1`, VERDICT or END: by the runbook's page structure the ARENA, RESET and PROGRAM groups completed, 11 register stores | OBSERVED (the page); INFERRED (the stores) |
+| 5 | What happened at `NEXT RUN`? | the screen | It went dark about 8 s after `NEXT RUN AFTER 8 S` was drawn and stayed dark to the end of the video (about 10 s); no `R1` line, VERDICT, END or fault page followed | OBSERVED (the screen); INFERRED (the link to the store) |
+
+**The steps after the black-out (E0; OBSERVED: the operator's report and the Mac-side logger).** The record of boot 17 added steps for a black panel; the
+one that matters here moves the Mac's cable into the stick's port and waits 60 s with the Mac-side logger running, to see any new USB device (a Qualcomm
+download-mode device, vendor `05C6`, was the case looked for), and then the unit is forced off. Result: no new device appeared on the Mac, no pop-up appeared, and the operator found the unit "normal warm" (his words; an impression, not a measurement). A null result: it says that the unit did not
+show up as a USB device on the stick's port in that minute, and nothing about whether the SoC was alive (INFERRED: a host controller that is not running
+presents nothing to a Mac either way). The Mac logger, which ran from before the boot, saw no USB device added or removed; its one network-interface change
+was a tunnel interface of the Mac itself, not a device of the unit (INFERRED). When and how the unit was powered off afterwards are not recorded here.
+
+### 17.2 Boot 18A: a read-only snapshot of both controllers, the clocks and the SMMU
+
+Boot 18A ran `usbsnap` (version 1: a read-only snapshot payload whose source and document are in a q1n1 worktree and are not committed) through the payload
+runner, with the stick in the top port and no cable. The operator had been asked for the second port and said afterwards that he put the stick in the top
+port; the Shell's map line on the video agrees (17.3). The payload only loads. It reads the clock and power words of both controllers, the PHY clocks and
+domain, the NoC clocks, both controllers' xHC, DWC3 core and glue registers and the SMMU, waits 8 s, reads the same blocks again (the `NEXT S2` lines) and
+compares the two passes (`DRIFT`). A line with one value means that both controllers read the same, a line with `A/B` that they differ (`A` is
+`usb_1_ss0`, `B` is `usb_1_ss1`: the page's `KEY` line).
+
+**The page of boot 18A** as read at 22 s of the video (the payload's 28 lines, between the runner's four opening lines and its `DONE` line; capital letters
+only; the address is one boot's allocation):
+
+```text
+PAYLOAD LOADED INDEX=0 BASE=0XCE200000 BYTES=9973 SHA=6C783E7B6DBAF990 TYPE=1
+PAYLOAD READY FILES=1 RANGES=4 CODE=1
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 0 6C783E7B6DBAF990
+PAYLOAD USBSNAP READ ONLY EL=2 HZ=0X124F800 GAP=8 S
+PAYLOAD USBSNAP KEY=A/B A=USB_1_SS0 B=USB_1_SS1 ONE VALUE=SAME DIFF=THE LINE HAS A/B
+PAYLOAD USBSNAP GCC GDSC=0XF822F800.ON MST=1.ON SLP=1.ON MOCK=1.ON CFGN=1.ON AGGR=1.ON
+PAYLOAD USBSNAP DWC ID=0X33313130 STS=0X7E800001 CM=1 BV=0 BERR=0
+PAYLOAD USBSNAP XHC CAP=0X1100020 CMD=0 USTS=1/0X11 P1=0X20002A0 P2=0X20002A0/0X24002C0 DIFF
+PAYLOAD USBSNAP SMMU SCR0=0X230406 ID0=0X7C017E9A ID1=0X6000005F GFSR=0
+PAYLOAD USBSNAP SMMU SMRN=3/4 SMR=0X80001420/0X80001460 S2CR=3 CB=3 DIFF
+PAYLOAD USBSNAP SMMU CBAR=0X35E03 CBA2=1 SCTL=0XE0 TCR=0 MAIR=0
+PAYLOAD USBSNAP SMMU TTBR=0 FSR=0X400 FMT=2 FLT=0 FAR=0X951F9F78F7F3 FSY0=0X460D5D
+PAYLOAD USBSNAP NEXT GCCPHY
+PAYLOAD USBSNAP GCCPHY AUX=1.ON CAUX=1.ON PIPE_NW=1 PGDS=0XF8222800.ON
+PAYLOAD USBSNAP NEXT NOC
+PAYLOAD USBSNAP NOC ANOC=1.ON SYS=1.ON NTH=0.ON STH=0.ON
+PAYLOAD USBSNAP NOC AHB=0.ON NAXI=1.ON SAXI=1.ON
+PAYLOAD USBSNAP NEXT DWC3
+PAYLOAD USBSNAP DWC3 GCTL=0X101005 PC=1 U2PC=0X102400 SU2=0
+PAYLOAD USBSNAP DWC3 U3PI=0XB081402 SU3=0 LTSM=0X9CC20026
+PAYLOAD USBSNAP NEXT QSCR
+PAYLOAD USBSNAP QSCR GENC=4 HSPC=0X10000000 SSPC=0
+PAYLOAD USBSNAP NEXT SACR
+PAYLOAD USBSNAP SACR SACR=0X41C
+PAYLOAD USBSNAP NEXT WAIT 8 S
+PAYLOAD USBSNAP NEXT S2 GCC
+PAYLOAD USBSNAP NEXT S2 U0
+PAYLOAD USBSNAP NEXT S2 U1
+PAYLOAD USBSNAP NEXT S2 SMMU
+PAYLOAD USBSNAP DRIFT NONE CMP=84
+PAYLOAD USBSNAP END LOADS=334 FAULTS=0 SKIPS=0 BLK=0 CUTS=0 GAP_MS=8004 LINES=28
+PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=334 FAULTS=0 REFUSED=0 LINES=28 DROPPED=0
+```
+
+The last frame of the video (33 s) is q1n1's foothold page at `UPTIME 23 S`; the page above stood unchanged from about 16 s to 31 s.
+
+**What it answers.**
+
+| # | Question | Page lines | What the unit showed | Label |
+| --- | --- | --- | --- | --- |
+| 1 | Did a read-only snapshot of both controllers run to its end, and did the screen stay lit? | `END`, `DONE` | Yes: `END LOADS=334 FAULTS=0 SKIPS=0 BLK=0 CUTS=0 GAP_MS=8004 LINES=28` and the runner's `DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=334 FAULTS=0 REFUSED=0 LINES=28 DROPPED=0`; no black-out. The operator reports that the screen stayed lit for 2 minutes and more after the video ended | OBSERVED (the page, one boot); OBSERVED (the operator's report) |
+| 2 | Are the NoC clocks on the controllers' path running? | `NOC` | `ANOC=1.ON SYS=1.ON NTH=0.ON STH=0.ON` and `AHB=0.ON NAXI=1.ON SAXI=1.ON`: no word reads off (the page's `.ON` is bit 31, CLK_OFF, clear: `clk-branch.h:63`), and `NAXI` and `SAXI` read `1` (bit 0 set). The earlier lead, that a NoC clock on the way to `usb_1_ss1` is off at EL2 (design notes that are not committed), is REFUTED for this wiring, the stick in the top port. Boot 16's wiring, the stick in the second port, was not read: `NAXI` and `SAXI` might differ there (UNKNOWN) | OBSERVED (the words); INFERRED (that these are the clocks of the controllers' path) |
+| 3 | Are the controllers' power domain and clocks, and the PHY clock and domain words, on? | `GCC`, `GCCPHY` | `GDSC=0XF822F800.ON` and the five clocks `MST`, `SLP`, `MOCK`, `CFGN` and `AGGR` (each `1.ON`) read the same on both controllers (one value, no `/`), and so do the PHY words `AUX=1.ON CAUX=1.ON PIPE_NW=1` and `PGDS=0XF8222800.ON`: nothing reads off | OBSERVED |
+| 4 | Do the DWC3 cores and the glue differ? | `DWC`, `DWC3`, `QSCR` | No: `ID=0X33313130 STS=0X7E800001 CM=1 BV=0 BERR=0` (host mode, no bus error latched: the decode of section 12, row 6), `GCTL=0X101005 PC=1 U2PC=0X102400 SU2=0`, `U3PI=0XB081402 SU3=0 LTSM=0X9CC20026` and `GENC=4 HSPC=0X10000000 SSPC=0` are one value each; so is the last block, `SACR=0X41C` (not decoded here) | OBSERVED (the values) |
+| 5 | What differs between the two controllers? | `XHC`, `SMMU` | Only `USTS` (`A` `0x1`, HCH; `B` `0x11`, HCH and PCD) and port 2 (`A` `0x20002A0`; `B` `0x24002C0`), and the two streams' own match registers (`SMRN` 3 and 4, `SMR` `0x80001420` and `0x80001460`, as in section 12, row 11). `CAP` `0x1100020`, `CMD` 0 and port 1 (`0x20002A0`) are one value. Decode (INFERRED; the PORTSC layout is from memory): `0x20002A0` is port power, wake-on-connect and link state 5 (RxDetect), nothing connected; `0x24002C0` is link state 6 (Inactive) with the link-state-change flag, and the `PCD` of `USTS` follows from it | OBSERVED (the values); INFERRED (the decode) |
+| 6 | Is the SMMU as S0b read it? | `SMMU` | As S0b read it for every value both print, except `FAR` and `FSYNR0`: `SCR0=0X230406 ID0=0X7C017E9A ID1=0X6000005F GFSR=0`; streams `0x1420` and `0x1460` into context bank 3 (`CB=3`); `CBAR=0X35E03` (nested), `CBA2=1`, `SCTL=0XE0`, `TCR=0`, `MAIR=0`, `TTBR=0`; `FSR=0X400 FMT=2 FLT=0` (the FORMAT field is 2, no fault bit is set); `FAR=0X951F9F78F7F3` and `FSY0=0X460D5D`: `FAR` differs from every earlier boot's, and `FSY0` is boot 17's value (S0b read `0x46005D`, boot 16 `0x660D5D`). `SCTL` `0xE0` is bits 5, 6 and 7 with `M`, bit 0, clear: `CFRE`, `CFIE` and `CFCFG`, as the pinned `arm-smmu.h` names them (`arm-smmu.h:150`, `arm-smmu.h:149`, `arm-smmu.h:147`; `M` at `arm-smmu.h:154`). What `CFCFG` does, to stall a transaction that faults instead of terminating it, is the architecture's meaning of the bit: the pinned file does not say it and the Arm text was not re-read here | OBSERVED (the values); VERIFIED (the bit names, as what the pinned file says); INFERRED (what `CFCFG` does); UNKNOWN (what stage 2 maps, `NUMS2CB` 0; what `FAR` and `FSY0` mean) |
+| 7 | Did anything move during the 8 s? | `NEXT S2`, `DRIFT` | `DRIFT NONE CMP=84`: of the 84 words compared, none differed between the first pass and the second, 8 s later (`GAP_MS=8004`) | OBSERVED |
+
+**What the snapshot shows.** Reads of both controllers' xHC, DWC3 and glue registers, the clock and power words and the SMMU, 334 loads, did not fault,
+did not black out the screen and did not change over 8 s, and the screen stayed lit for minutes: so the dark screens of the A1 boots did not come from
+those reads, from the payload runner or from the passage of time (INFERRED); they followed the xHC stores in each of those boots (INFERRED: the RUN store). Of
+everything the page prints, only the port word and `PCD` separate `usb_1_ss1`, the controller by the map line of 17.3 that held the stick, from `usb_1_ss0`
+(besides the two streams' own match registers).
+
+**What it does not show (UNKNOWN).** `DCBAAP`, `CRCR`, the event ring and `IMAN` of either controller (`usbsnap` prints `CAP`, `CMD`, `USTS` and the two
+`PORTSC` words only; boot 19's own pre-flight read of `usb_1_ss1` is in 17.4); `NAXI` and `SAXI`, and every other word of this page, in boot 16's wiring; the
+PHY, repeater and retimer state beyond the clock and domain words; whether the xHC's DMA reaches DRAM.
+
+### 17.3 Which port is which, and which controller the firmware started (INFERRED)
+
+The Shell prints the stick's firmware path in its map (the `BLK0` line, on the panel during the countdowns before the script writes its marker). It was read
+on the video of boot 16 and of each boot of this section (OBSERVED, one video each). The port word latched at the payload's first reading (`BASE`, or `P2`
+on the page of boot 18A) and the port that the Mac's cable changed are the payloads' own readings (OBSERVED):
+
+| Boot | Shell map line, `BLK0: Alias(s): ...` | The stick's port (who said) | Port word `0x24002C0` (Inactive, link-state change) latched at the first reading | Port changed by the Mac's cable at the cue |
+| --- | --- | --- | --- | --- |
+| 16 | `Pci(0x80,0x0)/USB(0x1,0x0)` | the second port, the one the operator usually uses (not recorded for that boot) | `U0P2` (`U0P1`, `U1P1` and `U1P2` read `0x20002A0`) | `U1P2` |
+| 17 | `Pci(0x81,0x0)/USB(0x1,0x0)` | the top port (the operator, afterwards) | `U1P2` (the other three read `0x20002A0`) | `U0P2` |
+| 18A | `Pci(0x81,0x0)/USB(0x1,0x0)` | the top port (the operator; the second had been asked for) | `P2` of `B`, `usb_1_ss1` (`A` reads `0x20002A0`) | no cable |
+| 19 | `Pci(0x81,0x0)/USB(0x1,0x0)` | the top port (the operator; the stick is in the frame of the video) | `U1P2` (the other three read `0x20002A0`) | none: the cue was ignored |
+
+**What it says (INFERRED).** S0 named `Pci(0x80)` as the controller at `0x0a600000`, `usb_1_ss0` (section 12, rows 1 and 2; the stick was, INFERRED, in the
+port the operator usually uses), so `Pci(0x81)` is the other controller, `usb_1_ss1`. In every row the latched port word is on the controller that the path names: it is the
+stick's link, a SuperSpeed port 2 left Inactive with a link-state change. S0b fits it: its `U0` read `USBSTS` `0x11` (HCH and PCD) and its `U1` `0x1`
+(section 13, rows 1 and 2), the same pattern, on the controller that held the stick if the stick was in the usual port. Then the top port is wired to
+`usb_1_ss1` and the second port, the one the operator usually uses, to `usb_1_ss0`, and the firmware starts the controller whose port holds the stick (its
+USB stack read the stick through that controller before ExitBootServices). The Mac's cable fits it: in boot 16, with the stick in the second port, the
+cable in the free top port changed `U1P2`; in boot 17, with the stick in the top port, the cable in the free second port changed `U0P2`. Each leg is one
+boot of one unit, the map line is UEFI device-path text, and nothing traced the wiring.
+
+**The consequence (INFERRED).** In boots 15, 16 and 17 the controller under test was the one without the stick: `XHCI1.BIN` on `usb_1_ss1` with the stick
+on the `usb_1_ss0` side (boots 15 and 16; boot 15's port is UNKNOWN, the usual port is the likely one), and `XHCI0.BIN` on `usb_1_ss0` with the stick in the
+top port, on the `usb_1_ss1` side (boot 17). The premise of the boot 17 record, to test the controller that the firmware used for the stick, did not hold,
+because the stick's port in boot 16 had not been recorded: a wiring miss, not a payload fault. Boot 19 is the first test with the stick on the tested
+controller (17.4). At EL2 that controller reads as reset (OBSERVED, boot 19): there is nothing of the firmware's state to adopt on it (S1a, section 1,
+item 3), only the port word and `PCD` tell it from the other.
+
+**The earlier sentences, and the caveat they need.** Several sentences of this log say that `usb_1_ss1` was never started by firmware, was untouched by it or
+is not among its USB controllers: section 1, item 4 ("firmware never started it"), section 12, rows 1 and 10, section 13, row 2, and the paragraph "One fact
+for the stick question" of 14.2 ("is not among them"). Each was read with the stick in the port the operator usually uses, which this section reads as the
+second port, the one wired to `usb_1_ss0` (INFERRED), so each holds for that wiring only. With the stick in the top port the path names `Pci(0x81,0x0)` and
+the latched port word is on `usb_1_ss1`, which fits a controller that the firmware did start and use (INFERRED). Each of those sentences now carries a pointer
+to this section where it stands; its words are unchanged. Section 3.2, the evidence table of section 9 and Q2 of section 11 say which controller the stick
+uses or which port is which, and say now that it follows the port. What the firmware's PCI I/O listing of 14.2 shows with the stick in the top port was
+not read (UNKNOWN).
+
+### 17.4 Boot 19: `XHCI1.BIN` with the stick on its controller and no cable
+
+Boot 19 ran `XHCI1.BIN` again, the file of boots 15 and 16 (the plan `a1-xhci-s1`), and changed only the attachments of boot 16: the stick in the top port,
+on the controller under test (INFERRED, 17.3), and no Mac cable at the cue. The checks that its approval asked for passed (OBSERVED): the Shell's map line
+read `Pci(0x81,0x0)/USB(0x1,0x0)` (the stick is in the frame of the video, in the top port), the script printed `AUTORUN a1-xhci-s1 STEP 1 OF 1`, the
+runner's digits were `989324B52E66C212` with `PAYLOAD VERIFY=OK`, and `BASE` showed `U1P2` at `0x24002C0` and `U0P2` at `0x20002A0`, the pattern of boots 17
+and 18A. The cue was ignored on purpose: `WATCH DONE CHANGED=NONE N=0` (O14 of the runbook: the run goes on).
+
+**The page of boot 19** as read at 66 s of the video, its last lit frame, on enlarged crops (capital letters only; the addresses are one boot's allocations,
+not constants):
+
+```text
+PAYLOAD LOADED INDEX=0 BASE=0XCE5EA000 BYTES=19798 SHA=989324B52E66C212 TYPE=1
+PAYLOAD READY FILES=1 RANGES=4 CODE=1
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 0 989324B52E66C212
+PAYLOAD XHCI U1 ID=0X33313130 CAPL=0X20 VER=0X110 HCS1=0X2000340 HCS2=0X140000F1 HCC1=0X110FFC5
+PAYLOAD XHCI U1 SCRATCH=2 PAGESZ=0X1 AC64=1 CSZ=64 DBOFF=0X2000 RTSOFF=0X1000
+PAYLOAD XHCI U1 CMD=0X0 STS=0X11:HCH,PCD CRCR=0X0 DCBAAP=0X0 CFG=0X0
+PAYLOAD XHCI SMMU STREAM=0X1460 SMR=4 TRANS CB=3 NCB=0X5F
+PAYLOAD XHCI SMMU0 GFSR=0X0 FSR=0X400 FAR=0X951F9F8F773 FSYNR0=0X460D5D
+PAYLOAD XHCI ARENAS 2=OK 3=OK 4=OK
+PAYLOAD XHCI WATCH 30 S: CONNECT THE MAC USB-C CABLE TO THE FREE PORT NOW
+PAYLOAD XHCI BASE U0P1=0X20002A0 U0P2=0X20002A0 U1P1=0X20002A0 U1P2=0X24002C0
+PAYLOAD XHCI WATCH 20 S LEFT
+PAYLOAD XHCI WATCH 10 S LEFT
+PAYLOAD XHCI WATCH DONE CHANGED=NONE N=0
+PAYLOAD XHCI NEXT ARENA 2 STACK 0XCE5D9000 PAGES 3 AFTER 8 S
+PAYLOAD XHCI NEXT RESET AFTER 8 S
+PAYLOAD XHCI NEXT PROGRAM AFTER 8 S
+PAYLOAD XHCI NEXT RUN AFTER 8 S
+```
+
+The `FAR` digits are as transcribed from a blurry crop (the page of boot 18A reads `0X951F9F78F7F3`): they are uncertain, and the meaning of `FAR` stays UNKNOWN,
+as it differs in every boot; `FSYNR0` `0x460D5D` is the value of boots 17 and 18A. Nothing follows: no `R1` line, no VERDICT, no END, no fault page.
+
+**The video, in time (OBSERVED; the 1 frame per second crops give +-1 s).**
+
+| Video, time | What is on the panel |
+| --- | --- |
+| about 3 s | the Shell's map line, `AUTORUN a1-xhci-s1 STEP 1 OF 1` and the five-second countdown |
+| about 38 s | `NEXT ARENA 2 STACK 0XCE5D9000 PAGES 3 AFTER 8 S` |
+| about 46 s | `NEXT RESET AFTER 8 S` |
+| about 54 s | `NEXT PROGRAM AFTER 8 S` |
+| about 62 s | `NEXT RUN AFTER 8 S` |
+| 69.5 to 70.0 s | the screen is lit at 69.5 s and dark at 70.0 s |
+| to 72.8 s | still dark: no further line |
+
+The screen went dark about 8 s after `NEXT RUN AFTER 8 S` was drawn, the signature of boot 16 (8.15 s) and boot 17 (about 8 s): the end of the 8 s wait before
+the first RUN-group store, `USBCMD` with RS. That the screen followed that store is INFERRED from the payload's nominal wait.
+
+**What it answers.**
+
+| # | Question | What the unit showed | Label |
+| --- | --- | --- | --- |
+| 1 | What does the controller under test report? | `usb_1_ss1`, the one the stick sat on (17.3), read halted with `CMD` 0, `STS` `0x11` (`HCH` and `PCD`), `CRCR` 0, `DCBAAP` 0 and `CONFIG` 0. That is indistinguishable from an unstarted controller: boot 16's `usb_1_ss1` read `STS` `0x1` with the same zeros, and boot 17's `usb_1_ss0` too; only `PCD`, with the latched port word, differs. So the firmware's state of the stick's controller is not adoptable at EL2: it reads as reset (INFERRED) | OBSERVED (the values); INFERRED (the reading) |
+| 2 | Does the screen go off with the stick on the tested controller and no cable anywhere? | Yes: the page ended at `NEXT RUN AFTER 8 S`, the screen went dark about 8 s later and the video ends dark (72.8 s); no `R1` line, VERDICT, END or fault page. The operator's report: "screen went black" | OBSERVED (the screen, the report); INFERRED (the link to the store) |
+| 3 | What did the Mac see afterwards? | After the black-out the operator plugged the Mac's cable into the free port, the second one: an optional step outside the approved boot, on the Mac's side only, with the logger started first. Nothing appeared on the Mac: the logger saw no USB or network event. With boot 17's null result, the Mac has seen no USB device of any kind in either port after a black-out (boot 17: the top port; boot 19: the second) | OBSERVED (the logger, the operator's report) |
+
+Not reported for this boot: the unit's heat, when and how it was powered off, and whether it came back (UNKNOWN). The runbook's success page (`VERDICT NOOP_OK`)
+was not reached.
+
+### 17.5 What the four boots that wrote xHC registers show together (INFERRED)
+
+Boots 15, 16, 17 and 19 are the four A1 boots. What differed between them, as far as the readings go, and how each ended:
+
+| Boot | Payload, controller | The stick | The Mac's cable at the cue | The ending |
+| --- | --- | --- | --- | --- |
+| 15 | `XHCI1.BIN`, `usb_1_ss1` | port UNKNOWN (the usual port, the second, is the likely one: not on the tested controller) | plugged at `WATCH 20 S LEFT` (memory) | the screen went off (the operator's memory; its page is UNKNOWN) |
+| 16 | `XHCI1.BIN`, `usb_1_ss1` | the second port: not on the tested controller | the free port; `U1P2` changed | off 8.15 s after `NEXT RUN`, and stayed off |
+| 17 | `XHCI0.BIN`, `usb_1_ss0`, first arena the firmware's own | the top port: not on the tested controller | the free port; `U0P2` changed | off about 8 s after `NEXT RUN`, and stayed off |
+| 19 | `XHCI1.BIN`, `usb_1_ss1` | the top port: ON the tested controller | none: `CHANGED=NONE N=0` | off about 8 s after `NEXT RUN`; the video ends dark |
+
+In every row for which a page was read, the page ended at `NEXT RUN AFTER 8 S`, and in every row the screen went off at about the end of the wait before the
+first store of the RUN group, `USBCMD` with RS (the link to the store is INFERRED from the timing; boot 15 rests on the operator's memory). What differed
+between the rows did not change the ending: the controller, the stick on or off the tested controller, the Mac's cable present or absent, the first arena
+(the runner's stack or the firmware's memory) and the payload's base address (it moves between boots). So the black-out is not specific to `usb_1_ss1`, not
+an unstarted controller, not the absence of the stick from the tested controller and not the Mac's cable (INFERRED: one unit, one boot per setup, boot 15
+from memory); each of these was a candidate when boot 16 ended. What the four share is the sequence of stores up to and including the first store of the RUN
+group (INFERRED for boot 15).
+
+**SC3 (section 4.7: five boots at S1 without a No-Op completing, or two boots with an unexplained Host System Error).** Boots 15, 16, 17 and 19 are four
+boots at S1 without a No-Op completing: the count is 4 of 5 (3 if boot 15 does not count, because its page and its ending are the operator's memory). One more
+such boot would be the fifth (the fourth without boot 15). Boot 18A is not a boot at S1: it stored nothing. No HSE was read in any of these boots, so the
+second limb is not counted. The stop criteria are points at which work on the stick writer stops and the plan is reviewed, not retried.
+
+**The stop rules applied.** O10 of the runbook reads each of these pages as section 16 says: no VERDICT, the page stops, the screen goes off. No restart was
+seen in boots 16 and 17 and none was reported in boot 19, so of O10's two readings, hang or reset, the hang fits (INFERRED); a dead display with a live SoC is
+a third, which the runbook does not list. The runbook marks O10 an SC1 candidate; nothing is authorised by that, and the clock, GDSC and PHY writes it would
+lead to stay UNIMPLEMENTED. The runbook's rules (4.3, 4.4) stand, except where the operator's waiver named one boot.
+
+### 17.6 What these boots do not show, the open hypotheses, and what follows
+
+**What these boots do not show (UNKNOWN).**
+
+- Whether the SoC was alive after the black-out: no probe of it exists. The Mac saw no USB device in either port, which excludes only a state that a Mac
+  can see (INFERRED), and the lit screen of boot 18A says nothing about it.
+- Whether the RS store completed, whether the xHC started (`HCH` after the store was never read) and whether it fetched `DCBAA[0]` or the scratchpad array: no
+  DMA was observed in any boot. The question of A1 (does the xHC's DMA reach the runner's RAM) stays UNKNOWN, and SC2 is neither triggered nor cleared.
+- The `HSE` and `HCE` bits, the SMMU fault registers and the DWC3's bus-error address after the RS store: never read.
+- `DCBAAP`, `CRCR`, the event ring and `IMAN` of the controller that holds the stick, as the firmware left them (`usbsnap` does not print them; boot 19's own
+  pre-flight read of `usb_1_ss1` gave `DCBAAP`, `CRCR` and `CONFIG` 0, before any store), and the words of boot 18A in boot 16's wiring, `NAXI` and `SAXI`
+  among them.
+- Boot 15's page. The stick was not read back for this section: nothing is claimed about its contents.
+
+**Hypotheses that nothing here separates (UNKNOWN unless a label says otherwise; none tested).** Each fits all four boots.
+
+- **(a) The xHC's first DMA after RS meets the SMMU's context bank 3.** Both streams translate through that bank (`SMR` 3 and 4, `S2CR` `TRANS`, `CB=3`:
+  S0, S0b and the pages of this section). Its registers read `CBAR` `0x35E03` (nested), `CBA2R` 1, `SCTLR` `0xE0` (stage 1 off, `M` clear; `CFRE`, `CFIE`
+  and `CFCFG` set), `TCR` and `TTBR0` 0, no fault bit in `FSR`, and `NUMS2CB` 0 (OBSERVED: S0b and boot 18A; the stream and `FSR` also in boots 16, 17 and
+  19). If `CFCFG` set means that a faulting transaction is stalled and not terminated (INFERRED, 17.2 row 6), a DMA of the xHC that faulted in the bank
+  would stall, and a stalled transaction could block interconnect paths that the display also uses (INFERRED mechanism; nothing here checks it beyond the
+  register values). The hypervisor that, INFERRED, configured the bank was replaced at the bounce (section 3.4), and what its stage 2 maps is UNKNOWN (section 13).
+- **(b) The start of the port state machines.** RS starts the xHC, which then runs its ports and PHYs with a PHY or Type-C path that is not as the
+  controller expects (PHY, repeater and retimer state UNKNOWN, M3 not measured; the stick's port word was latched Inactive at the first reading in boots 16 to
+  19).
+- **(c) An event of the embedded controller or the PMIC** that the start of a port provokes (UNKNOWN: nothing here reads either).
+- **(d) The display subsystem stopping while the SoC is alive**, for a reason that the xHC's start provokes or for another (a scanout underrun, a clock or a
+  power domain; UNKNOWN).
+
+The lead of earlier design notes (not committed), that a NoC clock on the way to `usb_1_ss1` is stopped at EL2, is REFUTED for the top-port wiring: `NAXI` and
+`SAXI` read on (OBSERVED, boot 18A, 17.2 row 2). Boot 16's wiring was not read.
+
+**What would separate them (NOT RUN; nothing is authorised, nothing is written here).** A payload that clears `CFCFG` in the bank's `SCTLR` before the RS
+store is the obvious next probe for (a): with the bit clear a faulting transaction would be terminated, not stalled (INFERRED), so if (a) holds the page should
+go on, perhaps with a fault bit in `FSR` or a VERDICT, and if the screen still goes off, (a) in this form is not the cause. It writes an SMMU register, which
+the records of A1 ban, so it needs its own named authorisation. For (b), (c) and (d) no probe is in hand: each needs a reading after the store, and the panel
+is the only channel. Read-only boots would add to the picture without a store: a snapshot like boot 18A with the stick in the second port (`NAXI` and `SAXI`
+in boot 16's wiring), and one that also prints `DCBAAP`, `CRCR` and the event ring of the controller that holds the stick.
+
+**The hazards, as they fell (the record's section 8).** As in section 16, INFERRED from the page structure (no boot printed an END line, so the payload's own
+`WRITES` count never appeared): in boots 17 and 19 the words of one RAM arena (boot 17: arena 1, the firmware's own xHCI memory; boot 19: arena 2, the runner's
+stack pages), `HCRST`, the ten PROGRAM stores and, at the end of the last wait, the RS store of `USBCMD`, the twelfth register store, after which the screen
+went off. Nothing else was written: no port, DWC3, glue, SMMU, clock, GDSC, PHY, retimer or stick register, no doorbell, `IMAN` or `ERDP`-with-EHB store, and
+no stick sector (A2). Boot 18A stored nothing by its design (`READ ONLY` on its page; its source is not committed here).
+
+**What follows.** No next step of the xHC work is requested here. On 2026-11-17, after boot 19, the operator paused the xHC and stick-writer work and turned
+to the monitor entry (M1 of [SP11-MONITOR-PORT.md](SP11-MONITOR-PORT.md)), which needs neither USB nor a log channel. By the runbook's rules (4.3, 4.4, O10) the A1 sequence stops again, and SC3 stands at 4 of 5 (3 if
+boot 15 does not count): the plan is reviewed, not retried. Any further xHC write needs a new record that the operator approves by name, and a write to the
+SMMU needs its own named authorisation; nothing is authorised, and this section writes nothing. For this log the panel is still the only channel and could not
+show what followed the RUN store in any boot; the writer stays UNIMPLEMENTED, no completed No-Op has been seen in any boot (boot 15's page is UNKNOWN), no USB
+DMA or live link has been demonstrated, and A2 was not exercised.
 
 ## Appendix A. The page lines of the survey boot (S0; EXPERIMENTAL in the q1n1 fork; ran once on the unit, section 12)
 
