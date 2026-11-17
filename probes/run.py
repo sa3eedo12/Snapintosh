@@ -545,8 +545,9 @@ EV_EARLY_STOP, EV_EARLY_STOP_REQUEST = 52, 53
 #   -84 .. -89     unused; kept free so the A16 band can grow without touching the SP11 ones.
 #   -90 .. -95     SNAP_PLATFORM_SP11 launch gate: NV2 and PAuth (compat/nv2-gate.h, compat/oryon-idregs.h).
 #   -96 .. -145    SNAP_PLATFORM_SP11 NVMe window (compat/nvme-host.h): NVMEH_E_SP11_* at -96 .. -144 and
-#                  NVMEH_SP11_STATUS_UNWIRED at -145, which ans_window_prepare returns until nvmeh_sp11_adopt has its
-#                  inputs. The same number is stored in the physical NVMe state's `prepare` word.
+#                  NVMEH_SP11_STATUS_UNWIRED at -145, which nvmeh_sp11_adopt (called by ans_window_prepare) returns when the
+#                  host placed neither the target nor the record in the reservation. The same number is stored in the
+#                  physical NVMe state's `prepare` word.
 #   -146           SNAP_PLATFORM_SP11 vCPU count that needs the fair service lock and the build has none
 #                  (GUEST_CPU_STATUS_FAIR_LOCK, compat/cpu.h; returned first by xnuboot_prepare).
 #   -147 .. -148   SNAP_PLATFORM_SP11 timer guards, the last refusals of vcpu_arch_prepare (compat/sp11-timer-guard.h,
@@ -623,8 +624,8 @@ PREPARE_FAILURES = {
          'cannot be mapped to the J700 view',
     -95: 'SP11 PAuth normalization: the PAuth ID fields are not a recognised shape (implementation-defined '
          'algorithm, both families, no PAuth, or not address 5 with PACGA)',
-    # SNAP_PLATFORM_SP11 NVMe window (compat/nvme-host.h): nvmeh_sp11_adopt's refusals, -96 .. -144, and the monitor's own
-    # until that adoption has inputs, -145. Each text is "SP11 NVMe window: " plus nvmeh_sp11_strerror's, which
+    # SNAP_PLATFORM_SP11 NVMe window (compat/nvme-host.h): nvmeh_sp11_adopt's refusals, -96 .. -144, and its answer when the host
+    # placed neither block, -145. Each text is "SP11 NVMe window: " plus nvmeh_sp11_strerror's, which
     # tools/test-sp11-integration.py holds equal. The same number is stored in the physical NVMe state's prepare word.
     -96: 'SP11 NVMe window: target or record ABI revision is not 1',
     -97: 'SP11 NVMe window: a reserved word, unknown known-bit or unknown flag is set',
@@ -680,8 +681,8 @@ PREPARE_FAILURES = {
     -142: 'SP11 NVMe window: Set Features with the Save bit is refused',
     -143: 'SP11 NVMe window: the I/O opcode is not Read, Write or Flush',
     -144: 'SP11 NVMe window: Write while the window is read-only',
-    -145: 'SP11 NVMe window: the monitor does not yet receive the SP11 target, record and '
-          'per-run pins, so it refuses to adopt the SSD',
+    -145: 'SP11 NVMe window: no SP11 target and record block was placed in the reservation, so the monitor '
+          'refuses to adopt the SSD',
     # SNAP_PLATFORM_SP11 launch configuration (compat/cpu.h): vCPUs spanning more than one cluster need the queued lock.
     -146: 'SP11 vCPU count: the guest vCPUs span more than one cluster and this build has no fair service lock '
           '(compat/topology.h NEEDS_FAIR_LOCK; build with -DSNAP_FAIR_TOKEN=1)',

@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 """What the authorisation record of a monitor entry run (--m1-run of tools/sp11_stick_bundle_build.py; docs/SP11-STICK-MONITOR.md section 10) is
 made from besides the bundle: the build report of tools/sp11_stick_wrapper_build.py --monitor, read strictly and checked against the bytes the
-builder was given as --monitor and --reporter, and the words of the PARAMS chunk that must be zero for this run.
+builder was given as --monitor and --reporter, the words of the PARAMS chunk that must be zero for this run, and the device models it must not list (any of
+the ANS family: an ANS window makes the monitor call nvmeh_sp11_adopt with two blocks that nothing of the stick bundle places; docs/SP11-STICK-MONITOR.md
+section 18).
 
 Nothing in the report is taken on trust: every size and digest the record prints is recomputed from the files, the layout of SNAPMON-M1.BIN
 (wrapper, zero padding, monitor) is checked byte for byte, and the NV2 record the monitor was built with is found in the monitor's own bytes,
@@ -28,7 +30,7 @@ import nv2_record  # noqa: E402
 import sp11_stick_bundle as sb  # noqa: E402
 import sp11_stick_bundle_chunks as ch  # noqa: E402
 
-REFUSALS = ('M1_REPORT_BAD', 'M1_REPORT_MISMATCH', 'PARAMS_LAUNCH', 'WRAPPER_CALLS_MONITOR', 'M1_NO_MONITOR_CALL')     # beside BUILDER_REFUSALS: docs/SP11-STICK-BUILD.md lists those name for name
+REFUSALS = ('M1_REPORT_BAD', 'M1_REPORT_MISMATCH', 'PARAMS_LAUNCH', 'PARAMS_ANS', 'WRAPPER_CALLS_MONITOR', 'M1_NO_MONITOR_CALL')     # beside BUILDER_REFUSALS: docs/SP11-STICK-BUILD.md lists those name for name
 ch.KNOWN_REFUSALS.update(REFUSALS)
 ch.KNOWN_REFUSALS.add('OPTIONS_BAD')
 Refused = ch.Refused
@@ -45,6 +47,14 @@ PARAMS_BYTES = 0x2410       # sizeof(struct params) (probes/xnuboot/report_layou
 # early_stop.flags bit 1 a call through a PARAMS pointer and bit 3 the loads from the A16's sensor addresses (record section 3b), txm_native (image,
 # work, size, tree_size) a native TXM image. The wrapper reads the first two before the call; the third only this builder reads.
 LAUNCH_WORDS = (('gpu.flags', 0x2340, 8), ('txm_native', 0x23C0, 32), ('early_stop.flags', 0x23E0, 8))
+# The device models of struct params (probes/xnuboot/report_layout.c, compat/device.h): model_count at 0x2D0, then DEVICE_MODEL_MAX slots of struct device_model
+# {kind, base, span, config[5]}, 64 bytes each, from 0x2D8. ans_window() (probes/xnuboot/ans_glue.c) is true for a DEVICE_ANS_NVME_V1 model whose config[3] is
+# ANS_WINDOW_MODE, and only then does ans_window_prepare call nvmeh_sp11_adopt, whose target and record blocks a host tool places in the window reservation
+# (docs/SP11-NVME-WINDOW.md section 2.3). Nothing of the stick bundle places them, so this kind lists no ANS model at all. The wrapper does not read these words:
+# only this builder does. tools/test-sp11-stick-monitor-ans.py holds the numbers against the headers and the monitor's own translation unit.
+MODEL_COUNT_AT, MODELS_AT, MODEL_BYTES, MODEL_MAX = 0x2D0, 0x2D8, 64, 128
+ANS_KINDS = {49: 'DEVICE_ANS_ASC_V1', 50: 'DEVICE_ANS_NVME_V1'}
+ANS_NVME_KIND, ANS_WINDOW_AT, ANS_WINDOW_MODE = 50, 24 + 3 * 8, 1       # config[3] of a model: kind, base and span (24 bytes) come first
 # What the wrapper tool leaves in front of an appended monitor, and what the wrapper prints when it has one (probes/sp11-stick-monitor.c) or has none
 # (probes/sp11-stick-wrapper.c). The first 1 MiB of a file is searched for a call: the wrapper is under the monitor's offset, 128 KiB by default.
 SCAN_BYTES, PAGE, PAD_BYTES = 1 << 20, 4096, 16
@@ -255,11 +265,22 @@ def read_report(data, image, reporter, efi=None):
 
 
 def check_launch(chunks):
-    """PARAMS_LAUNCH: the PARAMS chunk of the guest holds zero in every word of LAUNCH_WORDS. A chunk too short to hold them is BUILT_SHAPE, as
-    for the words check_params reads."""
+    """PARAMS_LAUNCH: the PARAMS chunk of the guest holds zero in every word of LAUNCH_WORDS. PARAMS_ANS: none of the MODEL_MAX slots of its device models holds
+    a DEVICE_ANS_* kind, the slots past model_count included (the monitor does not read those, but a PARAMS that has one is not a PARAMS this builder wrote; the
+    whole 64-bit word is the kind, as the monitor compares it). A chunk too short to hold them, or a model_count that struct params has no slots for, is
+    BUILT_SHAPE, as for the words check_params reads."""
     params = [c for c in chunks if c['kind'] == sb.KIND_PARAMS]
     data = params[0].get('data') if len(params) == 1 else None
     if data is None or len(data) < PARAMS_BYTES:
         raise Refused('BUILT_SHAPE', f'the PARAMS chunk is absent, zero-filled or shorter than the {PARAMS_BYTES:#x} bytes of struct params')
     if bad := [f'{name} (offset {at:#x})' for name, at, size in LAUNCH_WORDS if any(data[at:at + size])]:
         raise Refused('PARAMS_LAUNCH', f'PARAMS is not zero in {", ".join(bad)}: this run opens none of the paths those words open')
+    word = lambda at: int.from_bytes(data[at:at + 8], 'little')     # noqa: E731
+    if (count := word(MODEL_COUNT_AT)) > MODEL_MAX:
+        raise Refused('BUILT_SHAPE', f'PARAMS lists {count} device models and struct params has {MODEL_MAX} slots')
+    for slot in range(MODEL_MAX):
+        at = MODELS_AT + slot * MODEL_BYTES
+        if (kind := word(at)) in ANS_KINDS:
+            window = ', configured as an ANS window (config[3] is 1)' if kind == ANS_NVME_KIND and word(at + ANS_WINDOW_AT) == ANS_WINDOW_MODE else ''
+            raise Refused('PARAMS_ANS', f'PARAMS lists {ANS_KINDS[kind]} in device model slot {slot} (model_count {count}){window}: this kind has no ANS window, so '
+                                        'that the monitor never calls nvmeh_sp11_adopt, whose target and record blocks nothing of the stick bundle places')

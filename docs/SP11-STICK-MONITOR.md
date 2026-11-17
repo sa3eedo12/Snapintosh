@@ -211,9 +211,10 @@ Run from the repository root with `source <env>` first (clang, lld, llvm, QEMU o
 | H8 | test-sp11-stick-monitor-build.py, class Trampoline | Phase C (section 13): the real bytes of `sw_monitor_call` run at EL2 under QEMU's `-cpu max`; the monitor and the wrapper as a whole are NOT RUN under QEMU (EDK2 sets T0SZ 16 under `-cpu max`; FEAT_NV2 there is UNKNOWN) | 4 (the suite: 37) |
 | H9 | test-sp11-stick-monitor-census.py | Phase D (section 14, D3): the second review's mutants (an MSR, an SMC, a TLBI, a DC and an IC written over the first instruction of `xnuboot_report`; an MRS turned into an MSR in the wrapper; a data word that is an MSR), each failing the placed check that the name check passes; the ties of both ELFs to section 1b; the parser and the decoder | 20 |
 | H10 | test-sp11-stick-monitor-builder.py | Phase D (D2, D4): the label marker in PIN.DAT, refused in the facts of every kind and when it does not fit; the two EFI digests; `real --m1-run` refused unless the panel is withheld and the HVC patch is 0; `real --m1-run` run end to end on the host (SKIP without the J700 boot set) | 14 |
-| H11 | test-sp11-stick-monitor-devices.py | Phase D (D1, D5, D6, D7): the families of device code against the symbol table, the families the build leaves out, every SMC owner, the sources the gates are read from, the interrupts the monitor acknowledges, the thermal text, the kernelcache scan (SKIP without the boot set) and the hygiene of the new files | 22 |
+| H11 | test-sp11-stick-monitor-devices.py | Phase D (D1, D5, D6, D7): the families of device code against the symbol table, the families the build leaves out, every SMC owner, the sources the gates are read from, the interrupts the monitor acknowledges, the thermal text, the kernelcache scan (SKIP without the boot set) and the hygiene of the new files; Phase E part 3 (section 17): the SSD path and the stick bundle's silence about placing its blocks; Phase E part 4 (section 18): the call reached only for an ANS window and the builder's refusal of every ANS model | 24 |
 | H12 | test-sp11-stick-monitor-arm.py | Phase E (section 15, E1 and E2): the record's `gic` class against the registers the host model of the arm half logs in 17 runs, its offsets and outcome numbers, the place for pass 6; the arm outcomes 22, 23 and 48 refused before the monitor is called (the call counter, the put-back, the page at 29 of 30 lines, the reporter without `GIC QUAR`); five seeded-bad stages | 27 |
 | H13 | test-sp11-stick-monitor-gates.py | Phase E part 2 (section 16): the put-back's last write is not made with both group 1 gates left open (after a refusal and after the call) and is made with one gate stuck or a gate found open; the record's claims about it against the model; four mutants of the stage and nine faulty texts | 20 |
+| H14 | test-sp11-stick-monitor-ans.py | Phase E part 4 (section 18): the numbers `check_launch` reads the device models with, against the headers and the monitor's own translation unit (SKIP without a toolchain), and the builder refusing an ANS model in PARAMS end to end, for the M1 kind only | 5 |
 
 Seeded-bad stages (a test define each; the real stage passes the check, the seeded one fails it; all as required): `no-params-check`, `no-digest`,
 `no-reg-check`, `no-ic-sync`, `stray-gic` (a write to another CPU's redistributor frame), `wrong-args` (x1 and x2 swapped), `no-s2`,
@@ -288,7 +289,7 @@ names must be in the monitor's own bytes once and parse (`tools/nv2_record.py`):
 compares, and says LOCAL TEST RECORD for tool `wi4b-test-only`. Refusals, each with a faulty case: `M1_REPORT_BAD` (not the report of this kind; no text of the file is
 quoted), `M1_REPORT_MISMATCH` (the report does not describe the files: a digest, the layout, one changed byte of wrapper, padding or monitor, the pins, the NV2 record
 absent, twice or damaged), `PARAMS_LAUNCH` (PARAMS not zero in gpu.flags 0x2340, txm_native 0x23C0, 32 bytes, or early_stop.flags 0x23E0; this kind only: the others never
-call the monitor; a PARAMS chunk too short is `BUILT_SHAPE`), and the existing `TIME_BOX_MISMATCH` (PARAMS word 24) and `OPTIONS_BAD`. These are `m1.REFUSALS` with the two of the
+call the monitor; a PARAMS chunk too short is `BUILT_SHAPE`), and the existing `TIME_BOX_MISMATCH` (PARAMS word 24) and `OPTIONS_BAD` (`PARAMS_ANS` joined these in section 18). These are `m1.REFUSALS` with the two of the
 interlock below, not `BUILDER_REFUSALS`: `docs/SP11-STICK-BUILD.md` lists those name for name and has no room (its cap went from 33,000 to 33,200 for one pointer line; nothing in it was cut).
 
 **The interlock, both ways.** The records of the dry run and of the GIC and stop dry run say that no monitor is called, so a wrapper that calls one must not be authorised under
@@ -501,3 +502,54 @@ binaries). The size cap of this note and of the auth suite's check of it was rai
 the put-back began, so these tests follow `tools/test-sp11-stick-gic.c`; the comparison reads phrases, so a re-worded sentence needs `claims()` changed with it.
 
 Counts: monitor 33, record 19, build 37, auth 54, interlock 46, census 20, builder 14, devices 22, arm 27, gates 20.
+
+## 17. Phase E part 3: the SSD path after the storage preparation (host only)
+
+The storage preparation (docs/SP11-NVME-WINDOW.md section 2, docs/SP11-STORAGE-PROVISIONING.md) changed what the SP11 monitor does with an ANS window: `ans_window_prepare` calls `nvmeh_sp11_adopt` with a target block and a
+record block that a host tool places in the window reservation after the params and the state, and never `nvmeh_adopt`; a pair that was never placed (all zero) is refused by name as UNWIRED (-145). Before, the SP11
+branch only refused. Hardware NOT RUN; nothing here authorises a run.
+
+**I1, the pins** (`tools/test-sp11-stick-monitor-devices.py`, `Sources`; the old test pinned the two-statement refusal and failed). The SP11 branch of `ans_window_prepare` returns `nvmeh_sp11_adopt(...)` with the
+target, the record, the params and the state, has no other return and no call of `nvmeh_adopt`, and the other branch still adopts with `nvmeh_adopt`; `nvmeh_sp11_adopt` refuses an all-zero pair by name
+before it checks anything, looks at every byte of both blocks and stores its refusal in the state. Second pin: no file of the stick bundle's code (`tools/sp11_stick_*.py`, `tools/sp11_m1_*.py`,
+`probes/sp11-stick-*.c` and `.h`: 32 files) names `ANS_WINDOW_NVMEH_TARGET`, `ANS_WINDOW_NVMEH_RECORD` or `nvmesp11`: the stick profile stays refused by name only while nothing of the stick places the two blocks.
+Faulty cases: the old refusal, `nvmeh_adopt` in
+the SP11 branch, the blocks swapped, a second route, no SP11 branch, an A16 branch that no longer adopts, an `nvme-host.c` without the unplaced check, with one block unchecked and with the refusal not stored; a stick
+file that names each word and a pin that finds no file. The pins are on the sources because LTO inlines `nvmeh_sp11_adopt` (the binary holds `nvmeh_sp11_check`).
+
+**I2, the record.** The `nvmeh` paragraph of section 3b said that `ans_window_prepare` "answers UNWIRED when PARAMS configures an ANS window": imprecise now. It says what is above, that no tool of the stick bundle places
+the two blocks (UNIMPLEMENTED), and that whether this run's PARAMS configure an ANS window stayed UNKNOWN, which section 18 replaces (the builder now refuses an ANS model); the words the devices test needs are kept. Nothing else in
+this note repeated the claim. The auth suite's two pinned texts were re-pinned. **I3.** The M1 monitor grew with the call (xnuboot.bin 314,863 to 316,767 bytes, SNAPMON-M1.BIN 445,935 to 447,839); SNAPREP-M1.BIN, the
+monitor-off pair and the GIC pair are what they were. The size caps of this note in the auth and build suites went from 75,500 to 78,100 for this section; nothing was cut. Counts: devices 23.
+
+## 18. Phase E part 4: no ANS window in a bundle (R3) and the second storage drop (host only)
+
+The storage agent's second drop (storage v2: `nvmeh_sp11_adopt` clears the state word first; new line numbers in `ans_glue.c`, `run.py` and `board_descriptor.py`) and an independent review's R3 landed here: what stops a stick bundle
+from placing the two blocks that `nvmeh_sp11_adopt` reads? Hardware NOT RUN; nothing here authorises a run.
+
+**J1, what I found and the refusal.** `check_launch` of `tools/sp11_stick_bundle_m1.py` is the only place where the builder of this kind reads PARAMS, and it reads all of `struct params` (0x2410 bytes), so it sees `model_count` (0x2D0) and the 128
+device models (from 0x2D8, 64 bytes each). It does not build PARAMS: a real guest's comes from `probes/xnuboot.py`, whose default profile `j700ap-26A428` has no ANS model, and the synthetic one lists none. No ANS model reaches a bundle today;
+the refusal makes that a rule. A window could not live in a bundle anyway: the loader puts its reservation directly above the work area (`ans_reservation()`, `probes/xnuboot.py:592`), at the end of the placement, outside the one range the record
+lets the run store to, and a GUEST.DAT chunk must lie in the pinned guest range (`probes/sp11-stick-bundle.h:671`). `check_launch` now refuses, as `PARAMS_ANS` (in `m1.REFUSALS`, this kind only), a `DEVICE_ANS_ASC_V1` (49) or a `DEVICE_ANS_NVME_V1` (50) in any of the 128 slots (the detail says which is a window: the NVMe model
+with config[3] 1), compares the whole 64-bit kind as the monitor does, and refuses a `model_count` above 128 as `BUILT_SHAPE`; `PARAMS_LAUNCH` still comes first. One premise of the brief differs: with the refusal the call of `nvmeh_sp11_adopt` is not
+reached with two all-zero blocks and answered UNWIRED; it is not reached at all, because `ans_window()` is false without the ANS NVMe model and `ans_window_prepare` returns first. The gate is a LIVE read (asked at prepare, at each ANS access and
+at the stop, `report.c`): a guest that writes PARAMS (INFERRED possible, section 3b) could configure a window, with its ADOPTED word at an address that it names and `nvmeh_sp11_adopt` not having run; the record says so. The wrapper reads the time box,
+`early_stop.flags` and `gpu.flags` and not the models: only the builder, and the digest that the record names, stand between a hand-made GUEST.DAT and the monitor.
+
+Tests. `test-sp11-stick-monitor-devices.py` (24) pins that both hold: the call of `nvmeh_sp11_adopt` is the only one in the monitor's sources and sits behind `ans_window()`, which needs the NVMe model with the window word, and `check_launch` refuses
+six PARAMS that list an ANS model and accepts three that do not; faulty cases: eight sources (a window that needs no window word, the ASC model taken for the window model, a launch that does not return without a window, ANS operations or a stop that
+do not ask, a report that does not stop the window, a second call, none) and eight checks (the one before this change, one kind only, the first slot only, the counted slots only, the window word only, half of the kind, no shape refusal, another name),
+and two for the state word cleared first (R2). The new `test-sp11-stick-monitor-ans.py` (5) holds the numbers against the headers and, with a toolchain, against the monitor's own translation unit (the drift check can fail), and runs the builder end to
+end: a PARAMS with the ASC model, the NVMe window or the pair is `PARAMS_ANS` for the M1 kind and nothing for another kind, one with other kinds passes. Run by hand and caught: a `check_launch` that does nothing, one without the ASC kind.
+
+**J2, the record.** The `nvmeh` paragraph of section 3b says: LIVE gate (the ANS NVMe model of PARAMS with config[3] 1, read by `ans_window`); the builder refuses any ANS model (`PARAMS_ANS`), so a bundle it authorises has no window (INFERRED); a guest
+that writes PARAMS could configure one (INFERRED); for a window configured before the launch the monitor calls `nvmeh_sp11_adopt`, never `nvmeh_adopt`, with the two blocks a host tool places, clears the state word first, refuses a pair that was never
+placed (all zero) as UNWIRED (-145), and reads another pair through `nvmeh_sp11_check` and a load of the endpoint's configuration header before `nvmeh_adopt` re-proves the controller; no tool of the stick bundle places the blocks (UNIMPLEMENTED); whether
+the reservation from +0x234000 to +0x237000 is zero at the start is UNKNOWN, and the refusal does not depend on it. The first paragraph of 3b adds "and no ANS model listed" to what the builder makes. The two pinned texts of the auth suite were re-pinned.
+
+**J3, the plan.** `docs/SP11-MONITOR-PORT.md` cited eight lines that the storage drops moved (`run.py` 1820, 1877, 1907 and 1282, `board_descriptor.py` 68 and 198, `ans_glue.c` 104 and a refusal at 113 that no longer exists): they point at 1821, 1878, 1908,
+1283, 84, 244, 113 and the `return nvmeh_sp11_adopt(` at 130, and the row "SSD adoption (-145)" says what is true now. `test-sp11-monitor-port.py` passes again (32).
+
+**J4, the M1 pair.** xnuboot.bin 316,767 to 316,775 bytes; SNAPMON-M1.BIN 447,839 to 447,847 (`7b64553f...`); wrapper-m1.bin `e0eacd09...`; SNAPREP-M1.BIN (`ee866760...`), the monitor-off pair and the GIC pair are what they were; the three authorised records
+regenerate byte for byte. The template (`build/sp11-m1-record-template.txt`, git-ignored) is 49,472 bytes in 501 lines (48,443 and 492 before). The size caps of this note in the auth and build suites went from 78,100 to 84,300 for this section; nothing
+was cut. Counts: devices 24, ans 5.

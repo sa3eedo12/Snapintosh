@@ -259,12 +259,12 @@ enum {
     NVMEH_E_SP11_IO_READONLY = -144    /* Write while the window is read-only */
 };
 
-/* The prepare status of an SP11 launch that asks for the SSD window while nothing yet carries the target, the record and
- * the per-run pins to the monitor (UNIMPLEMENTED). ans_window_prepare (probes/xnuboot/ans_glue.c) returns it, and stores it
- * in nvmeh_state.prepare, instead of calling nvmeh_adopt(): that re-proves the controller registers only, so it would adopt
- * a disk the descriptor never named. The next number after the enumerators above; probes/run.py reserves -96 .. -145 for this
- * block and names each one (tools/test-sp11-integration.py, StatusBands). Not an NVMEH_E_SP11_* enumerator because
- * nvmeh_sp11_check() never returns it. */
+/* The prepare status of an SP11 launch that asks for the SSD window while the host placed no target and no record in the
+ * reservation (every word of both blocks is zero). nvmeh_sp11_adopt returns it and stores it in nvmeh_state.prepare before it
+ * runs nvmeh_sp11_check, so a run whose host supplies nothing is refused by name and not as an ABI mismatch. The name is
+ * from the time the monitor received no inputs at all (docs/SP11-NVME-WINDOW.md section 2). The next number after the
+ * enumerators above; probes/run.py reserves -96 .. -145 for this block and names each one (tools/test-sp11-integration.py,
+ * StatusBands). Not an NVMEH_E_SP11_* enumerator because nvmeh_sp11_check() never returns it. */
 #define NVMEH_SP11_STATUS_UNWIRED (-145)
 
 struct nvmeh_sp11_extent { uint64_t first_lba, last_lba; };   /* inclusive, real 512-byte LBAs */
@@ -322,10 +322,13 @@ int nvmeh_sp11_check(const struct nvmeh_sp11_target *t, const struct nvmeh_sp11_
  * nvmeh_sp11_check(), which validated the pins this reads. */
 int nvmeh_sp11_prove_endpoint(const struct nvmeh_ops *o, const struct nvmeh_sp11_target *t, const struct nvmeh_params *p);
 
-/* The SP11 adoption: nvmeh_sp11_check, nvmeh_sp11_prove_endpoint, then the A16 nvmeh_adopt (controller registers
- * re-proved against the record). A refusal is also stored as s->prepare. Do not call nvmeh_adopt() directly on an SP11
- * build: it knows nothing of the descriptor. Nothing calls this yet: until the monitor receives a target and a record,
- * ans_window_prepare refuses with NVMEH_SP11_STATUS_UNWIRED. */
+/* The SP11 adoption: if both blocks are all zero (the host placed neither) NVMEH_SP11_STATUS_UNWIRED; otherwise
+ * nvmeh_sp11_check, nvmeh_sp11_prove_endpoint, then the A16 nvmeh_adopt (controller registers re-proved against the
+ * record). Every call first clears s->status: the state lives in the window reservation and survives a warm restart, and an
+ * ADOPTED word left there by an earlier launch would otherwise let a refused adoption still ring doorbells. A refusal is also
+ * stored as s->prepare, and the state is then not-adopted whatever it held before. Do not call nvmeh_adopt() directly on
+ * an SP11 build: it knows nothing of the descriptor. The monitor's one call site is ans_window_prepare
+ * (probes/xnuboot/ans_glue.c); probes/nvmesp11.py places the target, a producer of the record is UNIMPLEMENTED. */
 int nvmeh_sp11_adopt(const struct nvmeh_ops *o, const struct nvmeh_sp11_target *t, const struct nvmeh_sp11_record *r,
                      const struct nvmeh_params *p, struct nvmeh_state *s, uint64_t mem_low, uint64_t mem_high);
 

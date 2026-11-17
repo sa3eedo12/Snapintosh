@@ -611,7 +611,7 @@ class Hygiene(unittest.TestCase):
                     self.assertLess(len(data), 50 * 1024)
                     self.assertLess(data.count(b'\n'), 1500)
                 else:
-                    self.assertLessEqual(len(data), 75500)       # raised from 70,000 on purpose for Phase E part 2 (60,000 before Phase E, 46,000 before Phase D, 36,000 before Phase C); nothing was cut
+                    self.assertLessEqual(len(data), 84300)       # raised from 78,100 on purpose for Phase E part 4 (75,500 before E part 3, 70,000 before E part 2, 60,000 before E, 46,000 before D, 36,000 before C); nothing was cut
                 for needle in (b'/Us' + b'ers/', b'/Vol' + b'umes/', b'/t' + b'mp/', b'/var/fol' + b'ders'):
                     self.assertNotIn(needle, data)
 

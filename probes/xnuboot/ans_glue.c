@@ -56,6 +56,15 @@ static int ans_window(const struct context *c)
 static const struct nvmeh_ops nvmeh_direct;   /* NVMEH_DIRECT: the monitor reaches the SSD itself */
 #define ANS_NVMEH_PARAMS(res) ((struct nvmeh_params *)((res)+ANS_WINDOW_NVMEH))
 #define ANS_NVMEH_STATE(res) ((struct nvmeh_state *)((res)+ANS_WINDOW_NVMEH+0x80))
+#if SNAP_PLATFORM_SP11
+#define ANS_NVMEH_TARGET(res) ((const struct nvmeh_sp11_target *)((res)+ANS_WINDOW_NVMEH_TARGET))
+#define ANS_NVMEH_RECORD(res) ((const struct nvmeh_sp11_record *)((res)+ANS_WINDOW_NVMEH_RECORD))
+/* After the params and the state, in order, and below the DMA window: the host writes them and the DMA window is the SSD's. */
+_Static_assert(ANS_WINDOW_NVMEH+0x80+sizeof(struct nvmeh_state)<=ANS_WINDOW_NVMEH_TARGET &&
+               ANS_WINDOW_NVMEH_TARGET+sizeof(struct nvmeh_sp11_target)<=ANS_WINDOW_NVMEH_RECORD &&
+               ANS_WINDOW_NVMEH_RECORD+sizeof(struct nvmeh_sp11_record)<=ANS_WINDOW_DMA,
+               "SP11 target and record blocks sit after the params and state and below the DMA window");
+#endif
 /* agents/nvme-async: the window flight (compat/ans-window.h) and the asynchronous callbacks, initializers that
  * expand to nothing without SNAP_ANS_ASYNC (the define-off text stays the base's). */
 #if SNAP_ANS_ASYNC
@@ -105,13 +114,21 @@ static int64_t ans_window_prepare(struct context *c)
     const struct device_model *m=ans_nvme_model(c);
     uint64_t res=m->config[0];
 #if SNAP_PLATFORM_SP11
-    /* nvmeh_adopt re-proves the controller's registers and nothing else, so on an SP11 it would adopt a disk the board
-     * descriptor never named. nvmeh_sp11_adopt (compat/nvme-host.h) needs the target, the adoption record and the
-     * per-run pins, and none of the three reaches the monitor yet (docs/SP11-NVME-WINDOW.md, section 3, row 17):
-     * refuse. The state stays not-adopted, so any later read, write or flush is refused before a doorbell. Replace this
-     * with a call of nvmeh_sp11_adopt once its inputs exist; never with nvmeh_adopt. */
-    ANS_NVMEH_STATE(res)->prepare=(uint64_t)(int64_t)NVMEH_SP11_STATUS_UNWIRED;
-    return NVMEH_SP11_STATUS_UNWIRED;
+    /* Never nvmeh_adopt here: it re-proves the controller's registers and nothing else, so on an SP11 it would adopt a
+     * disk the board descriptor never named. nvmeh_sp11_adopt (compat/nvme-host.h) compares the target (what the
+     * descriptor and the prepared run pin), the record (what the takeover recorded: untrusted) and the params with each
+     * other and with the namespace geometry, re-reads the endpoint's configuration header, and only then runs the A16
+     * re-proof. The two blocks are placed by the host (probes/nvmesp11.py); one that was never placed is all zero and is
+     * refused (ABI). nvmeh_sp11_adopt starts by clearing the state word (the reservation survives a warm restart, so an
+     * ADOPTED left by an earlier launch must not outlive this refusal), and a refusal is also stored in the physical NVMe
+     * state, which is then not-adopted, so any later read, write or flush is refused before a doorbell. It is the launch's
+     * status. */
+#if SNAP_ANS_ASYNC
+    /* The schedule's lock-free readers (timer_arm, the fast tick) find the state here; window mode only. */
+    c->root_ext->ans=(struct ans_state *)res;
+#endif
+    return nvmeh_sp11_adopt(&nvmeh_direct,ANS_NVMEH_TARGET(res),ANS_NVMEH_RECORD(res),ANS_NVMEH_PARAMS(res),
+                            ANS_NVMEH_STATE(res),c->params->mem_low,c->params->mem_high);
 #else
 #if SNAP_ANS_ASYNC
     /* The schedule's lock-free readers (timer_arm, the fast tick) find the state here; window mode only. */

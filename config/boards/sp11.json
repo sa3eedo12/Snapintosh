@@ -194,6 +194,46 @@
       "source": "UNKNOWN",
       "evidence": "UNIMPLEMENTED",
       "note": "x1-microsoft-denali.dtsi:264-276 and 1015-1022 enable pcie6a with a VREG_NVME_3P3 supply, but no storage endpoint is described."
+    },
+    "storage.nvme.segment": {
+      "source": "docs/SP11-NVME-WINDOW.md section 7.1 (the third X2 test image, 2026-11-15: MCFG entry 6 and the root's _UID 6); docs/SP11-X2-TESTS.md Run 7; the unit's own pciio.txt of that run",
+      "evidence": "OBSERVED",
+      "note": "One unit, one boot. The firmware's ACPI segment number, not Linux's pci-domain (which is also 6 here, hamoa.dtsi:3434). The A16's is 5."
+    },
+    "storage.nvme.ecam": {
+      "source": "docs/SP11-NVME-WINDOW.md section 7.1 (the MCFG allocation of segment 6 in the dumped tables, and read through at EL2 on 2026-11-15)",
+      "evidence": "OBSERVED",
+      "note": "The firmware's table, one unit: base 0x70000000, buses 0 to 1. Not a constant of the SoC as far as this file knows: the producer cross-checks it against the MCFG of every run (probes/nvmesp11.py check_observed)."
+    },
+    "storage.nvme.root_port": {
+      "source": "docs/SP11-NVME-WINDOW.md section 7.1 (root port 00:00.0 of segment 6 read at EL2 on 2026-11-15; pciio.txt of that run)",
+      "evidence": "OBSERVED",
+      "note": "One unit, one boot: vendor 0x17cb, device 0x0111, class 0x060400."
+    },
+    "storage.nvme.endpoint": {
+      "source": "docs/SP11-NVME-WINDOW.md section 7.1 (endpoint 01:00.0 of segment 6 read at EL2 on 2026-11-15; the device id is in pciio.txt of that run, not on the page)",
+      "evidence": "OBSERVED",
+      "note": "One unit, one boot: vendor 0x144d, device 0xa80b, class 0x010802. The SSD is user-removable, so another drive reads other ids: the cross-check refuses it, which is the point."
+    },
+    "storage.nvme.smmu": {
+      "source": "the IORT of the unit's own firmware tables in the git-ignored local dumps (downloads/sp11/, six runs, all alike): the root complex node of segment 6 refers to the one SMMUv3 node, base 0x15400000",
+      "evidence": "OBSERVED",
+      "note": "What the firmware declares, not what its SMMU is doing: whether the stream translates, bypasses or aborts is UNKNOWN (docs/SP11-NVME-WINDOW.md D7; the read of the SMMU faulted)."
+    },
+    "storage.nvme.stream": {
+      "source": "the same IORT: the segment 6 root complex node has one ID mapping, RIDs 0 to 0xffff to StreamIDs 0x60000 and up (the A16's formula segment << 16 | RID gives the same); docs/SP11-NVME-WINDOW.md section 4",
+      "evidence": "OBSERVED",
+      "note": "Equal to the iommu-map of the pinned EL2 overlay (x1-el2.dtso:47-49). The programmed stream table entry for it was never read (UNKNOWN)."
+    }
+  },
+  "storage": {
+    "nvme": {
+      "segment": 6,
+      "ecam": {"base": "0x70000000", "start_bus": 0, "end_bus": 1},
+      "root_port": {"bus": 0, "device": 0, "function": 0, "vendor_id": "0x17cb", "device_id": "0x0111", "class_code": "0x060400"},
+      "endpoint": {"bus": 1, "device": 0, "function": 0, "vendor_id": "0x144d", "device_id": "0xa80b", "class_code": "0x010802"},
+      "smmu": "pcie-smmu",
+      "stream": {"rid_base": "0x0", "rid_count": "0x10000", "stream_base": "0x60000"}
     }
   }
 }

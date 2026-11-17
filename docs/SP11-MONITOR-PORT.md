@@ -31,7 +31,7 @@ M1 passes only if every row holds.
 | --- | --- | --- |
 | a | The runner loads monitor and bundle, both hashes agree before and after the bounce | `PAYLOAD READY` and `PAYLOAD VERIFY=OK` (boots 4, 5, 7, 10 show the form) |
 | b | The wrapper refuses on any precondition mismatch (MIDR, regime, CNTFRQ, GOP, placement in one conventional descriptor of the final map) | one `REFUSED` line, no guest entry |
-| c | The guest ran: the monitor entered it and the stop reports a guest ELR inside the kernel image | the report's `entered` word is 1 (`status, entered = struct.unpack('<2Q'`[probes/run.py:1907]) and ELR is in the image; a first monitor call is stronger |
+| c | The guest ran: the monitor entered it and the stop reports a guest ELR inside the kernel image | the report's `entered` word is 1 (`status, entered = struct.unpack('<2Q'`[probes/run.py:1908]) and ELR is in the image; a first monitor call is stronger |
 | d | The run ended by the monitor's own stop (watchdog, stage-2 fault with an IPA, guest exception), never a hang or a reset | SNAPREP's lines, then the heartbeat |
 | e | The stop came inside the time box (default 5 s of wall time, counted on `CNTPCT_EL0`) | the report's elapsed counter |
 | f | No disk was written: no storage code path, stick files byte-identical after the run | build audit, stick re-read |
@@ -71,15 +71,15 @@ is mapped and writable (boots 8 to 10; section 5).
 
 **What the SP11 entry stub (the wrapper, WI 4) must do**, under `SNAP_PLATFORM_SP11` and the opt-in `SNAP_SP11_STICK` (refusals and
 their order: `docs/SP11-STICK-BUNDLE.md` section 8): (1) verify and refuse against `PIN.DAT` and the final memory map (`a->map_base`) and (2) copy the chunks
-and clean to the point of coherency (the A16 host does `proxy.flush_code(xb.IMAGE_PA`[probes/run.py:1820]): both are 4a, built and run in WI 7; (3) bring the boot CPU's
+and clean to the point of coherency (the A16 host does `proxy.flush_code(xb.IMAGE_PA`[probes/run.py:1821]): both are 4a, built and run in WI 7; (3) bring the boot CPU's
 GIC interface and PPI 26 up (F2; WI 8's arm half): the stop is the monitor's own timer interrupt, and a polling stop cannot exist, as the wrapper does not run while the monitor owns the CPU (INFERRED); (4) call `_start` and on return write the report head into `REPORT.DAT`
 (section 10), never returning a half state.
 
 ## 4. Delivery without a host link (Q2)
 
 **What `--boot` does on the A16.** `cycle.py launch --boot` runs the pinned launcher as a child (`tools/cycle_lib/launch.py:528-560`):
-a live read of the idle q1n1 over the NCM link, then `run_xnuboot` (`probes/run.py:1282`): q1n1's memory map, `place()`, build and
-upload of about 115 MiB, a work locator, `proxy.call(code, out, work`[probes/run.py:1877], a poll for a host stop, the report read
+a live read of the idle q1n1 over the NCM link, then `run_xnuboot` (`probes/run.py:1283`): q1n1's memory map, `place()`, build and
+upload of about 115 MiB, a work locator, `proxy.call(code, out, work`[probes/run.py:1878], a poll for a host stop, the report read
 back, capture, quiesce, chainload. The SP11 has none of these host-link steps: a stick boot is outside
 its attestation, authorisation and prepared-equals-booted layers (section 12).
 
@@ -201,7 +201,7 @@ GICR-range structure. MCFG: eight allocations, segments 0 to 7 (buses 0..255 for
 `GICD_PADDED_LENGTH = 25`[probes/bootcontract.py:155]) and a1fb91c (redistributors from the per-CPU GICC bases,
 `def _gicr_ranges_from_gicc`[probes/bootcontract.py:435]). VERIFIED (a boot-ready board built in memory, the six dumps): CPUs,
 GICD, GICR and ITS pass, then `check_hamoa_platform` refuses at `ecam-mismatch`: a descriptor holds at most four ECAM entries
-(`MAX_ECAM = 4`[tools/board_descriptor.py:68]) and the adapter demands set equality (`if got != want.ecam:`[probes/bootcontract.py:539]):
+(`MAX_ECAM = 4`[tools/board_descriptor.py:84]) and the adapter demands set equality (`if got != want.ecam:`[probes/bootcontract.py:539]):
 D11 proper, open for any `from_hamoa` use and X6. Not M1's: `PIN.DAT` does the board-info job, and the WI 3 builder reads both tables itself
 (`tools/sp11_stick_bundle_build.py:173-207`).
 
@@ -238,7 +238,7 @@ functional test ran on the boot CPU only.
 | NV2 launch gate: no embedded record, MIDR/REVIDR/MMFR2/MMFR4 mismatch, PAuth shape (-90 to -95) | `snap_nv2_gate_decide_embedded`[probes/xnuboot/prepare.c:356]; `SNAP_NV2_RECORD_HEADER`[compat/nv2-gate.c:10] | **yes, refuses every launch today** | a record, the profile's required input; the local one (`build/nv2-record`, X2 build 89889b7f) holds MMFR4 0 and has no regime field: D6 | VERIFIED |
 | vCPU count needs the fair lock (-146), checked first | `GUEST_CPU_STATUS_FAIR_LOCK`[probes/xnuboot/prepare.c:101] | yes | `-DSNAP_FAIR_TOKEN=1`, in the M1 profile (opt-in; D10) | VERIFIED |
 | `CNTHCTL_EL2` read-back (-147: EL1TVT or EL1TVCT clear) and `CNTVOFF_EL2` not 0 on this CPU (-148), the last refusals of `vcpu_arch_prepare` | `compat/sp11-timer-guard.h:49-50`; `snap_sp11_timer_guard(`[probes/xnuboot/prepare.c:614] | yes, SP11 builds only | stay: `CNTVOFF_EL2` reads 0 on all twelve cores (boots 3, 7); the read-back repeats T-HW1, which passed (boot 11) | EXPERIMENTAL / OBSERVED |
-| SSD adoption (-145) | `!ans_window(c)`[probes/xnuboot/ans_glue.c:104] precedes the SP11 refusal (`probes/xnuboot/ans_glue.c:113`) | **no**: the smoke profile has no ANS window | stays a refusal for X6 | VERIFIED |
+| SSD adoption (-145) | `!ans_window(c)`[probes/xnuboot/ans_glue.c:113] returns first; the SP11 branch then returns `return nvmeh_sp11_adopt(`[probes/xnuboot/ans_glue.c:130], which answers -145 when the host placed neither of the two blocks it reads (its other refusals are -96 to -144) | **no**: the builder refuses a PARAMS that lists an ANS model (`PARAMS_ANS`, `docs/SP11-STICK-MONITOR.md` section 18), so `ans_window()` is false for a bundle it authorises and the call is not reached | stays so for M1; the SSD path needs a host tool to place the two blocks (`docs/SP11-NVME-WINDOW.md` section 2.3) and is for X6 | VERIFIED |
 | DCZID != 4 (-26), PAN absent (-23), native-writer debug (-35 to -38), RNDR (-24) | `if(dczid!=4)return -26;`[probes/xnuboot/prepare.c:550] on every CPU; `probes/xnuboot/prepare.c:82` | yes | DCZID 4 and DC ZVA passed (boot 3, T04); the DFR0, PAN and -24 ID gates should pass (INFERRED, sections 3 and 8); other cores' DCZID and the breakpoint and MDSCR writes: UNKNOWN | OBSERVED / INFERRED / UNKNOWN |
 
 A guard refusal restores q1n1's `CNTHCTL_EL2` and leaves an `EV_OTHER` record (pc 0x5443); it shows that bits 13 and 14 do not stick or
@@ -383,7 +383,7 @@ The operator's decisions of 2026-11-16 are quoted from the app by the coordinato
 - D10 `-DSNAP_FAIR_TOKEN=1` as an SP11-only opt-in: OPEN.
 - D11 The ECAM rule of the boot-contract adapter (D11 proper stays OPEN: needed before any `from_hamoa` use and for X6, not for M1 or the bundle, as the guest view lists
   no window and `real` needs only a non-null `pcie.ecam`; section 7): the MCFG lists eight allocations, a descriptor holds four, the adapter demands equality. Raising the count
-  alone fails (VERIFIED, in memory: an eight-entry descriptor is refused, segment 2 `extends beyond 1<<`[tools/board_descriptor.py:198]
+  alone fails (VERIFIED, in memory: an eight-entry descriptor is refused, segment 2 `extends beyond 1<<`[tools/board_descriptor.py:244]
   the monitor's 36-bit limit). Relax that bound too and keep equality, or accept a descriptor that lists only the segments the port
   uses, as a subset of the MCFG.
 - N1 Boot seed (new, an open note): the builder's fixed label `sp11-stick-bundle` is a DEFAULT, not an operator decision (the record needs one GUEST.DAT); entropy at run time is UNIMPLEMENTED; whether the first run needs it, a run decides.

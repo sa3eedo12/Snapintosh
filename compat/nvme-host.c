@@ -415,10 +415,25 @@ int nvmeh_sp11_prove_endpoint(const struct nvmeh_ops *o, const struct nvmeh_sp11
     return !bar || bar != p->bar ? NVMEH_E_SP11_BAR : 0;
 }
 
+/* Every byte of both blocks is zero: the host placed neither, so there is nothing to check and nothing to adopt. Byte-wise
+ * on purpose: a char pointer may alias any object, and the record is not an array of one type. */
+static int sp11_unplaced(const struct nvmeh_sp11_target *t, const struct nvmeh_sp11_record *r)
+{
+    const unsigned char *tb = (const unsigned char *)t, *rb = (const unsigned char *)r;
+    unsigned i;
+    for (i = 0; i < sizeof *t; i++) if (tb[i]) return 0;
+    for (i = 0; i < sizeof *r; i++) if (rb[i]) return 0;
+    return 1;
+}
+
 int nvmeh_sp11_adopt(const struct nvmeh_ops *o, const struct nvmeh_sp11_target *t, const struct nvmeh_sp11_record *r,
                      const struct nvmeh_params *p, struct nvmeh_state *s, uint64_t mem_low, uint64_t mem_high)
 {
-    int e = nvmeh_sp11_check(t, r, p);
+    /* The state lives in the window reservation, which the monitor does not clear and which survives a warm restart. An ADOPTED (or
+     * FAILED) word left by an earlier launch would let command() and nvmeh_stop() reach the doorbells and CSTS of a controller this
+     * adoption refuses, from params nobody validated. Every adoption starts not-adopted; only nvmeh_adopt below sets ADOPTED again. */
+    s->status = 0;
+    int e = sp11_unplaced(t, r) ? NVMEH_SP11_STATUS_UNWIRED : nvmeh_sp11_check(t, r, p);
     if (!e) e = nvmeh_sp11_prove_endpoint(o, t, p);
     if (e) {
         s->prepare = (uint64_t)(int64_t)e;
@@ -546,7 +561,7 @@ const char *nvmeh_sp11_strerror(int code)
     case NVMEH_E_SP11_IO_OPCODE: return "the I/O opcode is not Read, Write or Flush";
     case NVMEH_E_SP11_IO_READONLY: return "Write while the window is read-only";
     case NVMEH_SP11_STATUS_UNWIRED:
-        return "the monitor does not yet receive the SP11 target, record and per-run pins, so it refuses to adopt the SSD";
+        return "no SP11 target and record block was placed in the reservation, so the monitor refuses to adopt the SSD";
     }
     return "unknown SP11 refusal code";
 }

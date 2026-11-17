@@ -56,8 +56,8 @@ DEVICE_LINES = (
           'name in its symbol table (tools/test-sp11-stick-monitor-devices.py). Each family below has a gate. PRIVATE: monitor state in the work area, '
           'which stage 2 makes read-only to the guest. LIVE: a PARAMS word that the monitor reads again while the guest runs. The guest can write the '
           'RAM that holds PARAMS (INFERRED: stage 2 gives it DRAM and the reserve; whether the SPTM stops it is UNKNOWN), so a LIVE gate is a bar that a '
-          'guest can lift and not a wall. With PARAMS as the builder makes it (gpu.flags, early_stop.flags and txm_native zero) and a guest that writes '
-          'none of it, no family below stores to a device or calls firmware (INFERRED from the sources; never run). A store or a call of one is in no '
+          'guest can lift and not a wall. With PARAMS as the builder makes it (gpu.flags, early_stop.flags and txm_native zero, and no ANS model listed) and a '
+          'guest that writes none of it, no family below stores to a device or calls firmware (INFERRED from the sources; never run). A store or a call of one is in no '
           'store class above.'),
     *wrap('adreno (adreno_*, gpu_*, fwd_*, and fence_at, tlbi and gic_off of compat/adreno.c; probes/xnuboot/gpu_glue.c): stores to the GPU, its SMMU '
           'and its GMU at PAs 0x03d00000 to 0x03df0000 (compat/adreno.h), the base of the X1E80100\'s GPU too (docs/SP11-GPU-A7XX-STUDY.md: INFERRED for '
@@ -73,10 +73,19 @@ DEVICE_LINES = (
     *wrap('thermal (thermal_*, which include thermal_read, and a16_thermal_*): loads only, from the A16\'s sensor addresses (section 4). PRIVATE gate '
           'c->thermal, which the monitor\'s setup makes only if early_stop.flags has the thermal bit at that moment (probes/xnuboot/setup.c): clear, as '
           'the builder requires.', rest=6),
-    *wrap('nvmeh (nvmeh_*, ans_window_*, and command of compat/nvme-host.c): doorbell stores to an NVMe controller. This profile\'s ans_window_prepare '
-          'answers UNWIRED when PARAMS configures an ANS window, which refuses the launch and leaves the controller not adopted, so that a read, a write '
-          'or a flush is refused before a doorbell (probes/xnuboot/ans_glue.c: a build-time gate; whether this run\'s PARAMS configure one is UNKNOWN).',
-          rest=6),
+    *wrap('nvmeh (nvmeh_*, ans_window_*, and command of compat/nvme-host.c): doorbell stores to an NVMe controller. LIVE gate: an ANS window, which is the ANS '
+          'NVMe model of PARAMS with config[3] set to the window mode, and which ans_window (probes/xnuboot/ans_glue.c) reads at prepare, at each ANS access and at '
+          'the stop; ans_window_prepare returns before any of this without one. The builder refuses a PARAMS that lists any DEVICE_ANS_* model (PARAMS_ANS), so a '
+          'bundle it authorises has no window (INFERRED from the sources; never run). A guest that writes PARAMS could configure one: the ADOPTED word that gates '
+          'the doorbells would then be read at an address that the guest names, and nvmeh_sp11_adopt would not have run for it (INFERRED). For a window that PARAMS '
+          'configure before the launch, the monitor, built for SNAP_PLATFORM_SP11, calls nvmeh_sp11_adopt and never nvmeh_adopt, with a target block and a record '
+          'block that a host tool places in the window reservation after the params and the state (docs/SP11-NVME-WINDOW.md section 2.3). That call clears the state '
+          'word first, so that an ADOPTED left by an earlier launch does not outlive a refusal. A pair that was never placed is all zero and is refused as UNWIRED '
+          '(-145, compat/nvme-host.c): the launch is refused and the controller is left not adopted, so that a read, a write or a flush is refused before a doorbell. '
+          'A pair that is not all zero is read through nvmeh_sp11_check and a load of the endpoint\'s configuration header before nvmeh_adopt re-proves the '
+          'controller. No tool of the stick bundle places the two blocks (UNIMPLEMENTED). Whether the reservation\'s memory from +0x234000 to +0x237000 (the params, '
+          'the state and the two blocks) is zero when the monitor starts is UNKNOWN: nothing of the stick bundle clears it, and the refusal does not depend on it. '
+          'Read from those sources, which tools/test-sp11-stick-monitor-devices.py pins; never run.', rest=6),
     *wrap('secondary (secondary_*, xnuboot_secondary_stop and early_off; group G above): PRIVATE gate host_cpus, from x4, which the wrapper passes as 0 '
           '(probes/xnuboot/setup.c, cpu_boot.c); SMC for PSCI, and the GIC distributor at one fixed address (group G).', rest=6),
     *wrap('Not in this binary, and the test fails if one appears: hamoa_*, edp_*, qcc*, i2c_input*, guest_net*, dvfs*, boot_reloc*, boot_relay*, '

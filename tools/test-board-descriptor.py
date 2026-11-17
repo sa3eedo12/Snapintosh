@@ -66,6 +66,9 @@ def synthetic():
     d['ranges'] = [r for r in d['ranges'] if r.get('device') != 'usb-host']
     for key in [k for k in d['provenance'] if k.startswith('ranges.usb-')]:
         del d['provenance'][key]
+    d.pop('storage')        # the SSD section has its own tests (tools/test-board-descriptor-storage.py)
+    for key in [k for k in d['provenance'] if k.startswith('storage.')]:
+        del d['provenance'][key]
     return d
 
 
@@ -686,8 +689,8 @@ class ShippedDescriptors(unittest.TestCase):
     def test_sp11_values_cite_the_pinned_tree_or_the_monitor(self):
         sp11 = raw('sp11.json')['provenance']
         for claim, entry in sp11.items():
-            if entry['evidence'] == 'UNIMPLEMENTED' or claim == 'limits.ipa_bits':
-                continue
+            if entry['evidence'] == 'UNIMPLEMENTED' or claim == 'limits.ipa_bits' or claim.startswith('storage.'):
+                continue        # the storage claims were measured on the unit: tools/test-board-descriptor-storage.py
             with self.subTest(claim):
                 self.assertIn(LINUX_PIN, entry['source'])
                 self.assertEqual(entry['evidence'], 'INFERRED')

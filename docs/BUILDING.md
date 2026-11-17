@@ -267,6 +267,7 @@ says what each one does not prove.
 
 ```sh
 python3 tools/test-board-descriptor.py          # board descriptor schema, refusals, boot-readiness gate
+python3 tools/test-board-descriptor-storage.py  # the optional `storage` section: the SSD's PCIe place, every refusal, the shipped SP11 values and their provenance
 python3 tools/test-board-info.py                # board-info blob: C validator (ASan/UBSan) against the Python packer; needs clang, plus an aarch64 target for the object check
 python3 tools/test-hamoa-bootcontract.py        # Hamoa ACPI cross-check on synthetic tables
 python3 tools/test-hamoa-bootcontract-bounds.py # the same, table-size and walk-bound edges
@@ -283,6 +284,9 @@ python3 tools/test-cycle-targets-wiring.py      # --target wiring: parser, dispa
 python3 tools/test-cycle-targets-hardening.py   # --target: thermal gate, source digest, per-run NVMe authorization, the CP_MEMCPY claim
 python3 tools/test-snapmac-partition-plan-sp11.py  # the sp11 partition profile on synthetic 512e and 4Kn surveys
 python3 tools/test-snapmac-partition-plan-hardening.py  # the planner: reader independence and MBR marking
+python3 tools/test-snapmac-image-sp11.py        # SP11 offline provisioning, the image layer: path refusal (/dev, /Volumes), the bounded writer, the GPT reader, the window header against the A16 script, a source audit with seeded faults
+python3 tools/test-snapmac-provision-sp11.py    # SP11 offline provisioning on synthetic image files: plan, pre-image, write, post-check, verify-undo, every refusal, the authorisation record of the (not enabled) device mode
+python3 tools/test-snapmac-provision-sp11-doc.py  # docs/SP11-STORAGE-PROVISIONING.md against the tools and the probe's register order (Q1N1_SP11_TREE names the q1n1 tree; SKIP of that one comparison without it)
 python3 tools/test-gen-a7xx-cp-protect.py       # a7xx CP_PROTECT generator; the pinned-source group needs network or build/ref
 python3 tools/test-sp11-boot-media.py           # boot-media staging; SP11_SHELL_EFI, SP11_SLBOUNCE_EFI and SP11_SLTEST_EFI enable the real-artifact test
 python3 tools/test-sp11-boot-media-hardening.py # the stager: destination guard, pins file, validated bytes
@@ -298,6 +302,7 @@ python3 tools/test-el2-entry-transition.py      # EL2 entry model, oracle, broke
 python3 tools/test-timer-offset-model.py        # timer offset policy model
 python3 tools/test-dc-zva-model.py              # DC ZVA decision and emulation model
 python3 tools/test-nvme-window-hamoa.py         # NVMe window: GPT fixtures, host model, the SP11 contract in compat/nvme-host.c (ASan/UBSan; needs clang)
+python3 tools/test-nvme-sp11-wiring.py          # the host side of the SP11 adoption wiring: target from the descriptor, block placement, the C structs, each refusal reaching the launch status (ASan/UBSan; needs clang)
 python3 tools/test-sp11-usb-ports.py            # USB controller table from the board descriptor: refusals, C and Python agreement, study citations
 python3 tools/test-sp11-usb-ports-hardening.py  # that tool: the independent-source guard, the unmeasured core id
 python3 tools/test-display-pipeline-check.py    # display pipeline decision: scenarios, properties, doc cross-check; needs clang (and an aarch64 target for the object check)
@@ -312,7 +317,7 @@ python3 tools/test-sp11-wifi-study.py           # the Wi-Fi study's structure, l
 python3 tools/test-sp11-wifi-unixnu.py          # the Wi-Fi study's UniXNU comparison (section 11): pins, ten-layer table, licence statements, Appendix B
 python3 tools/test-sp11-unixnu-study.py         # the UniXNU survey: labels, pins, citations, stance, size (pinned checks need SP11_UNIXNU_REF)
 python3 tools/test-sam-frames.py                # Surface Aggregator frame codec: vectors, negative tests, fuzz, seeded bugs
-python3 tools/test-monitor-hardening.py         # SP11 monitor: the SSD adoption refusal (-145), GUEST_CPU_COUNT rules, the vCPU launch refusal (-146); needs clang, llvm-nm and ../q1n1 for the object checks
+python3 tools/test-monitor-hardening.py         # SP11 monitor: the SSD adoption entry (the call of nvmeh_sp11_adopt, never nvmeh_adopt; its refusals), GUEST_CPU_COUNT rules, the vCPU launch refusal (-146); needs clang, llvm-nm and ../q1n1 for the object checks
 python3 tools/test-sp11-timer-guard.py          # SP11 monitor: the CNTHCTL_EL2 read-back and CNTVOFF_EL2 refusals (-147, -148) against modelled worlds, and their call site (ASan/UBSan; needs clang; the object checks need llvm-objdump and q1n1)
 python3 tools/test-sp11-m1-profile.py           # the M1 monitor profile: pinned flag set, the required NV2 record and every refusal of it, the build (SKIP without clang, lld and q1n1)
 python3 tools/test-sp11-stick-bundle.py         # the stick bundle interface (SP11-STICK-BUNDLE.md): C and Python validators, refusal codes, seeded bad records (ASan/UBSan; needs clang; Q1N1_SP11_TREE=<q1n1 checkout> adds the runner-header comparisons)

@@ -14,8 +14,10 @@
  *   io        "opcode writable"               -> nvmeh_sp11_io_verdict
  *   board     "segment blob-hex"              -> board_info_validate, then nvmeh_sp11_target_from_board
  *   endpoint  "T(16) bar cfg(16 dwords)"      -> nvmeh_sp11_prove_endpoint against a fake config space
- *   adopt     "T(16) R(82) P(16) cfg(16) op..." -> nvmeh_sp11_adopt on a fake controller, then the ops
+ *   adopt     "[S<state>] T(16) R(82) P(16) cfg(16) op..." -> nvmeh_sp11_adopt on a fake controller, then the ops
  *             op = "r:wlba:count", "w:wlba:count" or "f" (read, write, flush); lba and count in decimal.
+ *             The optional first token S<hex> is the state word an earlier launch left in the reservation, which the monitor
+ *             does not clear; such a line then ends with " t<n>" after its " v<n>": the controller registers nvmeh_stop read.
  * The fake controller is the physical truth: every command it receives is checked against what must never be touched
  * (the record's protected extents and the two GPT zones) and against the params' write window. */
 #include <stdio.h>
@@ -53,7 +55,7 @@ static uint32_t regs[0x2000 / 4], cfg[16];
 static uint64_t g_bar, g_dma, g_cfg;
 static const struct nvmeh_sp11_record *g_rec;
 static const struct nvmeh_params *g_params;
-static unsigned sq_head, cq_tail, cq_phase, doorbells, violations, badreads;
+static unsigned sq_head, cq_tail, cq_phase, doorbells, violations, badreads, bar_reads;
 static uint64_t clock_now;
 
 static uint8_t pattern(uint64_t lba, unsigned k) { return (uint8_t)(lba * 131 + k * 7 + (lba >> 8)); }
@@ -110,7 +112,7 @@ static uint32_t rd(void *ctx, uint64_t pa)
 {
     (void)ctx;
     uint32_t v = 0;
-    if (pa >= g_bar && pa + 4 <= g_bar + sizeof regs) return regs[(pa - g_bar) / 4];
+    if (pa >= g_bar && pa + 4 <= g_bar + sizeof regs) { bar_reads++; return regs[(pa - g_bar) / 4]; }
     if (pa >= g_cfg && pa + 4 <= g_cfg + sizeof cfg) return cfg[(pa - g_cfg) / 4];
     uint8_t *m = mem(pa);
     if (!m || !mem(pa + 3)) { badreads++; return 0; }
@@ -277,8 +279,19 @@ static void mode_adopt(void)
     while (fgets(line, sizeof line, stdin)) {
         struct nvmeh_sp11_target t; struct nvmeh_sp11_record r; struct nvmeh_params p; struct nvmeh_state s;
         strcpy(text, line);
-        /* The first TW + RW + PW + 16 tokens are numbers; the rest are ops. */
+        /* An optional first token "S<hex>" is a state word an earlier launch left behind. */
         char *rest = text;
+        int stale = 0;
+        uint64_t stale_status = 0;
+        while (*rest == ' ') rest++;
+        if (*rest == 'S') {
+            char *end;
+            stale = 1;
+            stale_status = strtoull(rest + 1, &end, 16);
+            if (*end != ' ') die("bad stale state word");
+            rest = end;
+        }
+        /* The first TW + RW + PW + 16 tokens are numbers; the rest are ops. */
         unsigned n = 0;
         for (; n < TW + RW + PW + 16; n++) {
             char *end;
@@ -291,6 +304,7 @@ static void mode_adopt(void)
         memcpy(&t, w, sizeof t); memcpy(&r, w + TW, sizeof r); memcpy(&p, w + TW + RW, sizeof p);
         load_cfg(w + TW + RW + PW);
         memset(&s, 0, sizeof s);
+        s.status = stale_status;
         fake_reset(&p, &r);
         g_cfg = ecam_address(&t);
         int rc = nvmeh_sp11_adopt(&ops, &t, &r, &p, &s, 0x1000, 0x100000);
@@ -312,7 +326,15 @@ static void mode_adopt(void)
                     }
             printf(" %d:%u", r2, doorbells - before);
         }
-        printf(" v%u\n", violations);
+        unsigned stop_reads = 0;
+        if (stale) {
+            unsigned before = bar_reads;
+            nvmeh_stop(&ops, &p, &s);
+            stop_reads = bar_reads - before;
+        }
+        printf(" v%u", violations);
+        if (stale) printf(" t%u", stop_reads);
+        printf("\n");
     }
 }
 

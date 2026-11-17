@@ -48,6 +48,10 @@
 #define ANS_WINDOW_HEAD ANS_DISK_OFFSET         /* virtual blocks 0..255 */
 #define ANS_WINDOW_TAIL (ANS_DISK_OFFSET + 0x100000ULL)
 #define ANS_WINDOW_NVMEH (ANS_DISK_OFFSET + 0x200000ULL)   /* params, then state at +0x80 */
+/* SNAP_PLATFORM_SP11 (compat/nvme-host.h): the target and record blocks nvmeh_sp11_adopt reads, placed by the host
+ * (probes/nvmesp11.py) in the reservation's unused stretch below the DMA window. An A16 build never reads them. */
+#define ANS_WINDOW_NVMEH_TARGET (ANS_WINDOW_NVMEH + 0x1000ULL)
+#define ANS_WINDOW_NVMEH_RECORD (ANS_WINDOW_NVMEH + 0x2000ULL)
 #define ANS_WINDOW_DMA 0x300000ULL
 #define ANS_WINDOW_STAGE 0x400000ULL
 #define ANS_WINDOW_BYTES 0x500000ULL

@@ -3,7 +3,10 @@
 **Status: EXPERIMENTAL (host-tested only). Hardware status: the contract code is NOT RUN; five of the per-machine
 questions (D2, D3, D4, D8 and D15) were read once at EL2 by the X2 test image, read-only (OBSERVED, one unit, one
 boot, 2026-11-15; [section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15)).** Nothing of the contract in
-`compat/nvme-host.{c,h}` has touched a Surface Pro, and nothing was written to the SSD or its controller. This
+`compat/nvme-host.{c,h}` has touched a Surface Pro, and nothing was written to the SSD or its controller. The monitor's SP11 path now
+calls the contract with host-placed blocks ([section 2](#2-the-sp11-contract-in-compatnvme-hostc)), the descriptor carries the stable
+facts ([section 4](#4-proposed-descriptor-and-board-info-additions)), and the offline provisioning flow and the first three storage
+hardware sessions are in [SP11-STORAGE-PROVISIONING.md](SP11-STORAGE-PROVISIONING.md). This
 document is the evidence study for WS-D items S2 and S3 of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) (section 7) and
 Appendix D of that plan. It records what the A16 NVMe takeover assumes, what the SP11-gated code in
 `compat/nvme-host.{c,h}` now refuses, what is still unknown, and exactly what must be measured at X2 and X6 to close
@@ -20,8 +23,12 @@ pinned public source; never "ran on a Surface"), OBSERVED, INFERRED, UNKNOWN, EX
 | --- | --- | --- |
 | q1n1 takes the controller over after ExitBootServices (shutdown, reset, its own admin queue, Identify, I/O queue 1, GPT read, window arm) and leaves it running | q1n1 `tools/nvme_m3.py` (Mac host over the proxy; A16 only) | A16 VERIFIED (q1n1 `docs/A16-NVME-M3.md`); SP11 UNIMPLEMENTED |
 | The monitor adopts the running controller, re-proves its registers, and serves the window through I/O queue 1 | `compat/nvme-host.{c,h}`, `compat/ans-window.{c,h}` | A16 qualified; unchanged by this work |
-| SP11 takeover contract: descriptor and record cross-checks, window geometry, endpoint re-proof, admin and I/O allow-lists | `compat/nvme-host.{c,h}`, only under `-DSNAP_PLATFORM_SP11=1` | EXPERIMENTAL; no caller yet: until it has its inputs the monitor's adoption entry refuses with `NVMEH_SP11_STATUS_UNWIRED` (-145), see section 2 |
+| SP11 takeover contract: descriptor and record cross-checks, window geometry, endpoint re-proof, admin and I/O allow-lists | `compat/nvme-host.{c,h}`, only under `-DSNAP_PLATFORM_SP11=1` | EXPERIMENTAL; called by the monitor's adoption entry with host-placed blocks; an all-zero pair refuses with `NVMEH_SP11_STATUS_UNWIRED` (-145), see section 2 |
 | Host model, GPT layout schema and loader, fixtures, differential tests | `tools/fixtures/sp11/`, `tools/test-nvme-window-hamoa.{py,c}` | EXPERIMENTAL |
+| The descriptor's `storage.nvme` section: segment, ECAM window, root port, endpoint, SMMU, stream window | `config/boards/sp11.json`, `tools/board_descriptor.py`, `tools/test-board-descriptor-storage.py` | EXPERIMENTAL; the values are OBSERVED once on one unit ([section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15)) or in its IORT |
+| The host producer of the target block and the placement of both blocks in the window reservation | `probes/nvmesp11.py`, `tools/test-nvme-sp11-wiring.py` | EXPERIMENTAL; the producer of the record (a takeover's output) is UNIMPLEMENTED |
+| The read-only PCIe and SMMU probe for the first storage hardware session | the q1n1 fork's `payloads/smmuprobe.c` and `docs/SP11-PAYLOAD-SMMUPROBE.md` | EXPERIMENTAL; NOT RUN |
+| The offline provisioning flow, its image-file tools, Appendix D by what each question needs, and the first three storage hardware sessions | [SP11-STORAGE-PROVISIONING.md](SP11-STORAGE-PROVISIONING.md), `tools/snapmac_provision.py` | EXPERIMENTAL; image files only; NOT RUN |
 
 The monitor never programs the PCIe controller (PARF, DBI, ELBI, ATU) or the SMMU. It reads the endpoint's
 configuration header through the ECAM window and talks to BAR0. The Hamoa controller addresses (`pcie6a` PARF
@@ -38,21 +45,31 @@ Everything is compiled only under `SNAP_PLATFORM_SP11`. The default A16 build pr
 | --- | --- |
 | `nvmeh_sp11_check(target, record, params)` | Pure. Compares the descriptor-derived target, the adoption record and the A16 params, and checks the window against the namespace and GPT geometry. One distinct refusal code per cause. |
 | `nvmeh_sp11_prove_endpoint(ops, target, params)` | Reads the endpoint's config header at `ecam_base` plus the pinned BDF's ECAM offset, 32-bit reads only, and requires an NVM Express endpoint with Memory Space and Bus Master on and BAR0 equal to `params.bar`. Never writes config space. |
-| `nvmeh_sp11_adopt(...)` | check, then prove, then the unchanged A16 `nvmeh_adopt`. A refusal is stored in `state.prepare`, so the monitor stays "not adopted" and every later read, write and flush returns `NVMEH_E_DEAD` before any doorbell. |
+| `nvmeh_sp11_adopt(...)` | clears `state.status` (the reservation survives a warm restart, so an ADOPTED left by an earlier launch must not outlive a refusal), then check, then prove, then the unchanged A16 `nvmeh_adopt`. A refusal is stored in `state.prepare` and leaves the monitor "not adopted", so every later read, write and flush returns `NVMEH_E_DEAD` before any doorbell, whatever the state held before. |
 | `nvmeh_sp11_target_from_board(blob, segment, target)` | ECAM window for `segment` and the one SMMUv3 from a validated board-info blob; requires `nvme` present. BDF, stream map, namespace identity and run generation stay unknown. |
 | `nvmeh_sp11_admin_verdict(phase, opcode, cdw10)`, `nvmeh_sp11_io_verdict(opcode, writable)` | The gate any physical admin or I/O command must pass ([section 2.2](#22-admin-and-io-allow-lists)). The monitor issues no admin command today. |
 
-**The monitor's adoption entry.** Nothing calls `nvmeh_sp11_adopt` yet, so on an SP11 build the monitor does not adopt the SSD at
-all: `ans_window_prepare` (`probes/xnuboot/ans_glue.c`) returns `NVMEH_SP11_STATUS_UNWIRED` (-145) and stores it in `state.prepare`
-whenever the launch asks for the SSD window, instead of calling the A16 `nvmeh_adopt`, which re-proves the controller registers
-and nothing else and would adopt a disk the descriptor never named. The state stays "not adopted", so a later read, write or
-flush returns `NVMEH_E_DEAD` before any doorbell. The A16 side of that function is unchanged. Replacing the refusal with a call
-needs the target, the adoption record and the params to reach the monitor, and the descriptor has no segment, BDF or stream
-field yet ([section 4](#4-proposed-descriptor-and-board-info-additions)); the refusal is never to be replaced by `nvmeh_adopt`.
-Host decoding: `probes/run.py` reserves -96 to -145 for this contract, names every code with the text of `nvmeh_sp11_strerror`
-(`tools/test-sp11-integration.py`, class `StatusBands`, holds them equal), and also names -83, the A16 `NVMEH_E_QUEUES` that
-`nvmeh_adopt` returns through the same entry. The entry is held by `tools/test-monitor-hardening.py` (class
-`NvmeWindowWiring`: the SP11 object never references `nvmeh_adopt`, the A16 object still does).
+**The monitor's adoption entry.** On an SP11 build `ans_window_prepare` (`probes/xnuboot/ans_glue.c`) calls `nvmeh_sp11_adopt` and
+never the A16 `nvmeh_adopt`, which re-proves the controller registers and nothing else and would adopt a disk the descriptor never
+named. It passes three blocks that the HOST places in the window reservation before the launch, in the stretch below the DMA window:
+the params (`ANS_WINDOW_NVMEH`), the target (`ANS_WINDOW_NVMEH_TARGET`, +0x1000 from it) and the record (`ANS_WINDOW_NVMEH_RECORD`,
++0x2000); a static assertion holds their order and sizes. The monitor builds no target from a blob. `probes/nvmesp11.py` builds the
+target from the descriptor's `storage.nvme` section and the per-run pins (the namespace EUI64 and the run generation, which are never
+descriptor values): a group the descriptor or the run does not state has its `known` bit clear and refuses by name (`UNKNOWN_BDF`,
+`UNKNOWN_STREAM`, ...). The record is what a takeover recorded and is untrusted input; its producer is UNIMPLEMENTED on the SP11
+(`pack_record` only lays out the fields a producer will hand it). The adoption clears `state.status` first, because the state lives in the
+reservation and an ADOPTED word from an earlier launch would otherwise outlive a refusal and still reach the doorbells (a stale state
+word with zero blocks, and with a stale generation, are held by `tools/test-nvme-sp11-wiring.py`). A refusal is also stored in
+`state.prepare`, the state is then "not adopted", and a later read, write or flush returns `NVMEH_E_DEAD` before any doorbell. If both blocks are all zero (the host
+placed neither) the status is `NVMEH_SP11_STATUS_UNWIRED` (-145): a named refusal, where an all-zero record would otherwise be
+refused as an ABI mismatch. The A16 side of that function is unchanged ([section 8](#8-validation-and-what-it-does-not-show): the
+A16 monitor images are byte for byte the ones before). Host decoding: `probes/run.py` reserves -96 to -145 for this contract, names
+every code with the text of `nvmeh_sp11_strerror` (`tools/test-sp11-integration.py`, class `StatusBands`, holds them equal), and also
+names -83, the A16 `NVMEH_E_QUEUES` that `nvmeh_adopt` returns through the same entry. The entry is held by
+`tools/test-monitor-hardening.py` (class `NvmeWindowWiring`: the SP11 object calls `nvmeh_sp11_adopt` and never references
+`nvmeh_adopt`, the A16 object still does; every guard of the glue has a mutant), by `tools/test-nvme-sp11-wiring.py` (the placement,
+the target from the descriptor, the C structs against the host layout, each refusal reaching the launch's status) and by
+`tools/test-board-descriptor-storage.py`.
 
 ### 2.1 What a record must prove (check order)
 
@@ -102,6 +119,17 @@ The takeover column equals the A16 tool's lists (`nvme_m3.py:56-60`) and the hos
 format is never switched by construction. Set Features of anything that describes geometry (for example LBA Range
 Type, `0x03`) is refused. Get Features and Get Log Page cannot change the media.
 
+### 2.3 The reservation across warm restarts
+
+The target and record blocks live in the window reservation, which is memory the monitor does not clear. After a warm restart or a
+second launch in the same power cycle the reservation can still hold the blocks of the run before (INFERRED: nothing here has been
+restarted on the unit). The monitor cannot tell a fresh pair from a stale one: both blocks of a stale pair agree with each other, and
+the generation they carry is a host pin, so the generation check of section 2.1 (step 4) refuses a mixed pair and never a whole stale
+one. So the host is where this is held, and the rules are: every launch places BOTH blocks, `nvmesp11.place` refuses a destination
+that is not all zero (so a producer that forgot to place its own block cannot leave another run's in place, and cannot overwrite half
+of a pair), and a bundle that reuses a reservation clears the two blocks first (UNIMPLEMENTED: the stick bundle belongs to its own
+owner). A launch for which nothing was placed is refused by name, `NVMEH_SP11_STATUS_UNWIRED`, never adopted.
+
 ## 3. Audit of the A16 assumptions
 
 "Where" cites this tree, or the pinned q1n1 (`7872398`, read-only) as `q1n1 path`. "Field" is the descriptor field that
@@ -109,12 +137,12 @@ carries the value on the SP11, or the proposal in [section 4](#4-proposed-descri
 
 | # | A16 assumption | Where | On the SP11 | Field |
 | --- | --- | --- | --- | --- |
-| 1 | PCI segment 5 (`Acpi(PNP0A08, 5)`) | q1n1 `tools/nvme_m3.py:49` | Segment 6 on the unit (OBSERVED once, [section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15): it is the firmware's number, and here it equals Linux's domain number). The pinned device tree puts the NVMe supply and slot on `pcie6a` (`linux,pci-domain = <6>` is Linux's number, not an ACPI segment). | `storage.nvme.segment` (proposed) |
-| 2 | ECAM from the ACPI MCFG at run time, never a constant | q1n1 `tools/nvme_m3.py:182-190` | Same method. The MCFG entry of segment 6 is `0x70000000`, buses 0 to 1 (OBSERVED in the dumped tables, and read through at EL2 on 2026-11-15, section 7.1). | `pcie.ecam` (exists, null in `sp11.json`) and the A5 cross-check |
-| 3 | Root port at 0:0.0, endpoint on its secondary bus at device 0 function 0 | q1n1 `tools/nvme_m3.py:192-215` | The device tree has one root port at device 0 (`hamoa.dtsi:3526-3529`). The bus number is firmware's: root port 00:00.0 and endpoint 01:00.0 were read (OBSERVED once, section 7.1). | `storage.nvme.endpoint` (proposed); re-proved by `nvmeh_sp11_prove_endpoint` |
+| 1 | PCI segment 5 (`Acpi(PNP0A08, 5)`) | q1n1 `tools/nvme_m3.py:49` | Segment 6 on the unit (OBSERVED once, [section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15): it is the firmware's number, and here it equals Linux's domain number). The pinned device tree puts the NVMe supply and slot on `pcie6a` (`linux,pci-domain = <6>` is Linux's number, not an ACPI segment). | `storage.nvme.segment` |
+| 2 | ECAM from the ACPI MCFG at run time, never a constant | q1n1 `tools/nvme_m3.py:182-190` | Same method. The MCFG entry of segment 6 is `0x70000000`, buses 0 to 1 (OBSERVED in the dumped tables, and read through at EL2 on 2026-11-15, section 7.1). | `storage.nvme.ecam`; `pcie.ecam` stays null in `sp11.json` (a populated one of the same segment must agree with it) and the A5 cross-check |
+| 3 | Root port at 0:0.0, endpoint on its secondary bus at device 0 function 0 | q1n1 `tools/nvme_m3.py:192-215` | The device tree has one root port at device 0 (`hamoa.dtsi:3526-3529`). The bus number is firmware's: root port 00:00.0 and endpoint 01:00.0 were read (OBSERVED once, section 7.1). | `storage.nvme.endpoint`; re-proved by `nvmeh_sp11_prove_endpoint` |
 | 4 | Vendor `0x144D`, class `0x010802`, the A16 disk's EUI64 | q1n1 `tools/nvme_m3.py:51-53`; `tools/snapmac-partition-plan.py` (the A16 pins `DISK_BYTES`, `DISK_GUID` and `EUI`); `tools/qualify-nvme-writeback.py:75-76` | Class kept (`NVMEH_SP11_CLASS_NVME`). Vendor is not pinned (the unit's endpoint reads vendor `0x144D` and class `0x010802`, OBSERVED once, section 7.1). EUI64 is a per-run pin, never a constant. The A16 qualifier and plan cannot be reused as written. | per-run pins; `nvmeh_sp11_target.eui64` |
-| 5 | SMMUv3 at `0x15480000` | q1n1 `tools/nvme_m3.py:50` | `pcie_smmu` is `arm,smmu-v3` at `0x15400000` (`hamoa.dtsi:8544-8546`). | `smmu[]` kind `smmu-v3` (exists) |
-| 6 | StreamID = `segment << 16 \| RID` | q1n1 `tools/nvme_m3.py:214-215` | The EL2 overlay maps `pcie6a` RIDs to StreamID `0x60000 + RID` (`x1-el2.dtso:47-49`), for Linux at EL2; the firmware's own map is UNKNOWN. | `storage.nvme.stream` (proposed) |
+| 5 | SMMUv3 at `0x15480000` | q1n1 `tools/nvme_m3.py:50` | `pcie_smmu` is `arm,smmu-v3` at `0x15400000` (`hamoa.dtsi:8544-8546`); the unit's IORT has exactly one SMMUv3 node, at the same address (OBSERVED in the dumped tables). | `smmu[]` kind `smmu-v3` (exists), named by `storage.nvme.smmu` |
+| 6 | StreamID = `segment << 16 \| RID` | q1n1 `tools/nvme_m3.py:214-215` | The EL2 overlay maps `pcie6a` RIDs to StreamID `0x60000 + RID` (`x1-el2.dtso:47-49`), for Linux at EL2; the firmware's own IORT gives the same map (RIDs `0` to `0xFFFF` to `0x60000 + RID`, OBSERVED in the dumped tables), and `segment << 16 \| RID` is the same value for segment 6. What the SMMU does with the stream is UNKNOWN (D7). | `storage.nvme.stream` |
 | 7 | The SMMU is already bypass or an identity stage 2 that q1n1 may only read | q1n1 `tools/nvme_m3.py:220-257,704` | The SMMU is "Controlled by Gunyah" (`hamoa.dtsi:8555`) and an EL2 owner must configure it itself (`x1-el2.dtso:25-27`). State at hand-off UNKNOWN. | record `smmu_mode`, `DMA_PROVEN`; see D7 |
 | 8 | ANS register offsets | `compat/ans/nvme_model.c` (doorbells `0x2490c/0x24910`, boot status `0x1300`) | Those are the virtual ANS2 the guest sees, not hardware. The physical side is plain NVMe: CAP, CC, CSTS, AQA, ASQ, ACQ and doorbells at `0x1000 + (2q + k) * (4 << DSTRD)` (`compat/nvme-host.c:78`). q1n1 `src/nvme.c` is the Apple ANS driver and is not on this path. | none |
 | 9 | Doorbell stride from CAP.DSTRD | `compat/nvme-host.c:48` (at most 4); q1n1 `tools/nvme_m3.py` takeover | Generic. | none |
@@ -124,38 +152,55 @@ carries the value on the SP11, or the proposal in [section 4](#4-proposed-descri
 | 13 | Queues and transfers: admin 32 entries, I/O queue 64, 1 MiB DMA window, 128 KiB data buffer, one PRP list page | `compat/nvme-host.h:25-34` | Unchanged. MDTS and CAP.MQES come from Identify and CAP; the producer sets `max_transfer` from MDTS, and the monitor refuses a larger transfer before a doorbell (`test_transfer_limit_and_data_buffer_bounds_hold`). | none |
 | 14 | DMA window inside the monitor's reservation, in Conventional memory, identity-mapped read/write for the SSD | `compat/ans.h:51`; `probes/answindow.py:108`; q1n1 `tools/nvme_m3.py:307-322` | DRAM map UNKNOWN (X2 item 8). All addresses must stay below `1 << 36`. | `ranges.dram0` (exists, null) |
 | 15 | Window policy: whole MiB, at least 1 GiB, 1 MiB guard, synthesized edge MiB | `probes/answindow.py:53`; `tools/snapmac-partition-plan.py` (`GUARD_LBAS`; the guard and alignment check in `plan`); `compat/ans.h:54` | Reused as `NVMEH_SP11_ALIGN_LBAS`, `GUARD_LBAS`, `EDGE_LBAS`. The 1 GiB minimum stays the planner's. | none |
-| 16 | The producer of the adoption record | `probes/run.py`, the `ans_window` block (q1n1 `nvme_m3` adopt, then `answindow.nvmeh_params`) | No producer of the SP11 target and record exists. | UNIMPLEMENTED |
-| 17 | The monitor's adoption entry | `probes/xnuboot/ans_glue.c`, `ans_window_prepare` | An SP11 build refuses with `NVMEH_SP11_STATUS_UNWIRED` instead of calling the A16 `nvmeh_adopt`; it must call `nvmeh_sp11_adopt` once the target, record and params reach the monitor. | WIRING (UNIMPLEMENTED); the refusal is host-tested |
+| 16 | The producer of the adoption record | `probes/run.py`, the `ans_window` block (q1n1 `nvme_m3` adopt, then `answindow.nvmeh_params`) | The target is produced on the host by `probes/nvmesp11.py` from the descriptor and the per-run pins; no producer of the RECORD exists. | target: EXPERIMENTAL; record: UNIMPLEMENTED |
+| 17 | The monitor's adoption entry | `probes/xnuboot/ans_glue.c`, `ans_window_prepare` | An SP11 build calls `nvmeh_sp11_adopt` with the host-placed target and record and never the A16 `nvmeh_adopt`; all-zero blocks refuse with `NVMEH_SP11_STATUS_UNWIRED` (section 2). | wired (EXPERIMENTAL); host-tested |
 
 The A16 path is not entangled: `nvme-host.c` is already generic. The A16 assumptions live in q1n1's Python and in the
 host helpers, so nothing in the A16 code had to change.
 
 ## 4. Proposed descriptor and board-info additions
 
-The shipped schema v1 has `pcie.ecam`, `smmu[]` and `devices.nvme`, but no field for the SSD's segment, BDF or stream
-map. Descriptor files belong to platform-gate; this is a proposal, not an edit. Until it exists
-`nvmeh_sp11_check` refuses with `UNKNOWN_BDF` / `UNKNOWN_STREAM`, which is the intended fail-closed state.
+The descriptor carries the stable facts of the SSD's PCIe path in an optional top-level `storage` section (EXPERIMENTAL;
+`tools/board_descriptor.py` and `config/boards/sp11.json`, held by `tools/test-board-descriptor-storage.py`). Every value is an
+EXPECTED value for the monitor's cross-checks, never a boot-specific address: BAR0, the queue addresses and the namespace identity
+are per-run and live in the record and the pins. A group the descriptor leaves null keeps `nvmeh_sp11_check` refusing with
+`UNKNOWN_BDF` / `UNKNOWN_STREAM`, which is the intended fail-closed state. The section as shipped for the SP11:
 
 ```json
 "storage": {
   "nvme": {
-    "segment": null,
-    "endpoint": null,
-    "smmu": null,
-    "stream": null
+    "segment": 6,
+    "ecam": { "base": "0x70000000", "start_bus": 0, "end_bus": 1 },
+    "root_port": { "bus": 0, "device": 0, "function": 0, "vendor_id": "0x17cb", "device_id": "0x0111", "class_code": "0x060400" },
+    "endpoint": { "bus": 1, "device": 0, "function": 0, "vendor_id": "0x144d", "device_id": "0xa80b", "class_code": "0x010802" },
+    "smmu": "pcie-smmu",
+    "stream": { "rid_base": "0x0", "rid_count": "0x10000", "stream_base": "0x60000" }
   }
 }
 ```
 
-| Field | Value once measured | Label |
+| Field | Value | Label |
 | --- | --- | --- |
-| `segment` | the `pcie.ecam[].segment` that hosts the SSD | OBSERVED once: 6 ([section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15)); the descriptor does not carry it (UNIMPLEMENTED) |
-| `endpoint` | `{"bus": 1, "device": 0, "function": 0}` (INFERRED from the A16 and the device tree) | OBSERVED once: 01:00.0 (section 7.1); the descriptor does not carry it (UNIMPLEMENTED) |
-| `smmu` | the `smmu[].name` that serves it, so ambiguity is stated, not guessed | UNKNOWN until X2 |
-| `stream` | `{"rid_base": "0x0", "rid_count": "0x10000", "stream_base": "0x60000"}` (the EL2 overlay's map, INFERRED to hold under the firmware) | UNKNOWN until X2 |
+| `segment` | the PCI segment (ACPI `_SEG`) of the root complex that hosts the SSD | OBSERVED once: 6 ([section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15)) |
+| `ecam` | that segment's MCFG allocation: base, first and last bus | OBSERVED once: `0x70000000`, buses 0 to 1 (the dumped tables, and read through at EL2) |
+| `root_port`, `endpoint` | the two functions with their ids and class codes, as values to cross-check | OBSERVED once: 00:00.0 (`0x17CB:0x0111`, class `0x060400`) and 01:00.0 (`0x144D:0xA80B`, class `0x010802`) |
+| `smmu` | the `smmu[].name` that serves it, so ambiguity is stated, not guessed | OBSERVED in the unit's IORT (one SMMUv3 node, `0x15400000`): what the firmware declares, not what the SMMU is doing |
+| `stream` | `{"rid_base": "0x0", "rid_count": "0x10000", "stream_base": "0x60000"}` | OBSERVED in the same IORT (the segment 6 root complex has one ID mapping: RIDs `0` to `0xFFFF` to `0x60000 + RID`); the SMMU's state is D7, UNKNOWN |
 
-Each field needs provenance like every other claim (a null must be `UNKNOWN`/`UNIMPLEMENTED`). Board-info ABI 1.0 has no
-room for it: a minor bump would add a `KNOWN_STORAGE` bit and a 24-byte group, appended after the 1.0 layout. The namespace
+**What refuses (the validator, each with a faulty case in `tools/test-board-descriptor-storage.py`).** An endpoint whose class is not
+`0x010802` or a root port that is not a PCI-to-PCI bridge (`0x0604xx`); a vendor id of 0 or `0xFFFF` (what a missing function reads
+as); a function with no ECAM window to be reached through, or a bus
+outside the window's bus range; an endpoint not on a bus above its root port's; an ECAM window without a segment, not 1 MiB aligned,
+with its end bus before its start, past the monitor's 36-bit limit or overlapping another claimed window; a `pcie.ecam` entry of the
+same segment that says something else; an `smmu` that is not a name in the descriptor's `smmu` list or is not an SMMUv3; a stream
+window without an `smmu`, past the 16-bit RID space or the 32-bit StreamID space, or that does not contain the endpoint's RID; an
+unknown key; a `storage` that is null instead of absent; and a claim without provenance (all six entries are OBSERVED and say where).
+`pcie.ecam` stays null in `sp11.json` because the M1 derivation of the guest's view refuses a populated `pcie.ecam` without its
+inputs; `devices.nvme` is absent in the guest's view while `storage` stays populated. `require_boot_ready` ignores `storage.*`
+placeholders: the SSD facts do not make a board boot-ready or keep one from it.
+
+Board-info ABI 1.0 has no room for the section: a minor bump would add a `KNOWN_STORAGE` bit and a 24-byte group, appended after the
+1.0 layout (UNIMPLEMENTED; the monitor reads the target from the host-placed block, not from the board-info blob). The namespace
 EUI64 and the run generation are not board facts; they belong in the per-run pins and the record.
 
 ## 5. GPT layout schema and fixtures
@@ -216,7 +261,10 @@ noted. A host test is not hardware evidence.
 | I21 | Malformed GPT layouts are refused by the loader | `test_malformed_layouts_are_refused`, `test_json_text_refusals`, `test_informational_keys_are_accepted_only_when_consistent` |
 | I22 | The SP11 code is absent from the default build, refuses a conflicting gate, and the monitor object needs no libc and holds no state | `test_default_preprocessing_has_no_sp11_text`, `test_gate_conflicts_are_refused`, `test_the_monitor_object_has_no_libc_and_no_state`; the A16 ELF by `tools/monitor_baseline.py compare` |
 | I23 | The cited lines say what this document claims | `test_cited_lines_say_what_the_documents_claim` (SKIP without `build/refs`) |
-| I24 | An SP11 monitor never adopts the SSD on the A16 controller re-proof alone: the adoption entry refuses with a named, host-decodable status | `tools/test-monitor-hardening.py` (`NvmeWindowWiring`, `Mutants`), `tools/test-sp11-integration.py` (`StatusBands`) |
+| I24 | An SP11 monitor never adopts the SSD on the A16 controller re-proof alone: the adoption entry calls `nvmeh_sp11_adopt`, never `nvmeh_adopt`, and refuses with a named, host-decodable status | `tools/test-monitor-hardening.py` (`NvmeWindowWiring`, `Mutants`), `tools/test-sp11-integration.py` (`StatusBands`) |
+| I25 | The target is the descriptor's and the run's pins, never a constant; a group left out stays unknown and refuses by name; blocks are placed at the glue's offsets, never over another run's block | `tools/test-nvme-sp11-wiring.py` (`Producer`, `Reservation`, `Adopt`) |
+| I26 | The descriptor's `storage` section refuses every inconsistent claim (class, bus range, ECAM window, SMMU, stream window, provenance) and does not change what is boot-ready | `tools/test-board-descriptor-storage.py` (`Refused`, `Accepted`, `Shipped`) |
+| I27 | Nothing placed (both blocks all zero) is `NVMEH_SP11_STATUS_UNWIRED`; one block placed is an ABI refusal, never a silent pass; the A16 monitor images are unchanged | `tools/test-nvme-sp11-wiring.py` (`Adopt`); `tools/monitor_baseline.py compare` |
 
 ## 7. Appendix D answered: the per-machine questions
 
@@ -231,8 +279,8 @@ below was measured on a Surface Pro except what [section 7.1](#71-what-the-x2-te
 | D2 | Which PCIe segment hosts the SSD? | The Denali tree enables `pcie6a` with the 3.3 V NVMe supply and the root port at device 0 (`x1-microsoft-denali.dtsi:264-267,1015-1016,1031-1033`; `hamoa.dtsi:3434,3526`) | ACPI MCFG allocations, then config-space class `0x010802` per segment (X2 item 6, with the A5 adapter) | the segment of `pcie6a`; its number is firmware's, not Linux's `6` | OBSERVED once ([7.1](#71-what-the-x2-test-image-read-on-2026-11-15)): segment 6, which is also Linux's number here |
 | D3 | Which BDF? | Root port at device 0 with `bus-range 0x01 0xff` (`hamoa.dtsi:3526-3529`) | Walk from the root port to its secondary bus and read the endpoint header (X2 item 6) | endpoint at bus 1, device 0, function 0, RID `0x0100` | OBSERVED once (7.1): endpoint 01:00.0, so RID `0x0100` |
 | D4 | Which ECAM base? | none: the device tree's `config` window (`hamoa.dtsi:3441`, `0x70100000`, 1 MiB) is Linux's, not an MCFG allocation | MCFG from the ACPI dump (X2 item 5, N6) | one allocation for the segment; value unknown | OBSERVED once (7.1): `0x70000000`, buses 0 to 1 |
-| D5 | Which SMMU serves it? | `pcie_smmu` is `arm,smmu-v3` at `0x15400000`, size `0x80000` (`hamoa.dtsi:8544-8546`); `pcie6a` maps into it (`x1-el2.dtso:47-49`) | IORT from the ACPI dump; `SMMU_IDR0` read (X2 item 6) | `0x15400000`, SMMUv3 | VERIFIED (device tree); INFERRED (that firmware agrees) |
-| D6 | Which StreamID? | EL2 overlay: `iommu-map = <0 &pcie_smmu 0x60000 0x10000>` for `pcie6a` (`x1-el2.dtso:48`) | IORT ID mappings, then the stream table entry read for that SID (X2 item 6) | `0x60100` for RID `0x0100` if the overlay holds; the A16 formula would give another value | INFERRED (the RID `0x0100` is now OBSERVED, D3; the stream mapping was not read) |
+| D5 | Which SMMU serves it? | `pcie_smmu` is `arm,smmu-v3` at `0x15400000`, size `0x80000` (`hamoa.dtsi:8544-8546`); `pcie6a` maps into it (`x1-el2.dtso:47-49`); the unit's own IORT (the dumped firmware tables) has one SMMUv3 node, base `0x15400000`, and the segment 6 root complex refers to it | IORT from the ACPI dump (done, offline); `SMMU_IDR0` read (X2 item 6; session 1 of [SP11-STORAGE-PROVISIONING.md](SP11-STORAGE-PROVISIONING.md#9-the-first-three-storage-hardware-sessions)) | `0x15400000`, SMMUv3 | VERIFIED (device tree); OBSERVED once in the unit's IORT (what the firmware declares); the SMMU's registers UNKNOWN |
+| D6 | Which StreamID? | EL2 overlay: `iommu-map = <0 &pcie_smmu 0x60000 0x10000>` for `pcie6a` (`x1-el2.dtso:48`); the unit's IORT: the segment 6 root complex has one ID mapping, RIDs `0` to `0xFFFF` to StreamIDs `0x60000` and up | IORT ID mappings (done, offline), then the stream table entry read for that SID (X2 item 6; session 1) | `0x60100` for RID `0x0100`; `segment << 16 \| RID` gives the same value for segment 6 | OBSERVED once in the IORT (the declared map; the RID `0x0100` is OBSERVED, D3); what the SMMU does with the stream UNKNOWN (D7) |
 | D7 | Is the PCIe SMMU translating, bypassing or aborting at hand-off? | "Controlled by Gunyah" (`hamoa.dtsi:8555`); an EL2 owner "needs to configure it properly" (`x1-el2.dtso:25-27`) | `SMMU_CR0` (`+0x20`), `GBPA` (`+0x44`), `STRTAB_BASE` (`+0x80`), `STRTAB_BASE_CFG` (`+0x88`) and the stream's STE, read only, as q1n1 `nvme_m3.py:220-257` does (X2 item 6) | CR0.SMMUEN 1, STE Config 6 (stage 2 only), identity map over DRAM, as on the A16 | UNKNOWN (A16: VERIFIED); the X2 image's read of the SMMUv3 at `0x15400000` faulted at EL2 in two boots (2026-11-14, 2026-11-15) |
 | D8 | What state is the controller in after ExitBootServices? | none | CAP (MQES, DSTRD, MPSMIN, TO), VS, CC, CSTS, AQA, ASQ, ACQ, read only (X2 item 6) | CC.EN 1, CSTS.RDY 1, firmware admin queue in firmware memory, DSTRD 0, MPSMIN 4 KiB, MQES at least 64 | OBSERVED once (7.1): every expected field matched; the queue memory being boot-services memory is INFERRED |
 | D9 | Identify facts | none | Identify controller and namespace 1 through q1n1's own queues: MDTS, NN, ONCS, VWC, HMPRE/HMMIN, NSZE/NCAP/NUSE, NLBAF, FLBAS, the LBAF table, DLFEAT, EUI64 and NGUID (X6, read only) | 512-byte current format, no metadata, EUI64 present; an SSD with NGUID only cannot be pinned by this contract and is refused | INFERRED |
@@ -293,8 +341,9 @@ the NVM command set and MQES at least 64, and the doorbell stride (row 9) at mos
   bits `0x6`, header type 0, BAR0 inside the bridge's window). BAR0 is the firmware's assignment in one boot: the record
   must carry it per run, and the endpoint proof compares it with the endpoint at each adoption.
 
-D1, D5 to D7, D9 to D12, D14 and D16 are unchanged: each needs the disk, the SMMU, a command on the controller, a
-controller reset or the operator.
+D1, D7, D9 to D12, D14 and D16 are unchanged: each needs the disk, the SMMU, a command on the controller, a
+controller reset or the operator. (D5 and D6 were later read in the unit's own IORT, section 7: what the firmware declares, not what
+the SMMU does.)
 
 ## 8. Validation and what it does not show
 
@@ -308,8 +357,16 @@ default build is proved unchanged by `tools/monitor_baseline.py compare` (see
 
 This work does not show: that an SP11 SSD, SMMU or firmware behaves as modelled; that the monitor's EL2 map reaches the
 ECAM page, BAR0 and DMA window (the A16 relies on q1n1's identity map, `compat/nvme-host.c:6`; X4); that a Windows boot
-survives a controller reset; or that anything calls `nvmeh_sp11_adopt` (wiring is UNIMPLEMENTED: until it exists the monitor's adoption
-entry refuses, section 2).
+survives a controller reset; that the call of `nvmeh_sp11_adopt` in the monitor's adoption entry works on the unit (it is wired and
+host-tested, and the producer of the record is UNIMPLEMENTED, section 2); or that the host-placed blocks are fresh (section 2.3).
+`python3 tools/test-nvme-sp11-wiring.py` (the placement, the target, the C structs against the host layout, each refusal reaching the
+launch's status) and `python3 tools/test-board-descriptor-storage.py` hold the host side of the wiring.
+
+The contract also trusts what the host places. The protected extents, the write-authorisation and DMA-proven flags and `smmu_mode` of
+the record are checked for consistency with the descriptor and the prepared run, not for truth; `nvmeh_sp11_prove_endpoint` has no vendor
+or device id check and no SError guard and takes BAR0 as a CPU physical address; and under bypass the SSD reaches all of DRAM.
+[SP11-STORAGE-PROVISIONING.md](SP11-STORAGE-PROVISIONING.md#102-what-the-monitor-does-not-know-accepted-limitations-of-the-contract)
+keeps the list.
 
 ## 9. K4
 
@@ -331,7 +388,9 @@ D3 is the owner's explicit decision; the agents and tools never switch to it sil
 
 In this order, each a separate supervised session with its own authorization, one hardware client at a time, AC power or
 at least 50% battery, no writes before step 6: (1) X2 read-only measurements D2 to D8, D15 (partly done, once: D2 to D4,
-D8 and D15 were read on 2026-11-15, section 7.1; D5 to D7 were not, the SMMU read faulted); (2) the S1 survey and the
+D8 and D15 were read on 2026-11-15, section 7.1; D5 to D7 were not, the SMMU read faulted; the read-only `smmuprobe` payload of the q1n1
+fork is the planned next read, and [SP11-STORAGE-PROVISIONING.md](SP11-STORAGE-PROVISIONING.md#9-the-first-three-storage-hardware-sessions)
+plans the first three storage sessions with their stop rules); (2) the S1 survey and the
 operator's single GPT entry with a verified backup and the BitLocker key off the device; (3) four-reader agreement and
 verify-undo; (4) a read-only takeover and adoption with Windows still bootable, D9 to D14; (5) D11, Windows boots after the
 reset; (6) per-run write enable with persistence capture, which needs the explicit per-run authorization this contract

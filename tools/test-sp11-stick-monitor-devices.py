@@ -3,9 +3,13 @@
 """Tests of what the record of the monitor entry run says about device code, firmware calls, interrupts and thermal reads (monitor port work item 4b,
 Phase D; docs/SP11-STICK-MONITOR.md section 14): D1, the families of device code in the monitor binary (found by name in its symbol table, llvm-nm), each
 named in section 3b with its gates, the families the build leaves out absent from the binary, and the sources that the gates are read from; D5, the guest SMC
-that nothing traps and the read-only scan of the local kernelcache that the text cites; D6, the thermal reads; D7, which interrupts the monitor acknowledges.
+that nothing traps and the read-only scan of the local kernelcache that the text cites; D6, the thermal reads; D7, which interrupts the monitor acknowledges; and, since the
+SP11 monitor calls nvmeh_sp11_adopt with a target and a record that a host places (storage integration), the way the monitor reaches the SSD, the stick bundle's silence about placing
+those two blocks, and, since the builder refuses an ANS model in PARAMS (R3), that the call is reached only for an ANS window and that no bundle of this kind lists one (the builder's numbers
+and its refusal end to end are in tools/test-sp11-stick-monitor-ans.py).
 Every check has a deliberately faulty case: a record that omits a family or a gate, a binary with a function of a family that the build leaves out, an SMC in a
-function that no family owns, a scan of words that hold an SMC.
+function that no family owns, a scan of words that hold an SMC, an ans_glue.c that adopts the SSD another way or asks for a window nowhere, an nvme-host.c that does not clear the
+state word or refuse a pair that was never placed, a check_launch that looks in fewer places than the real one, and a file of the stick bundle that names what places the blocks.
 
     python3 tools/test-sp11-stick-monitor-devices.py
 
@@ -36,7 +40,7 @@ AUTH = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(AUTH)
 SCRATCH = ROOT / 'build' / 'sp11-monitor-devices-test-scratch'
 AUTH.SCRATCH = SCRATCH
-BT, STATE, sha = AUTH.BT, AUTH.STATE, AUTH.sha
+BT, STATE, sha, m1, sb, ch = AUTH.BT, AUTH.STATE, AUTH.sha, AUTH.m1, AUTH.sb, AUTH.ch
 # The families of device code (code that stores to a device or calls firmware) that this monitor binary holds: the names of their functions as the symbol table
 # gives them (an LTO clone suffix taken off) and the words of their paragraph in section 3b that say what closes them.
 FAMILIES = {
@@ -69,6 +73,177 @@ def tearDownModule():
 def source(rel):
     """A source file with its white space folded to single spaces, so that a reflow does not fail a pin but a changed word does."""
     return ' '.join((ROOT / rel).read_text().split())
+
+
+# The SP11 monitor's way to the SSD (docs/SP11-NVME-WINDOW.md section 2): the one call of ans_window_prepare, as ans_glue.c spells it once its white space is folded.
+NVME_ADOPT_CALL = ('return nvmeh_sp11_adopt(&nvmeh_direct,ANS_NVMEH_TARGET(res),ANS_NVMEH_RECORD(res),ANS_NVMEH_PARAMS(res), ANS_NVMEH_STATE(res),'
+                   'c->params->mem_low,c->params->mem_high);')
+NVME_A16_CALL = 'return nvmeh_adopt(&nvmeh_direct,ANS_NVMEH_PARAMS(res),ANS_NVMEH_STATE(res), c->params->mem_low,c->params->mem_high);'
+NVME_OLD_REFUSAL = 'ANS_NVMEH_STATE(res)->prepare=(uint64_t)(int64_t)NVMEH_SP11_STATUS_UNWIRED; return NVMEH_SP11_STATUS_UNWIRED;'
+# What places the target and record blocks that the call reads (compat/ans.h, probes/nvmesp11.py). The stick profile stays refused by name only while nothing of the stick
+# bundle places them: a pair that was never placed is all zero.
+PLACEMENT_WORDS = ('ANS_WINDOW_NVMEH_TARGET', 'ANS_WINDOW_NVMEH_RECORD', 'nvmesp11')
+STICK_CODE = ('tools/sp11_stick_*.py', 'tools/sp11_m1_*.py', 'probes/sp11-stick-*.c', 'probes/sp11-stick-*.h')
+
+
+def prepare_branches(glue):
+    """{'sp11': the SP11 branch, 'other': the branch of every other profile} of the `#if SNAP_PLATFORM_SP11` in ans_window_prepare, comments taken out and white space folded;
+    {} when the function or the conditional is not there."""
+    at = glue.find('static int64_t ans_window_prepare(')
+    if at < 0:
+        return {}
+    depth, side, out = 0, None, {'sp11': [], 'other': []}
+    for line in re.sub(r'/\*.*?\*/', '', glue[at:], flags=re.S).splitlines():
+        word = line.strip()
+        if word.startswith('#if'):
+            depth += 1
+            if depth == 1:
+                side = 'sp11' if word == '#if SNAP_PLATFORM_SP11' else None
+                continue
+        elif word.startswith('#else') and depth == 1:
+            side = 'other' if side else None
+            continue
+        elif word.startswith('#endif'):
+            depth -= 1
+            if depth == 0:
+                break
+        if side and word:
+            out[side].append(word)
+    return {name: ' '.join(words) for name, words in out.items()} if out['sp11'] else {}
+
+
+def nvme_wiring_problems(glue, host):
+    """What the record's nvmeh paragraph says of the SSD path, against the text of probes/xnuboot/ans_glue.c and compat/nvme-host.c: [str]. The SP11 profile adopts the SSD only
+    through nvmeh_sp11_adopt, with the two blocks that the host places, and never through nvmeh_adopt; every adoption starts by clearing the state word (the reservation survives a
+    warm restart, so an ADOPTED left by an earlier launch must not outlive a refusal); a pair of blocks that was never placed (all zero) is refused by name before anything is
+    checked, and a refusal is stored in the state."""
+    problems, folded = [], ' '.join(glue.split())
+    problems += [f'ans_glue.c no longer has {needle!r}' for needle in ('if (!ans_window(c)) return 0;', '#if SNAP_PLATFORM_SP11') if needle not in folded]
+    branches = prepare_branches(glue)
+    sp11, other = branches.get('sp11'), branches.get('other')
+    if sp11 is None:
+        problems.append('ans_window_prepare has no branch for SNAP_PLATFORM_SP11')
+    else:
+        if NVME_ADOPT_CALL not in sp11:
+            problems.append('the SP11 branch does not return nvmeh_sp11_adopt called with the target, the record, the params and the state')
+        if re.search(r'\bnvmeh_adopt\s*\(', sp11):
+            problems.append('the SP11 branch calls nvmeh_adopt')
+        if len(re.findall(r'\breturn\b', sp11)) != 1:
+            problems.append('the SP11 branch has a return besides the call of nvmeh_sp11_adopt')
+    if not other or not re.search(r'\bnvmeh_adopt\s*\(', other):
+        problems.append('the branch of the other profiles no longer calls nvmeh_adopt: this test does not see the code it was written for')
+    adopt, unplaced = (re.search(rf'{head}\(.*?\n\}}\n', host, re.S) for head in ('int nvmeh_sp11_adopt', 'static int sp11_unplaced'))
+    adopt, unplaced = (' '.join(m.group(0).split()) if m else '' for m in (adopt, unplaced))
+    if 's->status = 0; int e = sp11_unplaced(t, r)' not in adopt:
+        problems.append('nvmeh_sp11_adopt does not clear the state word before it checks or refuses anything')
+    if 'int e = sp11_unplaced(t, r) ? NVMEH_SP11_STATUS_UNWIRED : nvmeh_sp11_check(t, r, p);' not in adopt:
+        problems.append('nvmeh_sp11_adopt does not refuse a pair that was never placed by name (UNWIRED) before it checks anything')
+    if 'if (e) { s->prepare = (uint64_t)(int64_t)e; return e; }' not in adopt:
+        problems.append('nvmeh_sp11_adopt does not store its refusal in the state')
+    for letter, block in (('t', 'target'), ('r', 'record')):
+        if f'for (i = 0; i < sizeof *{letter}; i++) if ({letter}b[i]) return 0;' not in unplaced:
+            problems.append(f'sp11_unplaced does not look at every byte of the {block} block')
+    return problems
+
+
+def stick_code():
+    """{path from the tree: text} of the stick bundle's code: its builders, the M1 profile and descriptor tools that make its monitor and PARAMS, and the sources of its stage
+    and reporter (STICK_CODE)."""
+    return {str(path.relative_to(ROOT)): path.read_text() for pattern in STICK_CODE for path in sorted(ROOT.glob(pattern))}
+
+
+def placement_problems(files):
+    """The files of `files` ({path: text}) that name what places the SSD window's target and record blocks: [str]."""
+    return ([] if files else ['no file of the stick bundle was found: the pin looks at nothing']) + [
+        f'{path} names {word}' for path, text in sorted(files.items()) for word in PLACEMENT_WORDS if word in text]
+
+
+def strip_comments(text):
+    return re.sub(r'/\*.*?\*/|//[^\n]*', '', text, flags=re.S)
+
+
+def monitor_sources():
+    """{path from the tree: text, comments taken out} of the C files the monitor is built from: its translation unit, the files that unit includes and the shared library."""
+    return {str(path.relative_to(ROOT)): strip_comments(path.read_text())
+            for pattern in ('probes/xnuboot.c', 'probes/xnuboot/*.c', 'compat/*.c') for path in sorted(ROOT.glob(pattern))}
+
+
+def ans_reach_problems(glue, monitor):
+    """Why the SP11 monitor calls nvmeh_sp11_adopt only for an ANS window, and from one place (`glue` is ans_glue.c, `monitor` is monitor_sources()): [str]. ans_window() is true
+    for the DEVICE_ANS_NVME_V1 model of PARAMS whose config[3] is ANS_WINDOW_MODE, and ans_window_prepare returns before the call when it is not. The window is a LIVE read: the
+    monitor asks ans_window again when it makes the ANS operations (each ANS access) and at the stop, as the record's nvmeh paragraph says."""
+    folded = ' '.join(glue.split())
+    problems = [f'ans_glue.c no longer has {needle!r}' for needle in (
+        'if (p->models[i].kind==DEVICE_ANS_NVME_V1) return &p->models[i];', 'return m && m->config[3]==ANS_WINDOW_MODE;', 'if (!ans_window(c)) return 0;',
+        'int window=ans_window(c);', 'static void ans_window_stop(struct context *c) { if (!ans_window(c)) return;') if needle not in folded]
+    problems += [] if 'ans_window_stop(c);' in monitor.get('probes/xnuboot/report.c', '') else ['probes/xnuboot/report.c no longer calls ans_window_stop']
+    calls = [path for path, text in sorted(monitor.items()) for _ in re.finditer(r'(?<!int )\bnvmeh_sp11_adopt\s*\(', text)]
+    return problems + ([] if calls == ['probes/xnuboot/ans_glue.c'] else [f'nvmeh_sp11_adopt is called from {calls}, not once from ans_glue.c'])
+
+
+def params_chunks(count=0, models=(), base=None):
+    """The PARAMS chunk of a guest as check_launch reads it: struct params, all zero or `base`, with model_count `count` and the (slot, kind, config[3]) of `models`."""
+    data = bytearray(bytes(m1.PARAMS_BYTES) if base is None else base)
+    data[m1.MODEL_COUNT_AT:m1.MODEL_COUNT_AT + 8] = count.to_bytes(8, 'little')
+    for slot, kind, window in models:
+        at = m1.MODELS_AT + slot * m1.MODEL_BYTES
+        data[at:at + 8] = kind.to_bytes(8, 'little')
+        data[at + m1.ANS_WINDOW_AT:at + m1.ANS_WINDOW_AT + 8] = window.to_bytes(8, 'little')
+    return [dict(kind=sb.KIND_PARAMS, dest=0x88000C000, data=bytes(data))]
+
+
+ANS_CASES = {'the ASC model': (1, [(0, 49, 0)]), 'the NVMe model as a window': (1, [(0, 50, 1)]), 'the NVMe model without the window word': (1, [(0, 50, 0)]),
+             'both models of the pair': (2, [(0, 49, 0), (1, 50, 1)]), 'a model in the last slot': (128, [(127, 49, 0)]), 'a model in a slot past model_count': (2, [(5, 50, 1)])}
+
+
+def builder_ans_problems(check):
+    """What `check` (check_launch, or a stand-in for it) says to PARAMS that list an ANS model and to PARAMS that do not: [str]."""
+    def verdict(*args):
+        try:
+            check(params_chunks(*args))
+        except m1.Refused as refused:
+            return refused.name, refused.detail
+        return None, ''
+    problems = [f'refuses {what}' for what, args in (('PARAMS with no model', ()), ('other kinds (1, 48 and 51)', (3, [(0, 1, 0), (1, 48, 0), (2, 51, 1)])),
+                                                      ('a kind whose upper half is not zero', (1, [(0, 49 | 1 << 32, 1)]))) if verdict(*args)[0]]
+    problems += [f'does not refuse {what} as PARAMS_ANS (it says {verdict(*args)[0]})' for what, args in ANS_CASES.items() if verdict(*args)[0] != 'PARAMS_ANS']
+    problems += [] if 'ANS window' in verdict(*ANS_CASES['the NVMe model as a window'])[1] else ['does not say which model is the window']
+    return problems + ([] if verdict(129)[0] == 'BUILT_SHAPE' else ['does not refuse a model_count that struct params has no slots for as BUILT_SHAPE'])
+
+
+def stand_in(slots=range(m1.MODEL_MAX), kinds=tuple(m1.ANS_KINDS), counted=False, width=8, window_only=False, shape=True, name='PARAMS_ANS'):
+    """A check_launch that looks in fewer places than the real one or reads less of a word: the faulty builders of builder_ans_problems."""
+    def check(chunks):
+        data = chunks[0]['data']
+        count = int.from_bytes(data[m1.MODEL_COUNT_AT:m1.MODEL_COUNT_AT + 8], 'little')
+        if shape and count > m1.MODEL_MAX:
+            raise m1.Refused('BUILT_SHAPE', 'count')
+        for slot in slots:
+            at = m1.MODELS_AT + slot * m1.MODEL_BYTES
+            window = int.from_bytes(data[at + m1.ANS_WINDOW_AT:at + m1.ANS_WINDOW_AT + 8], 'little') == m1.ANS_WINDOW_MODE
+            if int.from_bytes(data[at:at + width], 'little') in kinds and (slot < count or not counted) and (window or not window_only):
+                raise m1.Refused(name, 'ANS window' if window else 'ANS model')
+    return check
+
+
+def edited(text, old, new):
+    """`text` with `old` replaced by `new`: `old` must be there once, so that a faulty case whose source moved fails loudly and does not pass for nothing."""
+    assert text.count(old) == 1, f'{old!r} is in the text {text.count(old)} times'
+    return text.replace(old, new)
+
+
+def edited_in(text, head, old, new):
+    """`text` with `old` replaced by `new` inside the function that starts at `head` (up to the first line that is a closing brace alone)."""
+    start = text.index(head)
+    end = text.index('\n}\n', start) + 3
+    return text[:start] + edited(text[start:end], old, new) + text[end:]
+
+
+def edited_call(glue, new):
+    """`glue` with the call of nvmeh_sp11_adopt replaced by `new`."""
+    text, count = re.subn(r'return nvmeh_sp11_adopt\(.*?\);', lambda _: new, glue, count=1, flags=re.S)
+    assert count == 1, 'the call of nvmeh_sp11_adopt is not in the text'
+    return text
 
 
 def function_names(elf):
@@ -268,9 +443,93 @@ class Sources(unittest.TestCase):
                   'static uint64_t srot(unsigned b) {return UINT64_C(0x0c222000)+b*0x1000;}')
         self.pins('compat/hamoa-thermal.c', '#define SROT_BASE UINT64_C(0x0c222000)', '#define TM_BASE UINT64_C(0x0c271000)')
 
-    def test_the_nvme_path_is_unwired_on_this_profile(self):
-        self.pins('probes/xnuboot/ans_glue.c', 'if (!ans_window(c)) return 0;', '#if SNAP_PLATFORM_SP11',
-                  'ANS_NVMEH_STATE(res)->prepare=(uint64_t)(int64_t)NVMEH_SP11_STATUS_UNWIRED; return NVMEH_SP11_STATUS_UNWIRED;')
+    def test_the_sp11_profile_adopts_the_ssd_only_through_nvmeh_sp11_adopt_never_through_nvmeh_adopt_and_blocks_never_placed_are_refused(self):
+        self.pins('probes/xnuboot/ans_glue.c', 'if (!ans_window(c)) return 0;', '#if SNAP_PLATFORM_SP11', NVME_ADOPT_CALL)
+        glue, host = (ROOT / 'probes/xnuboot/ans_glue.c').read_text(), (ROOT / 'compat/nvme-host.c').read_text()
+        self.assertEqual(nvme_wiring_problems(glue, host), [])
+        branches = prepare_branches(glue)
+        self.assertIn(NVME_A16_CALL, branches['other'], 'the A16 branch still adopts with nvmeh_adopt: it is the code the A16 monitor runs')
+        self.assertNotIn('nvmeh_adopt', branches['sp11'].replace('nvmeh_sp11_adopt', ''), 'the SP11 branch does not name nvmeh_adopt at all')
+        head, tail = glue.split('static int64_t ans_window_prepare(', 1)
+        faulty = {
+            'the old refusal in place of the call': (edited_call(glue, NVME_OLD_REFUSAL), host, 'does not return nvmeh_sp11_adopt'),
+            'nvmeh_adopt in place of the call': (edited_call(glue, NVME_A16_CALL), host, 'the SP11 branch calls nvmeh_adopt'),
+            'the target and the record swapped': (edited(glue, 'ANS_NVMEH_TARGET(res),ANS_NVMEH_RECORD(res)', 'ANS_NVMEH_RECORD(res),ANS_NVMEH_TARGET(res)'), host,
+                                                  'does not return nvmeh_sp11_adopt'),
+            'the call and then a second route': (edited_call(glue, NVME_ADOPT_CALL + ' ' + NVME_A16_CALL), host, 'a return besides the call'),
+            'no branch for the SP11 profile': (head + 'static int64_t ans_window_prepare(' + edited(tail, '#if SNAP_PLATFORM_SP11', '#if 0'), host, 'has no branch for SNAP_PLATFORM_SP11'),
+            'the A16 branch no longer adopts': (edited(glue, 'return nvmeh_adopt(&nvmeh_direct,', 'return nvmeh_other(&nvmeh_direct,'), host,
+                                                'the branch of the other profiles no longer calls nvmeh_adopt'),
+            'an unplaced pair is not refused by name': (glue, edited(host, 'sp11_unplaced(t, r) ? NVMEH_SP11_STATUS_UNWIRED : nvmeh_sp11_check(t, r, p)', 'nvmeh_sp11_check(t, r, p)'),
+                                                        'does not refuse a pair that was never placed by name'),
+            'only the target block is looked at': (glue, edited(host, 'for (i = 0; i < sizeof *r; i++) if (rb[i]) return 0;', ''), 'does not look at every byte of the record block'),
+            'only the record block is looked at': (glue, edited(host, 'for (i = 0; i < sizeof *t; i++) if (tb[i]) return 0;', ''), 'does not look at every byte of the target block'),
+            'a refusal is not stored': (glue, edited_in(host, 'int nvmeh_sp11_adopt', 's->prepare = (uint64_t)(int64_t)e;', ''), 'does not store its refusal in the state'),
+            'a stale state word is not cleared': (glue, edited_in(host, 'int nvmeh_sp11_adopt', 's->status = 0;', ''), 'does not clear the state word'),
+            'the state word is set, not cleared': (glue, edited_in(host, 'int nvmeh_sp11_adopt', 's->status = 0;', 's->status |= 1;'), 'does not clear the state word'),
+        }
+        for what, (g, h, expected) in faulty.items():
+            with self.subTest(what):
+                problems = nvme_wiring_problems(g, h)
+                self.assertTrue([p for p in problems if expected in p], problems)
+        quoted = edited(glue, 'return nvmeh_sp11_adopt(', '/* never nvmeh_adopt(res), as the A16 branch does */ return nvmeh_sp11_adopt(')
+        self.assertEqual(nvme_wiring_problems(quoted, host), [], 'a comment that names nvmeh_adopt( is no call')
+
+    def test_nothing_of_the_stick_bundle_places_the_two_blocks_so_this_profile_stays_refused_by_name(self):
+        files = stick_code()
+        self.assertEqual(placement_problems(files), [])
+        for known in ('tools/sp11_stick_bundle_build.py', 'tools/sp11_stick_bundle_record_m1.py', 'tools/sp11_stick_wrapper_build.py', 'tools/sp11_m1_descriptor.py',
+                      'probes/sp11-stick-monitor.c', 'probes/sp11-stick-wrapper.c', 'probes/sp11-stick-gic.h'):
+            self.assertIn(known, files, 'the pin looks at the files it is meant to look at')
+        for word in PLACEMENT_WORDS:
+            for path in ('tools/sp11_stick_bundle_build.py', 'tools/sp11_stick_bundle_record_m1.py', 'probes/sp11-stick-monitor.c'):
+                with self.subTest(word=word, path=path):
+                    self.assertEqual(placement_problems({**files, path: files[path] + f'\n{word}\n'}), [f'{path} names {word}'])
+        self.assertTrue(placement_problems({}), 'a pin that finds no file is refused')
+        for word, rel in (('ANS_WINDOW_NVMEH_TARGET', 'compat/ans.h'), ('ANS_WINDOW_NVMEH_RECORD', 'compat/ans.h'), ('nvmesp11', 'docs/SP11-NVME-WINDOW.md')):
+            self.assertIn(word, (ROOT / rel).read_text(), f'the pin names what {rel} names')
+        self.assertTrue((ROOT / 'probes/nvmesp11.py').is_file(), 'the host library that places the blocks')
+
+    def test_the_call_of_nvmeh_sp11_adopt_is_reached_only_for_an_ans_window_and_the_builder_refuses_every_ans_model_so_no_bundle_reaches_it(self):
+        glue_path, trap_path, report_path = 'probes/xnuboot/ans_glue.c', 'probes/xnuboot/trap_dispatch.c', 'probes/xnuboot/report.c'
+        glue, monitor = (ROOT / glue_path).read_text(), monitor_sources()
+        self.assertEqual(ans_reach_problems(glue, monitor), [])
+        self.assertEqual(builder_ans_problems(m1.check_launch), [])
+        faulty_reach = {
+            'a window that needs no window word': (edited(glue, 'return m && m->config[3]==ANS_WINDOW_MODE;', 'return m != 0;'), monitor, 'config[3]==ANS_WINDOW_MODE'),
+            'the ASC model is taken for the window model': (edited(glue, 'if (p->models[i].kind==DEVICE_ANS_NVME_V1) return &p->models[i];',
+                                                                   'if (p->models[i].kind==DEVICE_ANS_ASC_V1) return &p->models[i];'), monitor, 'DEVICE_ANS_NVME_V1'),
+            'a launch that does not return when there is no window': (edited(glue, 'if (!ans_window(c)) return 0;', ''), monitor, 'if (!ans_window(c)) return 0;'),
+            'ANS operations made without asking for a window': (edited(glue, 'int window=ans_window(c);', 'int window=0;'), monitor, 'int window=ans_window(c);'),
+            'a stop that does not ask for a window': (edited(glue, 'static void ans_window_stop(struct context *c)\n{\n    if (!ans_window(c)) return;', 'static void ans_window_stop(struct context *c)\n{\n'),
+                                                      monitor, 'ans_window_stop(struct context *c)'),
+            'a report that does not stop the window': (glue, {**monitor, report_path: monitor[report_path].replace('ans_window_stop(c);', '')}, 'no longer calls ans_window_stop'),
+            'a second call, from the trap handler': (glue, {**monitor, trap_path: monitor[trap_path] + '\nint again(void) { return nvmeh_sp11_adopt(0, 0, 0, 0, 0, 0, 0); }'}, 'is called from'),
+            'no call at all': (glue, {**monitor, glue_path: monitor[glue_path].replace('nvmeh_sp11_adopt', 'nvmeh_adopt')}, 'is called from []'),
+        }
+        for what, (g, mon, expected) in faulty_reach.items():
+            with self.subTest(what):
+                problems = ans_reach_problems(g, mon)
+                self.assertTrue([p for p in problems if expected in p], problems)
+        faulty_builder = {
+            'a check that does not look at the models (the one before this change)': (stand_in(slots=()), 'does not refuse the ASC model'),
+            'a check for the NVMe model only': (stand_in(kinds=(50,)), 'does not refuse the ASC model'),
+            'a check that looks at the first slot only': (stand_in(slots=[0]), 'does not refuse a model in the last slot'),
+            'a check that looks at the counted slots only': (stand_in(counted=True), 'does not refuse a model in a slot past model_count'),
+            'a check that refuses the window word and nothing else': (stand_in(window_only=True), 'does not refuse the NVMe model without the window word'),
+            'a check that reads half of the kind': (stand_in(width=4), 'refuses a kind whose upper half is not zero'),
+            'a check that has no shape refusal': (stand_in(shape=False), 'does not refuse a model_count that struct params has no slots for'),
+            'a check that is another refusal': (stand_in(name='PARAMS_LAUNCH'), 'does not refuse the ASC model as PARAMS_ANS'),
+        }
+        for what, (check, expected) in faulty_builder.items():
+            with self.subTest(what):
+                problems = builder_ans_problems(check)
+                self.assertTrue([p for p in problems if expected in p], problems)
+        words = bytearray(params_chunks(1, [(0, 50, 1)])[0]['data'])
+        words[0x2340] = 1                                  # gpu.flags: the refusal that was there first keeps its place
+        with self.assertRaises(ch.Refused) as caught:
+            m1.check_launch(params_chunks(1, [(0, 50, 1)], bytes(words)))
+        self.assertEqual(caught.exception.name, 'PARAMS_LAUNCH')
 
     def test_hcr_el2_starts_without_tsc_and_no_write_sets_it_and_no_handler_takes_an_smc_from_the_guest(self):
         entry = (ROOT / 'probes/xnuboot.S').read_text()

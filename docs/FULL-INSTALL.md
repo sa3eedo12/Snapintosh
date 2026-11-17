@@ -299,13 +299,15 @@ adoption contract (`nvmeh_sp11_check`, `nvmeh_sp11_prove_endpoint` and
 `nvmeh_sp11_adopt`): the monitor re-proves the endpoint from configuration
 space, accepts only 512-byte LBAs, never switches the LBA format, and refuses
 with a named reason when the descriptor lacks the PCIe segment, BDF or SMMU
-stream. The monitor does not call it yet: an SP11 build refuses to adopt the SSD
-at all (`ans_window_prepare` returns `NVMEH_SP11_STATUS_UNWIRED`, prepare status
--145) rather than reaching the A16 adoption, until the call site is wired to real
-inputs. The audit of the A16 assumptions and the contract are in
+stream. The monitor's SP11 adoption entry calls it with a target and a record that the host places in the window reservation
+(`probes/nvmesp11.py`; the target comes from the descriptor's `storage.nvme` section and the per-run pins), never the A16 adoption:
+blocks that were never placed are refused as `NVMEH_SP11_STATUS_UNWIRED` (prepare status -145), and the producer of the record is
+UNIMPLEMENTED. The audit of the A16 assumptions and the contract are in
 [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md), and `tools/test-nvme-window-hamoa.py`
-holds them (`tools/test-monitor-hardening.py` holds the refusal). A16 behaviour
-is unchanged.
+holds them (`tools/test-monitor-hardening.py`, `tools/test-nvme-sp11-wiring.py` and `tools/test-board-descriptor-storage.py` hold the
+wiring and its refusals). The SP11 has no live link to provision through: its SSD is removable, and the offline flow with the SSD on a
+Mac, its image-file tools and the first storage hardware sessions are in
+[SP11-STORAGE-PROVISIONING.md](SP11-STORAGE-PROVISIONING.md). A16 behaviour is unchanged.
 
 ## Provisioning
 

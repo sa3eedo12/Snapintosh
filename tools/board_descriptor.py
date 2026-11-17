@@ -24,6 +24,16 @@ Rules that exist for hardware safety rather than tidiness:
   byte is then (1 << 36) - 1). That is the rule the existing code applies:
   shadow/stage2.c refuses only hi > limit, probes/bootcontract.py only
   end > 1 << address_bits, probes/monitor_work.py only base + size > IPA_LIMIT.
+* `storage` is an optional section (the A16 descriptor has none) for the
+  internal SSD's place on the PCIe side: `storage.nvme` carries the segment, the
+  ECAM window, the root port and the endpoint (bus/device/function and the ids
+  they must read as), the SMMU that serves it and its RID to StreamID window.
+  Every value is an EXPECTED value for a cross-check (docs/SP11-NVME-WINDOW.md
+  section 4); nothing in it is a boot-specific assignment (BAR0, queue
+  addresses, the namespace identity and the run generation are per-run pins
+  and never live here). It is not a boot fact, so require_boot_ready() does not
+  ask for it; probes/nvmesp11.py turns it into the monitor's target block and
+  leaves every group it does not state unknown.
 
 Usage: python3 tools/board_descriptor.py check FILE... [--boot-ready]
 """
@@ -41,6 +51,12 @@ PAGE = 0x1000
 
 TOP_KEYS = ('schema_version', 'board', 'soc', 'clusters', 'gic', 'smmu', 'timer', 'pcie',
             'ranges', 'devices', 'limits', 'provenance')
+OPTIONAL_TOP_KEYS = ('storage',)
+STORAGE_KEYS = ('segment', 'ecam', 'root_port', 'endpoint', 'smmu', 'stream')
+# PCI class codes (PCI Code and ID Assignment Specification): 0x010802 is mass storage, non-volatile memory, NVM Express;
+# base class 0x06, sub-class 0x04 is a PCI-to-PCI bridge, which is what a root port reads as.
+NVME_CLASS = 0x010802
+BRIDGE_CLASS = 0x0604
 
 # SoC name -> (family, MIDR implementer byte). 0x51 is Qualcomm in the Arm ARM
 # MIDR_EL1 implementer list; docs/FEASIBILITY.md records it for the A16.
@@ -152,6 +168,35 @@ class Window:
 
 
 @dataclass(frozen=True)
+class PciFunction:
+    """A PCI function the descriptor expects: where it sits and what its configuration header must read as."""
+    bus: int
+    device: int
+    function: int
+    vendor_id: int
+    device_id: int
+    class_code: int            # 24 bits: base class, sub-class, programming interface
+
+    @property
+    def rid(self):
+        """The requester id: bus << 8 | device << 3 | function (PCI Express Base Specification)."""
+        return self.bus << 8 | self.device << 3 | self.function
+
+
+@dataclass(frozen=True)
+class NvmeStorage:
+    """Where the internal SSD is, as expected values to cross-check (docs/SP11-NVME-WINDOW.md section 4).
+
+    A field is None until it was measured; a populated field says nothing about this boot's assignments."""
+    segment: object            # int | None: the PCI segment (ACPI _SEG) of the root complex that hosts the SSD
+    ecam: object               # (base, start_bus, end_bus) | None: that segment's MCFG allocation
+    root_port: object          # PciFunction | None
+    endpoint: object           # PciFunction | None: the NVM Express function
+    smmu: object               # str | None: the name of the smmu[] entry that serves it (kind smmu-v3)
+    stream: object             # (rid_base, rid_count, stream_base) | None: the RID window and its StreamID base
+
+
+@dataclass(frozen=True)
 class Board:
     board_id: str
     display_name: str
@@ -176,6 +221,7 @@ class Board:
     devices: dict               # name -> (state, mmio, tuple(range names))
     ipa_bits: object            # 36 | None
     provenance: dict            # claim -> (source, evidence)
+    storage: object = None      # NvmeStorage | None (the section is optional)
 
     @property
     def cpu_count(self):
@@ -363,6 +409,115 @@ def _parse_ecam(section):
     return tuple(entries)
 
 
+def _parse_pci_function(value, what, bridge=False):
+    """One expected PCI function. An endpoint must read as NVM Express, a root port as a PCI-to-PCI bridge: a descriptor
+    that says otherwise describes another device, and the contract that consumes it would refuse it later anyway."""
+    item = _object(value, what, ('bus', 'device', 'function', 'vendor_id', 'device_id', 'class_code'))
+    bus = parse_int(item['bus'], f'{what}.bus', 0, 255)
+    device = parse_int(item['device'], f'{what}.device', 0, 31)
+    function = parse_int(item['function'], f'{what}.function', 0, 7)
+    vendor = parse_hex(item['vendor_id'], f'{what}.vendor_id', 16)
+    ident = parse_hex(item['device_id'], f'{what}.device_id', 16)
+    klass = parse_hex(item['class_code'], f'{what}.class_code', 24)
+    if vendor in (0, 0xffff):
+        raise _err(f'{what}.vendor_id', f'{vendor:#x} is not a vendor id (0xffff is what a missing function reads as)')
+    if bridge and klass >> 8 != BRIDGE_CLASS:
+        raise _err(f'{what}.class_code', f'{klass:#x} is not a PCI-to-PCI bridge (a root port reads as 0x0604xx)')
+    if not bridge and klass != NVME_CLASS:
+        raise _err(f'{what}.class_code', f'{klass:#x} is not NVM Express ({NVME_CLASS:#x})')
+    return PciFunction(bus, device, function, vendor, ident, klass)
+
+
+def _parse_storage(section, smmus):
+    """The optional `storage` section: the SSD's PCIe place as expected values. Every relation that must hold between the
+    values is checked here; the relations with the rest of the descriptor (the ECAM list, the other windows and the 36-bit
+    limit) are checked by validate() once the whole board exists."""
+    section = _object(section, 'storage', ('nvme',))
+    item = _object(section['nvme'], 'storage.nvme', STORAGE_KEYS)
+    segment = None if item['segment'] is None else parse_int(item['segment'], 'storage.nvme.segment', 0, 0xffff)
+
+    ecam = None
+    if item['ecam'] is not None:
+        what = 'storage.nvme.ecam'
+        entry = _object(item['ecam'], what, ('base', 'start_bus', 'end_bus'))
+        base = parse_hex(entry['base'], f'{what}.base')
+        start = parse_int(entry['start_bus'], f'{what}.start_bus', 0, 255)
+        end = parse_int(entry['end_bus'], f'{what}.end_bus', 0, 255)
+        if end < start:
+            raise _err(what, f'end_bus {end} before start_bus {start}')
+        if not base or base & 0xfffff:
+            raise _err(what, f'ECAM base {base:#x} must be nonzero and 1 MiB aligned (one bus is 1 MiB)')
+        if segment is None:
+            raise _err(what, 'needs storage.nvme.segment: an ECAM window belongs to one PCI segment')
+        ecam = (base, start, end)
+
+    functions = {}
+    for key, bridge in (('root_port', True), ('endpoint', False)):
+        if item[key] is None:
+            continue
+        what = f'storage.nvme.{key}'
+        function = _parse_pci_function(item[key], what, bridge)
+        if ecam is None:
+            raise _err(what, 'needs storage.nvme.ecam: the function is reached through its configuration window')
+        if not ecam[1] <= function.bus <= ecam[2]:
+            raise _err(what, f'bus {function.bus} is outside the ECAM bus range {ecam[1]}..{ecam[2]}')
+        functions[key] = function
+    root, endpoint = functions.get('root_port'), functions.get('endpoint')
+    if root and endpoint and root.bus >= endpoint.bus:
+        raise _err('storage.nvme.endpoint', f'bus {endpoint.bus} is not below the root port (bus {root.bus}): '
+                                            'an endpoint sits on the root port\'s secondary bus')
+
+    smmu = None
+    if item['smmu'] is not None:
+        smmu = parse_name(item['smmu'], 'storage.nvme.smmu')
+        if smmus is None:
+            raise _err('storage.nvme.smmu', f'names {smmu!r} but the descriptor\'s smmu list is unknown')
+        kinds = {name: kind for name, kind, _, _ in smmus}
+        if smmu not in kinds:
+            raise _err('storage.nvme.smmu', f'{smmu!r} is not an entry of smmu {sorted(kinds)}')
+        if kinds[smmu] != 'smmu-v3':
+            raise _err('storage.nvme.smmu', f'{smmu!r} is {kinds[smmu]}: the SSD contract needs an SMMUv3 (stream table)')
+
+    stream = None
+    if item['stream'] is not None:
+        what = 'storage.nvme.stream'
+        entry = _object(item['stream'], what, ('rid_base', 'rid_count', 'stream_base'))
+        rid_base = parse_hex(entry['rid_base'], f'{what}.rid_base', 16)
+        rid_count = parse_hex(entry['rid_count'], f'{what}.rid_count', 17)
+        stream_base = parse_hex(entry['stream_base'], f'{what}.stream_base', 32)
+        if not 1 <= rid_count <= 0x10000 - rid_base:
+            raise _err(what, f'RID window {rid_base:#x}+{rid_count:#x} is empty or runs past the 16-bit RID space')
+        if stream_base + rid_count - 1 > 0xffffffff:
+            raise _err(what, f'StreamIDs {stream_base:#x}+{rid_count:#x} run past 32 bits')
+        if smmu is None:
+            raise _err(what, 'needs storage.nvme.smmu: a StreamID mapping goes through one SMMU')
+        if endpoint and not rid_base <= endpoint.rid < rid_base + rid_count:
+            raise _err(what, f'the endpoint\'s RID {endpoint.rid:#x} is outside the mapped window: it would have no StreamID')
+        stream = (rid_base, rid_count, stream_base)
+    return NvmeStorage(segment, ecam, root, endpoint, smmu, stream)
+
+
+def _check_storage_window(board, limit):
+    """The storage ECAM window against the rest of the descriptor: its own limit and alignment, the same segment's
+    pcie.ecam entry if there is one (it must say the same), and every other claimed window."""
+    storage = board.storage
+    if storage is None or storage.ecam is None:
+        return
+    base, start, end = storage.ecam
+    name = 'storage.nvme.ecam'
+    size = (end + 1) << 20
+    _check_window(name, base, size, limit)
+    same = [e for e in board.ecam or () if e[0] == storage.segment]
+    if same:
+        if same[0][1:] != (base, start, end):
+            raise _err(name, f'contradicts pcie.ecam of segment {storage.segment}: '
+                             f'{same[0][1]:#x} buses {same[0][2]}..{same[0][3]}, not {base:#x} buses {start}..{end}')
+        return                       # the identical window is already checked and overlap-checked as pcie.ecam
+    for window in windows(board):
+        if base < window.end and window.base < base + size:
+            raise _err(name, f'overlaps {window.name}')
+
+
 def _parse_ranges(value):
     if value is None:
         return None
@@ -488,6 +643,9 @@ def _claims(board):
             claims[f'{container}.{entry[0]}'] = entry[2] is not None
     for name, (state, mmio, owned) in board.devices.items():
         claims[f'devices.{name}'] = state != 'unknown'
+    if board.storage is not None:
+        for key in STORAGE_KEYS:
+            claims[f'storage.nvme.{key}'] = getattr(board.storage, key) is not None
     return claims
 
 
@@ -536,7 +694,7 @@ def _parse_provenance(section, board_without_provenance):
 
 def validate(desc):
     """Validate a parsed descriptor; return a normalized Board or raise."""
-    desc = _object(desc, 'descriptor', TOP_KEYS)
+    desc = _object(desc, 'descriptor', TOP_KEYS, optional=OPTIONAL_TOP_KEYS)
     if type(desc['schema_version']) is not int or desc['schema_version'] != SCHEMA_VERSION:
         raise _err('schema_version', f'{desc["schema_version"]!r} is not supported (this reader: {SCHEMA_VERSION})')
 
@@ -580,8 +738,12 @@ def validate(desc):
     if gicr and count and cores and gicr[2] // gicr[1] < count * cores:
         raise _err('gic.gicr', f'{gicr[2] // gicr[1]} redistributors cannot serve {count * cores} cores')
 
+    if 'storage' in desc and desc['storage'] is None:
+        raise _err('storage', 'the section is either absent or an object; null is not a value for it')
+    storage = _parse_storage(desc['storage'], smmus) if 'storage' in desc else None
+
     board = Board(board_id, display, ident['status'], name, family, midr, count, cores, affinity, cluster,
-                  mpidrs, version, gicd, gicr, its, smmus, hz, ppi, ecam, ranges, devices, ipa, {})
+                  mpidrs, version, gicd, gicr, its, smmus, hz, ppi, ecam, ranges, devices, ipa, {}, storage)
 
     seen = []
     for window in windows(board):
@@ -591,6 +753,7 @@ def validate(desc):
                 raise _err(window.name, f'overlaps {other.name}'
                            + (' (DRAM against MMIO)' if {window.kind, other.kind} == {'dram', 'mmio'} else ''))
         seen.append(window)
+    _check_storage_window(board, limit)
 
     provenance = _parse_provenance(desc['provenance'], board)
     return Board(**{**board.__dict__, 'provenance': provenance})
@@ -638,7 +801,9 @@ def require_boot_ready(board):
     unresolved = unknown_devices(board)
     if unresolved:
         problems.append(f'device state unknown for {list(unresolved)}')
-    placeholders = sorted(k for k, (_, ev) in board.provenance.items() if ev == 'UNIMPLEMENTED')
+    # `storage.*` is not a boot fact: an SSD fact that is still unmeasured must not make a boot-ready board refuse.
+    placeholders = sorted(k for k, (_, ev) in board.provenance.items()
+                          if ev == 'UNIMPLEMENTED' and not k.startswith('storage.'))
     if placeholders and not problems:
         # Defence in depth: provenance says something is unmeasured that the
         # field checks above did not catch.

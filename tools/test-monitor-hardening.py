@@ -116,7 +116,8 @@ A16_ADOPTION = '''#if SNAP_ANS_ASYNC
 
 
 def check_adoption_entry(text):
-    """What probes/xnuboot/ans_glue.c ans_window_prepare must be until nvmeh_sp11_adopt is wired to real inputs."""
+    """What probes/xnuboot/ans_glue.c ans_window_prepare must be: the SP11 side calls nvmeh_sp11_adopt with the host-supplied
+    target and record blocks and the params and state, returns its result, and never reaches the A16 re-proof directly."""
     body = function(text, 'static int64_t ans_window_prepare(struct context *c)')
     need('#if SNAP_PLATFORM_SP11' in body,
          'ans_window_prepare has no SP11 side: an SP11 build adopts the SSD on the A16 controller re-proof alone')
@@ -125,10 +126,19 @@ def check_adoption_entry(text):
     sp11, a16 = branches(body)
     code = re.sub(r'/\*.*?\*/', '', sp11, flags=re.S)          # a comment may name the function it forbids
     need('nvmeh_adopt' not in code, 'an SP11 build must not adopt the SSD with the A16 controller re-proof alone')
-    need(re.search(r'\breturn\s+NVMEH_SP11_STATUS_UNWIRED\s*;', code), 'the SP11 side must refuse with the named status')
-    need(re.search(r'->prepare\s*=\s*\(uint64_t\)\(int64_t\)\s*NVMEH_SP11_STATUS_UNWIRED\s*;', code),
-         'the refusal must also be recorded in the physical NVMe state, where the host reads it')
-    need(not re.search(r'\breturn\s+0\s*;', code), 'the SP11 side must not return success')
+    call = re.search(r'\breturn\s+nvmeh_sp11_adopt\s*\(\s*&nvmeh_direct\s*,([^;]*)\)\s*;', code)
+    need(call, 'the SP11 side must return the result of nvmeh_sp11_adopt: the launch refuses on any mismatch')
+    arguments = [re.sub(r'\s+', '', a) for a in call.group(1).split(',')]
+    need(arguments == ['ANS_NVMEH_TARGET(res)', 'ANS_NVMEH_RECORD(res)', 'ANS_NVMEH_PARAMS(res)', 'ANS_NVMEH_STATE(res)',
+                       'c->params->mem_low', 'c->params->mem_high'],
+         f'the SP11 call must pass the target, the record, the params, the state and the guest memory bounds, in that order: '
+         f'got {arguments}')
+    need(code.count('nvmeh_sp11_adopt') == 1, 'the SP11 side must call nvmeh_sp11_adopt exactly once')
+    need(not re.search(r'\breturn\s+0\s*;', code), 'the SP11 side must not return success on its own')
+    need('NVMEH_SP11_STATUS_UNWIRED' not in code,
+         'the glue must not answer the unwired status itself: nvmeh_sp11_adopt owns it, so the contract sees every launch')
+    need(re.search(r'#if\s+SNAP_ANS_ASYNC\s+c->root_ext->ans=\(struct ans_state \*\)res;\s+#endif\s+return\s+nvmeh_sp11_adopt', code),
+         'the SP11 side must publish the asynchronous state hook as the A16 side does, before adopting')
     need(a16 == A16_ADOPTION, 'the A16 side of ans_window_prepare changed')
 
 
@@ -161,10 +171,10 @@ def copy_monitor(name):
 class NvmeWindowWiring(unittest.TestCase):
     """The SP11 contract (compat/nvme-host.c) is not enforced if the live adoption path never reaches it."""
 
-    def test_the_sp11_adoption_entry_refuses_with_a_named_status_and_the_a16_side_is_unchanged(self):
+    def test_the_sp11_adoption_entry_calls_the_sp11_contract_and_the_a16_side_is_unchanged(self):
         check_adoption_entry(read(ANS_GLUE))
 
-    def test_the_refusal_status_is_a_named_prepare_status_of_the_nvme_window_band(self):
+    def test_the_unwired_status_is_still_a_named_status_of_the_nvme_window_band(self):
         header = read('compat/nvme-host.h')
         found = re.search(r'#define\s+NVMEH_SP11_STATUS_UNWIRED\s+\((-\d+)\)', header)
         self.assertIsNotNone(found, 'compat/nvme-host.h does not define NVMEH_SP11_STATUS_UNWIRED')
@@ -172,15 +182,17 @@ class NvmeWindowWiring(unittest.TestCase):
         self.assertIn('NVMEH_SP11_STATUS_UNWIRED', sp11_block, 'the A16 build must not see the SP11 status')
         self.assertLess(header.index('#if SNAP_PLATFORM_SP11'), header.index('NVMEH_SP11_STATUS_UNWIRED'))
 
-    def test_the_sp11_monitor_object_never_calls_the_a16_adopt_and_the_a16_one_still_does(self):
+    def test_the_sp11_monitor_object_calls_the_sp11_contract_never_the_a16_adopt_and_the_a16_one_still_does(self):
         need_clang(self)
         if not find_tool('llvm-nm') or not UEFI.is_dir():
             self.skipTest('llvm-nm or the shared q1n1 checkout is absent')
         a16 = undefined_symbols(ROOT, 'xnuboot-a16')
         self.assertIn('nvmeh_adopt', a16, 'the control is meaningless: the A16 object no longer calls nvmeh_adopt')
+        self.assertNotIn('nvmeh_sp11_adopt', a16)
         # With the fair lock the build is launchable, so the adoption path is live code and cannot be dropped as dead.
         sp11 = undefined_symbols(ROOT, 'xnuboot-sp11', *SP11_LAUNCHABLE)
         self.assertIn('ans_reset', sp11, 'the control is meaningless: prepare is not in the SP11 object')
+        self.assertIn('nvmeh_sp11_adopt', sp11, 'the SP11 monitor never calls the SP11 contract')
         self.assertNotIn('nvmeh_adopt', sp11)
 
 
@@ -344,21 +356,42 @@ def swap(old, new):
 
 A16_CALL = ('return nvmeh_adopt(&nvmeh_direct,ANS_NVMEH_PARAMS(res),ANS_NVMEH_STATE(res),\n'
             '                       c->params->mem_low,c->params->mem_high);')
-STATE_WRITE = re.compile(r'^\s*ANS_NVMEH_STATE\(res\)->prepare=\(uint64_t\)\(int64_t\)NVMEH_SP11_STATUS_UNWIRED;\n', re.M)
+SP11_CALL = ('return nvmeh_sp11_adopt(&nvmeh_direct,ANS_NVMEH_TARGET(res),ANS_NVMEH_RECORD(res),ANS_NVMEH_PARAMS(res),\n'
+             '                            ANS_NVMEH_STATE(res),c->params->mem_low,c->params->mem_high);')
+SP11_HOOK = '    c->root_ext->ans=(struct ans_state *)res;\n#endif\n    return nvmeh_sp11_adopt('
+A16_HOOK = '    c->root_ext->ans=(struct ans_state *)res;\n#endif\n    return nvmeh_adopt('
 
 # name: (file, check, how to weaken it, a fragment of the failure it must cause). The fragment pins WHICH rule catches
 # the mutant, so none is killed by an unrelated one.
 MUTANTS = {
     'sp11 adoption goes back to the A16 re-proof': (
-        ANS_GLUE, check_adoption_entry, swap('return NVMEH_SP11_STATUS_UNWIRED;', A16_CALL), 'A16 controller re-proof alone'),
-    'sp11 adoption reports success': (
-        ANS_GLUE, check_adoption_entry, swap('return NVMEH_SP11_STATUS_UNWIRED;', 'return 0;'), 'named status'),
-    'sp11 refusal forgets the physical NVMe state': (
-        ANS_GLUE, check_adoption_entry, lambda t: need(len(STATE_WRITE.findall(t)) == 1, 'anchor') or STATE_WRITE.sub('', t),
-        'physical NVMe state'),
-    'a16 adoption loses its asynchronous state hook': (
+        ANS_GLUE, check_adoption_entry, swap(SP11_CALL, A16_CALL), 'A16 controller re-proof alone'),
+    'sp11 adoption reports success without the contract': (
+        ANS_GLUE, check_adoption_entry, swap(SP11_CALL, 'return 0;'), 'must return the result of nvmeh_sp11_adopt'),
+    'sp11 adoption ignores the contract\'s verdict': (
         ANS_GLUE, check_adoption_entry,
-        swap('    c->root_ext->ans=(struct ans_state *)res;\n', ''), 'A16 side of ans_window_prepare changed'),
+        swap(SP11_CALL, SP11_CALL.replace('return nvmeh_sp11_adopt', 'nvmeh_sp11_adopt') + '\n    return 0;'),
+        'must return the result of nvmeh_sp11_adopt'),
+    'sp11 adoption falls back to the retired unwired status': (
+        ANS_GLUE, check_adoption_entry,
+        swap(SP11_CALL, 'return NVMEH_SP11_STATUS_UNWIRED;'), 'must return the result of nvmeh_sp11_adopt'),
+    'sp11 adoption passes no target': (
+        ANS_GLUE, check_adoption_entry, swap(SP11_CALL, SP11_CALL.replace('ANS_NVMEH_TARGET(res)', '0')),
+        'must pass the target, the record'),
+    'sp11 adoption passes the record as the target': (
+        ANS_GLUE, check_adoption_entry,
+        swap(SP11_CALL, SP11_CALL.replace('ANS_NVMEH_TARGET(res)', 'ANS_NVMEH_RECORD(res)')), 'must pass the target, the record'),
+    'sp11 adoption swaps the target and the record': (
+        ANS_GLUE, check_adoption_entry,
+        swap('ANS_NVMEH_TARGET(res),ANS_NVMEH_RECORD(res),', 'ANS_NVMEH_RECORD(res),ANS_NVMEH_TARGET(res),'),
+        'must pass the target, the record'),
+    'sp11 adoption forgets the guest memory bounds': (
+        ANS_GLUE, check_adoption_entry,
+        swap(SP11_CALL, SP11_CALL.replace('c->params->mem_low,c->params->mem_high', '0,0')), 'must pass the target, the record'),
+    'sp11 adoption forgets its asynchronous state hook': (
+        ANS_GLUE, check_adoption_entry, swap(SP11_HOOK, '#endif\n    return nvmeh_sp11_adopt('), 'asynchronous state hook'),
+    'a16 adoption loses its asynchronous state hook': (
+        ANS_GLUE, check_adoption_entry, swap(A16_HOOK, '#endif\n    return nvmeh_adopt('), 'A16 side of ans_window_prepare changed'),
     'window guard moved behind the branch': (
         ANS_GLUE, check_adoption_entry,
         swap('    if (!ans_window(c)) return 0;\n    const struct device_model *m=ans_nvme_model(c);\n'
@@ -406,8 +439,13 @@ class Mutants(unittest.TestCase):
     def test_the_monitor_object_checks_fail_on_the_mutants_only_a_build_can_show(self):
         root = copy_monitor('sp11-adopt-a16')
         target = root / ANS_GLUE
-        target.write_text(swap('return NVMEH_SP11_STATUS_UNWIRED;', A16_CALL)(target.read_text(encoding='utf-8')), encoding='utf-8')
+        target.write_text(swap(SP11_CALL, A16_CALL)(target.read_text(encoding='utf-8')), encoding='utf-8')
         self.assertIn('nvmeh_adopt', undefined_symbols(root, 'xnuboot-sp11-adopt-a16', *SP11_LAUNCHABLE))
+        root = copy_monitor('sp11-adopt-none')
+        target = root / ANS_GLUE
+        target.write_text(swap(SP11_CALL, '(void)res;\n    return 0;')(target.read_text(encoding='utf-8')), encoding='utf-8')
+        self.assertNotIn('nvmeh_sp11_adopt', undefined_symbols(root, 'xnuboot-sp11-adopt-none', *SP11_LAUNCHABLE),
+                         'the mutant should have dropped the call to the SP11 contract from the object')
         root = copy_monitor('sp11-folded')
         target = root / PREPARE
         target.write_text(swap('    __asm__ volatile("" : "+r"(fair_lock_missing));\n', '')(target.read_text(encoding='utf-8')),
