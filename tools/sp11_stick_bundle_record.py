@@ -26,7 +26,7 @@ ch.KNOWN_REFUSALS.add('NOTE_BAD')       # the builder lists it among its own ref
 MIB = sb.MIB
 STORES = {'ram': sb.STORE_RAM, 'el2_sysreg': sb.STORE_EL2_SYSREG, 'gic': sb.STORE_GIC}       # the classes --stores names, in the order the record lists them
 DEFAULT_SEED = 'sp11-stick-bundle'      # the label `real` uses when --seed is not given: a default of the tool, not a decision of the operator
-NOTE_LINES, NOTE_COLUMNS = 40, 120
+NOTE_LINES, NOTE_COLUMNS = 48, 120
 PANEL_WORDS = {'withheld': 'the guest is given no framebuffer', 'handed': 'the guest is given the unit\'s framebuffer'}
 HVC_WORDS = {0: 'a stock kernel', 1: 'the loader replaces the kernel\'s SPTM call words'}
 
@@ -321,7 +321,8 @@ def record_text(r):
     index), note (lines or None), gic_stop (the record of the GIC and stop dry run), m1 (None, else the facts of the monitor entry run that
     tools/sp11_stick_bundle_m1.py read_report returns: section 1b, the touches of M1_TOUCHES, section 4 with the time budget and two stop rules)
     and real (None for a synthetic build, else real_lines' argument). gic_quarantine, with gic_stop, chooses the pass 5 text of
-    tools/sp11_stick_bundle_record_gic.py in place of GIC_STOP_TOUCHES, and its section 4 and silence rule in place of the generic lines."""
+    tools/sp11_stick_bundle_record_gic.py in place of GIC_STOP_TOUCHES, and its section 4, the heading of section 2 and the silence rule and the last bullet of
+    section 5 in place of the generic lines."""
     p, g, m1 = r['place'], r['guest'], r.get('m1')
     assert not (m1 and r.get('gic_stop')), 'a record is of one kind'
     assert not r.get('gic_quarantine') or r.get('gic_stop'), 'the pass 5 text is a variant of the GIC and stop record'
@@ -341,7 +342,7 @@ def record_text(r):
     if m1:
         lines += [*m1_lines(m1), '']
     lines += [
-        '2. Placement (the one range the run may store to)',
+        gq.PLACEMENT_HEADER if r.get('gic_quarantine') else '2. Placement (the one range the run may store to)',
         f'   guest_base {p["guest_base"]:#x}  guest_size {p["guest_size"] // MIB} MiB  reserve {p["reserve_size"] // MIB} MiB  '
         f'work_base {p["work_base"]:#x}  work_size {p["work_size"] // MIB} MiB',
         f'   place_base {p["place_base"]:#x}  place_end {p["place_base"] + p["place_size"]:#x}  (limit 2^36)', '',
@@ -366,8 +367,9 @@ def record_text(r):
               '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',
               *(M1_SILENCE_RULE if m1 else gq.silence_lines() if r.get('gic_quarantine') else (SILENCE_RULE,)),
               '   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',
-              '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',
-              '     operator\'s power cycle, which writes nothing.',
+              *(gq.HARDWARE_LINES if r.get('gic_quarantine') else (
+                  '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',
+                  '     operator\'s power cycle, which writes nothing.')),
               *(M1_STOP_RULES if m1 else ())]
     if r['note']:
         lines += ['', '6. Notes of this build (part of the digest)', *r['note']]

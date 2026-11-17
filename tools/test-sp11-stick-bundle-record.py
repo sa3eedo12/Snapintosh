@@ -97,7 +97,7 @@ class Record(BT.Case):
 
     def test_a_note_that_is_not_plain_text_of_the_stated_size_is_refused(self):
         cases = {'not ASCII': 'caf\u00e9\n'.encode(), 'a carriage return': b'a\r\nb\r\n', 'a tab': b'a\tb\n', 'an escape sequence': b'\x1b[2J\n', 'a NUL': b'a\0b\n',
-                 '41 lines': b'x\n' * 41, 'a line of 121 characters': b'x' * 121 + b'\n', 'over the size cap': b'x\n' * 2500, 'empty': b'', 'blank': b'\n \n'}
+                 '49 lines': b'x\n' * 49, 'a line of 121 characters': b'x' * 121 + b'\n', 'over the size cap': b'x\n' * 3000, 'empty': b'', 'blank': b'\n \n'}
         for name, data in cases.items():
             with self.subTest(name):
                 code, text, err = BT.template(note=note_file('bad.txt', data))
@@ -106,7 +106,7 @@ class Record(BT.Case):
         os.symlink(note_file('target.txt', 'x\n'), SCRATCH / 'notes/link.txt')
         for name in ('missing.txt', 'link.txt', ''):                        # absent, a symbolic link, a directory
             self.refused('NOTE_BAD', BT.template(note=SCRATCH / 'notes' / name))
-        self.assertEqual(self.noted(('x' * 120 + '\n') * 40)[0], 0)         # 40 lines of 120 characters is the most
+        self.assertEqual(self.noted(('x' * 120 + '\n') * 48)[0], 0)         # 48 lines of 120 characters is the most (raised from 40 for the note of the third GIC attempt)
         bad, good = note_file('bad.txt', b'caf\xc3\xa9\n'), note_file('good.txt', 'x\n')
         self.refused('NOTE_BAD', BT.build_cli('bad-note', approve=False, extra=['--no-manifest', '--authorisation-sha256', '1' * 64], note=bad))
         self.assertFalse((SCRATCH / 'out/bad-note').exists())

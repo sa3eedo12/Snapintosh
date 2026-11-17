@@ -12,10 +12,17 @@ the memory-mapped ones included).
 Three rules, each with a deliberately faulty case: (A) every register a scenario WRITES is named as a write in the text (the retry writes, PPI 26's own
 ICENABLER0 and ICPENDR0, and both DAIF writes included); (B) every register the model only READS (the RWP polls of GICR_CTLR among them) is named as a read; (C)
 every register the text claims to write is written in some scenario, except SPSR_EL2 and ELR_EL2, which the assembly of the windows writes and the model replaces
-(the census of the binary has them: tools/test-sp11-stick-bundle-record-gic.py). What the model proves is the stage's order and its accesses against the model, and
+(the census of the binary has them: tools/test-sp11-stick-bundle-record-gic.py). Beside the rules, the sentences of the text that say what the stage does in a given
+case are held to the model, each with a case that fails it: a gate found open is not counted (so the last ISENABLER0 write IS made), a window takes and ends whatever
+INTID arrives and writes no SPI register, the bounds that the durations add up (4.08 s, 8 s, 4 s), no store before a refusal of 0X1 to 0XF, no REFUSED line after a
+window verdict, a data abort in a window ends it with everything put back, and the registers that are not read first. The class Source holds, with no model and no toolchain, the
+sentences that describe the stage's source and the documents (COUNTER, whole-register writes, the end of a foreign interrupt, the verdict return, the heading of section 2)
+and the commit that the note names against the sources of the pair. What the model proves is the stage's order and its accesses against the model, and
 nothing about the unit. It needs clang and a q1n1 checkout ($Q1N1_SP11_TREE) and SKIPs without them, which is not a pass. No hardware: NOT RUN. Everything is
 written below build/sp11-wrapper-test-scratch-record-gic-model/, deleted at the end."""
+import collections
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -46,6 +53,11 @@ EXTRA = {
     'partial-hold-putback-fails': dict(gic=[*GC.UNIT13, 'ICE_HOLD 0x00800001', 'NOHOLD GICR_ISENABLER0 0']),
     'foreign-isen-stuck': dict(gic=[*GC.UNIT13, *SPI40, 'NOHOLD GICR_ISENABLER0 0']),
     'foreign-gates-both-stuck': dict(gic=[*GC.UNIT13, *SPI40, *BOTH_0]),
+    # EnableGrp1A found set (class G is never begun) and ICC_IGRPEN1_EL1 stuck open: a gate found open is not counted, so the last ISENABLER0 write IS made.
+    'gates-found-open': dict(gic=[*GC.UNIT13, 'CTLR 0x12', 'NOHOLD ICC_IGRPEN1_EL1']),
+    'foreign-spi': dict(gic=['INTID 40']),
+    'foreign-spi-eoimode': dict(gic=['INTID 40', 'ICCCTLR 2']),
+    'late': dict(gic=['DELAY 9000000']),                  # every delivery 0.375 s late: still a pass, in a run that lasts longer than 20 s
 }
 # How the text spells what the model calls a register: the redistributor's registers without the frame's name, the stack pointer select as the instruction set has it.
 TEXT_NAME = {'GICR_IGROUPR0': 'IGROUPR0', 'GICR_ISENABLER0': 'ISENABLER0', 'GICR_ICENABLER0': 'ICENABLER0', 'GICR_ISPENDR0': 'ISPENDR0',
@@ -158,6 +170,88 @@ def silence_problems(rule_s, healthy_s, orderly_s):
     return [f'{rule_s} s leaves less than 2 s over the {orderly_s:.1f} s of an orderly run'] * (rule_s < orderly_s + 2)
 
 
+def stored(run):
+    return any(event[0] == 'W' for event in run.g.log)
+
+
+def verdict_problems(runs, lowest=0x20, highest=0x2F):
+    """The runs whose page has a REFUSED line exactly when the outcome is in lowest..highest: [name]. The text says that no REFUSED line follows a window verdict
+    (OUTCOME 0X20 to 0X2F, IRQ_OK 0X20 included), so for the right range there are none; for a narrower one there are."""
+    return [name for name, run in runs.items() if any('REFUSED' in text for text in run.mon.texts()) == (lowest <= run.rec.outcome <= highest)]
+
+
+def window_1_problems(run, limit_s):
+    """Where `run` unmasks IRQ (DAIFClr): after the NEXT line of window 1, before the next NEXT line, and masked again (DAIFSet) within `limit_s` seconds: [str]."""
+    texts, ticks, log = run.mon.texts(), run.g.line_ticks, run.g.log
+    nexts, problems = [ticks[i] for i, text in enumerate(texts) if ' NEXT ' in text and i in ticks], []
+    for n, (kind, reg, value, _, tick) in enumerate(log):
+        if kind == 'W' and reg == 'DAIF' and value == 0:
+            masked = next((e[4] for e in log[n + 1:] if e[0] == 'W' and e[1] == 'DAIF' and e[2] != 0), None)
+            if not (len(nexts) >= 2 and nexts[1] <= tick and (len(nexts) < 3 or tick < nexts[2])):
+                problems.append('IRQ is unmasked outside window 1')
+            if masked is None or masked - tick > limit_s * GC.HZ:
+                problems.append(f'IRQ stays unmasked for more than {limit_s} s')
+    return problems
+
+
+def written_never_read(runs, prefix):
+    """The registers named `prefix`... that some scenario writes and none reads: {name}."""
+    reads, writes = collections.Counter(), collections.Counter()
+    for run in runs.values():
+        for reg, (read, write) in run.g.acc.items():
+            reads[reg] += read
+            writes[reg] += write
+    return {reg for reg in writes if writes[reg] and not reads[reg] and reg.startswith(prefix)}
+
+
+def except_names(lines):
+    """The registers that the text says are not read first, put back and verified by read-back ("..., except A, B and the handlers' C and D (below)"): {name}."""
+    match = re.search(r'each read first, put back and verified by read-back, except (.*?) \(below\)', ' '.join(' '.join(lines).split()))
+    return set(REGISTER.findall(match.group(1))) if match else set()
+
+
+CACHE = {}
+
+
+def final_census():
+    """The census of the ELF of the final wrapper, built once."""
+    if 'census' not in CACHE:
+        out = T.BUILD / 'elf'
+        wb.build(str(out), str(ROOT / 'config/monitor-profile-sp11-m1.json'), False, True)
+        CACHE['census'] = C.census(out / 'snapmon-gic.elf')
+    return CACHE['census']
+
+
+def counter_problems(gic, dry):
+    """Where the stage returns COUNTER, against the text ("0X1 to 0XF a refusal, before any store except COUNTER at the second 8 s wait"): [str]. `gic` and `dry` are the
+    sources probes/sp11-stick-gic.c and probes/sp11-stick-gic-dry.c."""
+    arm = gic.split('unsigned sw_gic_arm_stores(', 1)[1].split('\n}\n', 1)[0]
+    second = dry.split('static unsigned gic_el1_window(', 1)[1].split('\n}\n', 1)[0]
+    problems = [] if 'sw_gic_wait_seconds(g->hz, SW_GIC_WAIT_S)) return SG_OUT_COUNTER;' in second else ['the second 8 s wait does not return COUNTER']
+    if not 0 <= arm.find('return SG_OUT_COUNTER') < arm.find('gic_store_q(g)'):
+        problems.append('the first 8 s wait does not come before the first store')
+    return problems + ['another place returns COUNTER'] * ((gic.count('SG_OUT_COUNTER'), dry.count('SG_OUT_COUNTER')) != (3, 1))
+
+
+def pair_sources():
+    """The files of the repository that the final pair is built from: the sources of both payloads and the headers they include, the build tool and the profile."""
+    todo, seen = [s for name in wb.GIC_NAMES for s in wb.SOURCES[name] if s.startswith('probes/')], set()
+    while todo:
+        path = todo.pop()
+        if path not in seen:
+            seen.add(path)
+            todo += [f'probes/{name}' for name in re.findall(r'#include "([^"]+)"', (ROOT / path).read_text()) if (ROOT / 'probes' / name).is_file()]
+    return sorted(seen | {'tools/sp11_stick_wrapper_build.py', 'config/monitor-profile-sp11-m1.json'})
+
+
+def source_problems(commit, files):
+    """The `files` that differ between the tree of `commit` and this one: [str]. SKIPS when git does not have the commit (a shallow clone)."""
+    git = lambda *args: subprocess.run(['git', '-C', str(ROOT), *args], capture_output=True, text=True)       # noqa: E731
+    if git('cat-file', '-e', f'{commit}^{{commit}}').returncode:
+        raise unittest.SkipTest(f'git does not have commit {commit[:7]}')
+    return git('diff', '--name-only', commit, '--', *files).stdout.split()
+
+
 class Model(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -223,8 +317,9 @@ class Model(unittest.TestCase):
         self.assertEqual(len(unit), 3, 'NEXT GIC STORES, NEXT GIC WINDOW 2 S and NEXT GIC EL1 EXCURSION')
         for got, want in zip(unit, (wait, box, wait + box)):
             self.assertAlmostEqual(got, want, delta=0.1)          # the wait; window 1 (about the box); the wait and window 2
-        healthy = max(s for run in self.runs.values() if run.rec.outcome == G.OUT.IRQ_OK for _, s in silences(run))
+        healthy = max(s for name, run in self.runs.items() if name != 'late' and run.rec.outcome == G.OUT.IRQ_OK for _, s in silences(run))       # interrupts on time
         orderly = max(s for run in self.runs.values() for _, s in silences(run))
+        self.assertTrue(healthy < max(s for _, s in silences(self.runs['late'])) <= orderly, 'a late healthy run is silent a little longer, and within the 12 s')
         self.assertAlmostEqual(healthy, wait + box, delta=0.1)
         self.assertAlmostEqual(orderly, wait + 2 * box, delta=0.1)       # window 2 at the stub's bound, having seen no interrupt
         text = ' '.join(' '.join(gq.silence_lines()).split())
@@ -235,6 +330,83 @@ class Model(unittest.TestCase):
         self.assertEqual(len(silence_problems(10, healthy, orderly)), 1, 'twice the time box of 5 s, the rule of the other records, would stop a healthy run')
         self.assertEqual(len(silence_problems(12, healthy, orderly)), 1)
         self.assertEqual(len(silence_problems(14, healthy, 13.0)), 1)
+
+    # ---- the sentences about what the stage does in a given case -----------------------------------------------------------------------------
+    def test_a_gate_found_open_is_not_counted_so_the_last_isenabler0_write_is_made(self):
+        run = self.runs['gates-found-open']
+        r = run.g.r()
+        self.assertEqual([n for n in G.REGS if r.restore_failed & G.REG_BIT[n]], ['ICC_IGRPEN1'], 'the one gate that the stage set does not go back')
+        self.assertNotIn('G', G.classes(r.begun), 'EnableGrp1A was found set: class G is never begun')
+        self.assertEqual((run.g.acc['GICD_CTLR'][1], run.g.acc['GICR_ISENABLER0'][1], r.outcome), (0, 1, G.OUT.NOT_RESTORED), 'GICD_CTLR is not written; the write is made')
+        self.assertTrue(withheld_problems(run), 'it is not the pass 6 exception: the write is made')
+        self.assertEqual(withheld_problems(self.runs['gates-both']), [], 'both gates found closed and left open: the exception')
+        says = 'A gate found open is not counted: with EnableGrp1A found set (class G never begun) and ICC_IGRPEN1_EL1 stuck open the write IS made'
+        self.assertIn(says, ' '.join(' '.join(gq.GIC_WRITES).split()))
+        self.assertIn('so a gate found open is not counted', ' '.join((ROOT / 'docs/SP11-STICK-GIC.md').read_text().split()))
+
+    def test_a_window_takes_and_ends_whatever_intid_arrives_and_no_spi_register_is_written(self):
+        for name, eoimode in (('foreign-spi', False), ('foreign-spi-eoimode', True)):
+            with self.subTest(name):
+                run = self.runs[name]
+                self.assertEqual(run.rec.outcome, G.OUT.WRONG_INTID)
+                self.assertGreaterEqual(run.g.acc['ICC_IAR1_EL1'][0], 1, 'acknowledged')
+                self.assertEqual([w for w in run.g.writes() if w[0] in ('ICC_EOIR1_EL1', 'ICC_DIR_EL1')], [('ICC_EOIR1_EL1', 40), *[('ICC_DIR_EL1', 40)] * eoimode])
+        self.assertIn(('ICC_DIR_EL1', 26), self.runs['unit-boot13'].g.writes(), 'EOImode was set in boot 13')
+        self.assertEqual({n for n in self.written if n.startswith('GICD_')}, {'GICD_CTLR'}, 'the one distributor register that the stage writes: no SPI register')
+        unit = self.runs['unit-boot13'].g.acc
+        self.assertEqual((unit['GICR_IGROUPR0'][1], unit['GICR_ICFGR1'][1]), (0, 0), 'on the unit\'s reads (DS 0, ICFGR1 level) neither is written')
+        text = ' '.join(' '.join(gq.GIC_NEVER).split())
+        for says in ('No SPI register is written (the SPIs are only read)', 'ICC_IAR1_EL1 acknowledges it, ICC_EOIR1_EL1 ends it (ICC_DIR_EL1 too when EOImode is set; it was '
+                     'in boot 13), a foreign SPI included', 'GICD_CTLR EnableGrp1A is distributor-wide'):
+            self.assertIn(says, text)
+
+    def test_the_bounds_that_the_durations_add_up_are_the_model_s_and_a_late_interrupt_still_passes(self):
+        wait, box = header_number(r'SW_GIC_WAIT_S (\d+)u'), header_number(r'SP11_STICK_GIC_TIME_BOX_S (\d+)u')
+        extra = 2 * (header_number(r'#define SG_CYCLES (\d+)u') + 1) * header_number(r'SP11_STICK_GIC_CYCLE_US (\d+)u') / 1e6
+        seen = [(text, seconds) for run in self.runs.values() for text, seconds in silences(run)]
+        window_1 = max(s for text, s in seen if 'WINDOW 2' in text)
+        window_2 = max(s for text, s in seen if 'EL1 EXCURSION' in text) - wait
+        self.assertAlmostEqual(window_1, 2 * box + extra, delta=0.02)        # window 1 sees no interrupt: 4.08 s
+        self.assertAlmostEqual(window_2, 2 * box, delta=0.1)                 # the stub's own bound
+        total = round(window_1 + 2 * wait + window_2)
+        text = ' '.join(' '.join([*gq.time_lines(5), *gq.EL2_TIME]).split())
+        for says in (f'at most about {total} s, the sum of the bounds ({window_1:.2f} s + {wait} s + {wait} s + {window_2:.0f} s)', f'at most about {total} s (section 4)'):
+            self.assertIn(says, text)
+        late, on_time = self.runs['late'], self.runs['unit-boot13']
+        span = lambda run: max(event[4] for event in run.g.log) / GC.HZ       # noqa: E731
+        self.assertEqual(late.rec.outcome, G.OUT.IRQ_OK)
+        self.assertAlmostEqual(span(on_time), 2 * wait + 2 * box, delta=0.1)
+        self.assertTrue(span(on_time) + 1 < span(late) <= window_1 + 2 * wait + window_2 + 0.1, 'late deliveries pass, in a run that lasts longer than 20 s and within the bounds')
+
+    def test_a_refusal_of_0X1_to_0XF_comes_before_any_store_in_the_model(self):
+        refusals = [name for name, run in self.runs.items() if 1 <= run.rec.outcome <= 15]
+        self.assertGreaterEqual(len(refusals), 10)
+        self.assertEqual([name for name in refusals if stored(self.runs[name])], [])
+        self.assertTrue([name for name, run in self.runs.items() if 16 <= run.rec.outcome <= 31 and stored(run)], '0X10 to 0X1F come after a store: the check can fail')
+
+    def test_a_window_verdict_prints_no_refused_line_and_every_other_outcome_does(self):
+        self.assertEqual(verdict_problems(self.runs), [])
+        self.assertTrue(verdict_problems(self.runs, 0x21), 'IRQ_OK (0X20) is a verdict too: a range that leaves it out fails')
+        self.assertTrue(verdict_problems(self.runs, 0x20, 0x30), 'NOT_RESTORED (0X30) prints a REFUSED line: a range that holds it fails')
+
+    def test_a_data_abort_in_a_window_ends_it_with_everything_put_back(self):
+        for name, outcome in (('sync', 'EXCEPTION'), ('el1-sync-class', 'EL1_EXCEPTION')):
+            r = self.runs[name].g.r()
+            self.assertEqual((G.OUTCOMES[r.outcome], r.outcome, r.restore_failed), (outcome, header_number(rf'X\({outcome}, (\d+)\)'), 0), name)
+        self.assertEqual([self.runs['sync'].g.r().outcome, self.runs['el1-sync-class'].g.r().outcome], [0x23, 0x2C])
+
+    def test_the_registers_that_are_not_read_first_are_the_text_s_and_irq_is_unmasked_only_in_window_1(self):
+        self.assertEqual(written_never_read(self.runs, 'ICC_'), {'ICC_EOIR1_EL1', 'ICC_DIR_EL1'})
+        self.assertEqual(except_names(self.writes), {'ICC_EOIR1_EL1', 'ICC_DIR_EL1', *ASSEMBLY})
+        self.assertNotEqual(except_names([line.replace('ICC_EOIR1_EL1, ICC_DIR_EL1 and', 'ICC_EOIR1_EL1 and') for line in self.writes]), except_names(self.writes),
+                            'a text that leaves one out fails')
+        limit = 2 * header_number(r'SP11_STICK_GIC_TIME_BOX_S (\d+)u') + 2 * (header_number(r'#define SG_CYCLES (\d+)u') + 1) * header_number(r'SP11_STICK_GIC_CYCLE_US (\d+)u') / 1e6
+        self.assertEqual([p for run in self.runs.values() for p in window_1_problems(run, limit + 0.02)], [])
+        self.assertTrue([p for run in self.runs.values() for p in window_1_problems(run, 1.0)], 'window 1 that sees no interrupt lasts longer than 1 s')
+        flat_writes = ' '.join(' '.join(self.writes).split())
+        self.assertIn('only inside window 1, which ends at 4.08 s at the latest', flat_writes)
+        self.assertIn('ICC_EOIR1_EL1 (ICC_DIR_EL1 when EOImode is set) is written to end the interrupt that was acknowledged, and is neither read nor put back; SPSR_EL2 and ELR_EL2 '
+                      'are read for the page (the entry\'s values) and set for the return, and are not put back', flat_writes)
 
     # ---- the text is its parts ------------------------------------------------------------------------------------------------------------
     def test_every_line_of_the_two_classes_is_in_exactly_one_part_and_the_rendered_record_has_them(self):
@@ -257,12 +429,18 @@ class Model(unittest.TestCase):
 
     def test_the_registers_only_the_assembly_writes_are_the_binarys_and_the_model_has_neither(self):
         self.assertFalse(set(ASSEMBLY) & (self.written | self.read))
-        out = T.BUILD / 'elf'
-        wb.build(str(out), str(ROOT / 'config/monitor-profile-sp11-m1.json'), False, True)
-        census = C.census(out / 'snapmon-gic.elf')
+        census = final_census()
         for name in ASSEMBLY:
             self.assertIn(name, census['msr'], name)
             self.assertEqual(set(census['msr'][name]), ASSEMBLY_FUNCTIONS, name)
+
+    def test_the_handlers_read_the_four_registers_the_text_names_for_them(self):
+        names = ['ESR_EL2', 'ELR_EL2', 'SPSR_EL2', 'FAR_EL2']
+        for name in names:
+            self.assertIn('sw_gic_vec_common', final_census()['mrs'][name], name)
+        clause = ' '.join(' '.join(gq.EL2_READS).split()).split('in the handlers ', 1)[1].split(' and ICC_IAR1_EL1', 1)[0]
+        self.assertEqual(re.findall(r'[A-Z][A-Z0-9_]*_EL2', clause), names)
+        self.assertNotEqual(re.findall(r'[A-Z][A-Z0-9_]*_EL2', clause.replace('FAR_EL2', '')), names, 'a text that leaves one out fails')
 
     # ---- each rule can fail ----------------------------------------------------------------------------------------------------------------
     def test_a_register_written_in_a_scenario_and_missing_from_the_text_fails_naming_it(self):
@@ -295,6 +473,52 @@ class Model(unittest.TestCase):
         self.assertEqual(problems, ['the text claims to write VBAR_EL3 and no scenario writes it'])
         self.assertEqual(rule_problems(self.written, self.only_read, self.writes, self.reads, assembly=()),
                          [f'the text claims to write {n} and no scenario writes it' for n in sorted(ASSEMBLY)])
+
+
+class Source(unittest.TestCase):
+    """The sentences of the text that describe the stage's source and the documents, and the commit of the note: no model and no toolchain."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.new, cls.old, cls.other = (' '.join(rec.record_text({**FIXED, **over}).split()) for over in ({}, dict(gic_quarantine=False), dict(gic_stop=False, gic_quarantine=False)))
+
+    def test_the_heading_of_section_2_and_the_last_bullet_of_section_5_are_this_kind_s_and_the_other_kinds_keep_theirs(self):
+        heading, spinning = '2. Placement (the one range the run may store to)', 'A spinning guest is ended by the operator\'s power cycle'
+        for other in (self.old, self.other):
+            self.assertIn(heading, other)
+            self.assertIn(spinning, other)
+            self.assertNotIn('REPORT.DAT (outside the placement)', other)
+        self.assertNotIn(heading, self.new)
+        self.assertNotIn('spinning guest', self.new)
+        for says in (gq.PLACEMENT_HEADER, 'A hung window or stub is ended by the operator\'s power cycle, which writes nothing.',
+                     'ram: the placement (the copy of the chunks, zero fills), REPORT.DAT (outside the placement) and the wrapper\'s stack, as the dry-run wrapper'):
+            self.assertIn(says, self.new)
+        self.assertIn('REPORT.DAT is outside the placement by `PLACE_DECLARED` and `PLACE_NOT_CONV`', ' '.join((ROOT / 'docs/SP11-STICK-BUNDLE.md').read_text().split()))
+
+    def test_a_window_verdict_stops_the_series_in_the_documents_words_and_no_other_kind_says_it(self):
+        bullet = ('After any window verdict (OUTCOME 0X20 to 0X2F, IRQ_OK 0X20 included; no REFUSED line follows it) stop: the next work is the M1 stop design (D2), not a retry '
+                  '(docs/SP11-STICK-GIC.md section 11).')
+        self.assertIn(bullet, self.new)
+        self.assertNotIn('window verdict', self.old)
+        self.assertIn('the next work is the M1 stop design (D2), not a retry', ' '.join((ROOT / 'docs/SP11-STICK-GIC.md').read_text().split()))
+        self.assertIn('return SG_OUT_IS_VERDICT(out) ? 0 : sw_refuse(g->c, SP11SB_E_GIC_NOT_READY, out);', (ROOT / 'probes/sp11-stick-gic-dry.c').read_text())
+
+    def test_the_stage_returns_counter_where_the_text_says_and_writes_whole_registers_only_where_it_says(self):
+        gic, dry = [(ROOT / 'probes' / name).read_text() for name in ('sp11-stick-gic.c', 'sp11-stick-gic-dry.c')]
+        self.assertEqual(counter_problems(gic, dry), [])
+        self.assertEqual(len(counter_problems(gic, dry.replace('return SG_OUT_COUNTER;', 'return 0;'))), 2, 'a second wait that returns nothing, and one place fewer')
+        self.assertEqual(counter_problems(gic + ' SG_OUT_COUNTER', dry), ['another place returns COUNTER'])
+        for needle in ('if (g->ds && !(grp->old & g->bit)) {', 'grp->new = grp->old | g->bit;', 'if (cfg->old & edge) {', 'cfg->new = cfg->old & ~edge;'):
+            self.assertIn(needle, gic)
+        for needle in ('sp11hw_write_icc_eoir1_el1(iar);', 'if (rec->icc_ctlr_el1 & SG_ICC_CTLR_EOIMODE) sp11hw_write_icc_dir_el1(iar);', 'if ((iar & 0xFFFFFF) >= SW_GIC_INTID_SPURIOUS) return;'):
+            self.assertIn(needle, dry)
+
+    def test_the_commit_of_the_note_is_the_tree_of_the_pair_s_sources_and_a_file_that_changed_since_is_not(self):
+        commit = re.search(r"^COMMIT = '([0-9a-f]{40})'", (TOOLS / 'test-sp11-stick-bundle-record-gic.py').read_text(), re.M).group(1)     # the one the note's line is held to
+        files = pair_sources()
+        self.assertGreaterEqual(len(files), 12)
+        self.assertEqual(source_problems(commit, files), [])
+        self.assertEqual(source_problems(commit, [*files, 'tools/sp11_stick_bundle_record_gic.py']), ['tools/sp11_stick_bundle_record_gic.py'])
 
 
 class Hygiene(unittest.TestCase):

@@ -687,7 +687,7 @@ def build_opts(p, kind, template=False):
                      ('--time-box-s', dict(type=int, required=True, help='D5')), ('--descriptor', dict(help='a boot-ready board descriptor (real needs one)')),
                      ('--m1-efi', dict(action='append', default=[], metavar='NAME=SHA256', help='with --m1-run, once for SLBOUNCE-DEVHE-MARK.EFI and Q1N1-PAYLOAD.EFI: '
                                                                                               'the EFI files that run before the wrapper, named in section 1b')),
-                     ('--note', dict(help='a text file (printable ASCII, at most 40 lines of 120 characters) appended to the record as its section 6'))):
+                     ('--note', dict(help='a text file (printable ASCII, at most 48 lines of 120 characters) appended to the record as its section 6'))):
         p.add_argument(flag, **kw)
     if kind == 'synthetic':
         for flag, default in (('--image-mib', 115.5), ('--tables-mib', 16.0), ('--sptm-data-mib', 5.0)):

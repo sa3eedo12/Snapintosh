@@ -10,7 +10,10 @@ digests) and this one is a variant that is chosen by name: --gic-quarantine, val
 chooses and checks. Section 4 has a variant too (time_lines): the generic line says that the time box is the PARAMS chunk's and that the stop is the
 monitor's own, and the GIC wrapper reads no PARAMS word and calls no monitor. So has section 5 (silence_lines): the generic silence rule, twice the time
 box after ENTER (10 s for a box of 5 s), would stop a healthy run, which is silent for about 10 s after its last NEXT line (8 s wait, then window 2:
-docs/SP11-STICK-GIC.md section 4), and the document gives 15 s (section 11); the variant also says that NOT_RESTORED stops the series.
+docs/SP11-STICK-GIC.md section 4), and the document gives 15 s (section 11); the variant also says that NOT_RESTORED stops the series and that a window
+verdict (OUTCOME 0X20 to 0X2F: no REFUSED line follows it, so the first bullet of the other records does not apply) does too. Two more shared lines have a
+variant, because they say what is false of this stage: the heading of section 2 (PLACEMENT_HEADER: REPORT.DAT and the wrapper's stack are outside the
+placement) and the last bullet of section 5 (HARDWARE_LINES: no guest runs here; a hung window or the EL1 stub is what the power cycle ends).
 
 The text is kept in parts (EL2_WRITES, EL2_READS, GIC_READS, GIC_WRITES, ...), so that tools/test-sp11-stick-bundle-record-gic-model.py can hold what it
 says is written and what it says is read to what the host model of the stage writes and reads, register by register.
@@ -80,15 +83,18 @@ EL2_WRITES = (
     'see gic below), and the census of this binary lists the same 26 MSR instructions of the same 15 registers as',
     'the builds of the first two attempts (VERIFIED on the host by tools/test-sp11-stick-bundle-record-gic.py; the',
     'builder does not disassemble). The wrapper writes these registers of the boot CPU, each read first, put back',
-    'and verified by read-back: class C ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1; class T CNTHP_CVAL_EL2 and',
-    'CNTHP_CTL_EL2 (the EL2 physical timer, armed for a time box of 2 s in the default build, in each of two',
-    'windows, then disabled); class V VBAR_EL2 (the wrapper\'s own vector table), and IRQ unmasked by DAIFClr (#2),',
-    'only inside a window of at most twice the time box, and masked again by DAIFSet (#2), which the put-back uses',
-    'too; in the handlers ICC_EOIR1_EL1 (ICC_DIR_EL1 when EOImode is set), SPSR_EL2 and ELR_EL2. Class E, only',
-    'after a first window passed and a second announcement and 8 s: HCR_EL2 (RW and IMO, TGE clear), VBAR_EL1 and',
-    'SCTLR_EL1 (MMU and caches off), and SPSR_EL2 and ELR_EL2 for the one ERET to a stub at EL1 (saved first, put',
-    'back after the stub\'s HVC); the stub spins on the counter for at most twice the time box and ends by HVC; its',
-    'lines are made visible with DC CIVAC and IC IVAU.')
+    'and verified by read-back, except ICC_EOIR1_EL1, ICC_DIR_EL1 and the handlers\' SPSR_EL2 and ELR_EL2 (below):',
+    'class C ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1; class T CNTHP_CVAL_EL2 and CNTHP_CTL_EL2 (the EL2',
+    'physical timer, armed for a time box of 2 s in the default build, in each of two windows, then disabled);',
+    'class V VBAR_EL2 (the wrapper\'s own vector table), and IRQ unmasked by DAIFClr (#2), only inside window 1,',
+    'which ends at 4.08 s at the latest, and masked again by DAIFSet (#2), which the put-back uses too. In the',
+    'handlers: ICC_EOIR1_EL1 (ICC_DIR_EL1 when EOImode is set) is written to end the interrupt that was acknowledged,',
+    'and is neither read nor put back; SPSR_EL2 and ELR_EL2 are read for the page (the entry\'s values) and set for the',
+    'return, and are not put back. Class E, only after a first window passed and a second announcement and 8 s:',
+    'HCR_EL2 (RW and IMO, TGE clear), VBAR_EL1 and SCTLR_EL1 (MMU and caches off), and SPSR_EL2 and ELR_EL2 for the',
+    'one ERET to a stub at EL1 with IRQ unmasked in its SPSR (saved first, put back after the stub\'s HVC); the stub',
+    'spins on the counter for at most 4 s (window 2) and ends by HVC; its lines are made visible with DC CIVAC and',
+    'IC IVAU.')
 EL2_OTHER = (
     'The other system instructions are the dry run\'s: DC CVAC, AT S1E2W and AT S1E2R (they set PAR_EL1), DSB SY and',
     'ISB.')
@@ -97,7 +103,8 @@ EL2_READS = (
     'SPSel and DAIF (the checks of the CPU\'s state), MPIDR_EL1 (the affinity to match), ICC_SRE_EL2 and, if SRE is',
     'set, ICC_CTLR_EL1, ICC_PMR_EL1, ICC_BPR1_EL1, ICC_IGRPEN1_EL1 and ICC_RPR_EL1; CNTHCTL_EL2, CNTHP_CTL_EL2,',
     'CNTHP_CVAL_EL2, HCR_EL2, VBAR_EL2, VBAR_EL1, SCTLR_EL1, ESR_EL1, ELR_EL1 and FAR_EL1; CNTPCT_EL0, the counter,',
-    'which every wait and the EL1 stub read; ICC_IAR1_EL1 in the handlers, a read that acknowledges the interrupt.',
+    'which every wait and the EL1 stub read; in the handlers ESR_EL2, ELR_EL2, SPSR_EL2 and FAR_EL2 (the entry\'s',
+    'syndrome, return address, saved state and fault address) and ICC_IAR1_EL1, a read that acknowledges the interrupt.',
     'New in pass 5: ICC_HPPIR1_EL1, which the windows already read, is read once more after the last store with IRQ',
     'masked (it acknowledges nothing); and, in this build only (the dry run\'s: the arm half that a monitor entry',
     'would call is built without them), the EL1 timers CNTV_CTL_EL0, CNTV_CVAL_EL0, CNTP_CTL_EL0 and CNTP_CVAL_EL0,',
@@ -105,7 +112,8 @@ EL2_READS = (
 EL2_NOT = (
     'It writes no CNTHCTL_EL2, TPIDR_EL2 or other register, executes no SMC, SVC, TLBI, WFI or WFE, and calls no',
     'monitor.')
-EL2_TIME = ('Total time of the two windows and the two 8 s waits: about 20 s.',)
+EL2_TIME = ('Total time of the two windows and the two 8 s waits: about 20 s with the interrupts on time, at most about',
+            '24 s (section 4).')
 # The gic class in parts: the reads (the survey included), the writes in their order, the check, and what is never touched.
 GIC_HEAD = ('memory-mapped GIC registers in the pinned frames only (PIN.DAT gicd_base, gicr_first, gicr_stride, gicr_count).',)
 GIC_READS = (
@@ -129,7 +137,9 @@ GIC_WRITES = (
     '    GICD_CTLR failed (both group 1 gates left open): ISENABLER0 is then only read and named in FAILED, the',
     '    foreign interrupts stay disabled and the run ends NOT_RESTORED (OUTCOME=0X30). The pending state of those',
     '    interrupts is never written: a source that asserts through the run is pending, and, except in that case,',
-    '    enabled again, when the run ends.',
+    '    enabled again, when the run ends. A gate found open is not counted: with EnableGrp1A found set (class G',
+    '    never begun) and ICC_IGRPEN1_EL1 stuck open the write IS made; both gates were found closed on the unit',
+    '    (GICD_CTLR 0x10, ICC_IGRPEN1_EL1 0: OBSERVED, boot 13).',
     '  G, class G: GICD_CTLR, only when EnableGrp1A reads clear: the value read with 0x2 and 0x1 set when DS is',
     '    clear (a read of 0x10 is written 0x13; boot 13 read back 0x12, OBSERVED), with 0x2 set when DS is set; the',
     '    old value is put back.',
@@ -142,16 +152,21 @@ GIC_CHECK = (
     'Then, with IRQ still masked, ICC_HPPIR1_EL1 is read once: only INTID 1023 (none) or 26 may be next, else',
     'FOREIGN_PENDING (23, OUTCOME=0X17): no window opens, everything is put back and the INTID is on the page.')
 GIC_NEVER = (
-    'Never the ITS, SMMU, PCIe, USB or the framebuffer. No SPI is written (the SPIs are only read) and no other',
-    'redistributor (only its GICR_TYPER is read). Of the interrupts but PPI 26 only the enable bits that Q cleared',
-    'are written, by Q and its put-back (SGI 0 and PPIs 23, 25, 27 and 30 where ISENABLER0 read 0x4E800001): no',
-    'priority, group, trigger or pending state of any of them is written. PPI 26\'s own are the stage\'s: it sets',
-    'them as the writes above say, and undoes them.')
+    'Never the ITS, SMMU, PCIe, USB or the framebuffer. No SPI register is written (the SPIs are only read) and no',
+    'other redistributor (only its GICR_TYPER is read). Of the interrupts but PPI 26 only the enable bits that Q',
+    'cleared are written, by Q and its put-back (SGI 0 and PPIs 23, 25, 27 and 30 where ISENABLER0 read 0x4E800001):',
+    'no priority or pending state of any of them is written, and IGROUPR0 and ICFGR1 are written whole, the other',
+    'bits as read, and only in the cases of R above (neither on this unit\'s reads in boot 13: DS 0, ICFGR1 level).',
+    'But a window takes whatever INTID arrives: ICC_IAR1_EL1 acknowledges it, ICC_EOIR1_EL1 ends it (ICC_DIR_EL1',
+    'too when EOImode is set; it was in boot 13), a foreign SPI included (INFERRED from the architecture: a level',
+    'source that still asserts is pending again, an edge or message interrupt is consumed). GICD_CTLR EnableGrp1A',
+    'is distributor-wide: group 1 is enabled for every interrupt while the stage holds it set. PPI 26\'s own are the',
+    'stage\'s: it sets them as the writes above say, and undoes them.')
 TOUCHES = {
-    'ram': ('RAM inside the placement only, as the dry-run wrapper: the copy of the chunks, zero fills and the report in',
-            'REPORT.DAT. One more RAM store of the GIC and stop stage: its record, version 3, 1456 bytes (1376 before pass',
-            '5, which added the survey), at REPORT.DAT offset 0x11000 (after the monitor\'s 64 KiB window), which is inside',
-            'the report. No other RAM.'),
+    'ram': ('the placement (the copy of the chunks, zero fills), REPORT.DAT (outside the placement) and the',
+            'wrapper\'s stack, as the dry-run wrapper. One more RAM store of the GIC and stop stage: its record, version 3,',
+            '1456 bytes (1376 before pass 5, which added the survey), at REPORT.DAT offset 0x11000 (after the monitor\'s',
+            '64 KiB window), which is inside the report. No other RAM.'),
     'el2_sysreg': (*EL2_WRITES, *EL2_OTHER, *EL2_READS, *EL2_NOT, *EL2_TIME),
     'gic': (*GIC_HEAD, *GIC_READS, *GIC_WRITES, *GIC_CHECK, *GIC_NEVER)}
 FACT_LINES = (
@@ -160,15 +175,16 @@ FACT_LINES = (
     '      ISENABLER0 write that undoes it, which pass 6 withholds when both group 1 gates stay open), the check of',
     '      ICC_HPPIR1_EL1 before any window, record version 3 and two outcomes. The windows, the timer, the vector table',
     '      and the EL1 excursion are as before.',
-    '      Outcomes (OUTCOME= on the page, in hex): 0X1 to 0XF a refusal before any store; 0X10 to 0X1F a store that did',
-    '      not hold or a foreign interrupt next, always after a store and so always with a put-back (new: Q_NOT_HELD',
-    '      0X16, FOREIGN_PENDING 0X17); 0X20 to 0X2F what the windows showed (IRQ_OK 0X20); NOT_RESTORED 0X30.',
+    '      Outcomes (OUTCOME= on the page, in hex): 0X1 to 0XF a refusal, before any store except COUNTER at the second',
+    '      8 s wait (after the stores, with a put-back); 0X10 to 0X1F a store that did not hold or a foreign interrupt',
+    '      next, always after a store and so always with a put-back (new: Q_NOT_HELD 0X16, FOREIGN_PENDING 0X17); 0X20 to',
+    '      0X2F what the windows showed (IRQ_OK 0X20); NOT_RESTORED 0X30.',
     '      OBSERVED, one unit, one boot each (boot 12 from a photograph of the page, boot 13 from one video read frame by',
     '      frame):',
     '         the firmware leaves SGI 0 and PPIs 23, 25, 26, 27 and 30 enabled: ISENABLER0 0x4E800001 (boot 12);',
     '         INTID 27 was pending before any store: ISPENDR0 0x08000000 (boot 13);',
-    '         the unit\'s GTDT, from its ACPI dump, gives Virtual EL1 GSIV 27 (Secure EL1 29, Non-secure EL1 30,',
-    '           Non-secure EL2 26);',
+    '         the unit\'s GTDT gives Virtual EL1 GSIV 27 (Secure EL1 29, Non-secure EL1 30, Non-secure EL2 26) (from its',
+    '           ACPI dump, not from boot 12 or 13);',
     '         GICD_CTLR written 0x13 read back 0x12 (boot 13);',
     '         an enabled, pending PPI is delivered to EL2 as an IRQ once group 1 and the CPU interface are on: INTID 27,',
     '           not 26, was the first interrupt of window 1 in boot 13, and everything was put back clean.',
@@ -189,8 +205,10 @@ TIME_LINES = (
     '   time box for every record and checks the chunk against it (TIME_BOX_MISMATCH); the GIC wrapper does not read it',
     '   and calls no monitor, so nothing here is stopped by it. The wrapper times itself: each of its two windows arms',
     '   CNTHP 2 s ahead and is bounded at 4 s (window 1: 4.08 s, with 80 ms for its re-arms of 10 ms), and the two 8 s',
-    '   waits, before the first store and before the EL1 excursion, come on top: about 20 s in all on a passing run, 12 s',
-    '   if window 1 sees no interrupt, 22 s if window 2 sees none (docs/SP11-STICK-GIC.md section 4).')
+    '   waits, before the first store and before the EL1 excursion, come on top: about 20 s in all with the interrupts on',
+    '   time (12 s if window 1 sees no interrupt, 22 s if window 2 then sees none: docs/SP11-STICK-GIC.md section 4); at',
+    '   most about 24 s, the sum of the bounds (4.08 s + 8 s + 8 s + 4 s), because the verdict fails an interrupt that',
+    '   comes early and not one that comes late.')
 
 
 def time_lines(box_s):
@@ -201,16 +219,24 @@ def time_lines(box_s):
 # Section 5 of this kind, in place of the generic silence rule (twice the time box after ENTER: 10 s for a box of 5 s). The page of a healthy run is silent for
 # 8 s after the first NEXT line (the wait), 2 s after the second (window 1) and about 10 s after the third (the wait, then window 2), at most 12 s when window 2
 # sees no interrupt (the host model's page, tools/test-sp11-stick-bundle-record-gic-model.py; docs/SP11-STICK-GIC.md section 4), so 10 s would stop a healthy
-# run; the document's rule is 15 s (section 11), and it stops the series on NOT_RESTORED.
+# run; the document's rule is 15 s (section 11), and it stops the series on NOT_RESTORED and after any window verdict (OUTCOME 0X20 to 0X2F: the wrapper returns
+# and prints no REFUSED line, which the first bullet of the other records needs). HARDWARE_LINES replaces the last bullet of the other records, which speaks of
+# a guest that does not run here.
 SILENCE_LINES = (
     '   - No page change for 15 s after a NEXT line or after ENTER (docs/SP11-STICK-GIC.md section 11): note the last line',
     '     and power cycle. A healthy run is silent for 8 s after NEXT GIC STORES AFTER 8 S and for about 10 s after NEXT GIC',
     '     EL1 EXCURSION AFTER 8 S (the 8 s wait, then window 2 of about 2 s; at most 12 s: section 4). This replaces the rule',
     '     of the other records, twice the time box.',
-    '   - NOT_RESTORED stops the series (the quarantined interrupts may then stay disabled until the power cycle: INFERRED).')
+    '   - NOT_RESTORED stops the series (the quarantined interrupts may then stay disabled until the power cycle: INFERRED).',
+    '   - After any window verdict (OUTCOME 0X20 to 0X2F, IRQ_OK 0X20 included; no REFUSED line follows it) stop: the next',
+    '     work is the M1 stop design (D2), not a retry (docs/SP11-STICK-GIC.md section 11).')
+HARDWARE_LINES = (
+    '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A hung window or stub is',
+    '     ended by the operator\'s power cycle, which writes nothing.')
+PLACEMENT_HEADER = '2. Placement (the range of the copy and the zero fills; REPORT.DAT and the wrapper\'s stack are outside it)'
 
 
 def silence_lines():
     """The lines of section 5 of the record of --gic-quarantine that replace the generic silence rule: the 15 s of docs/SP11-STICK-GIC.md section 11 after a NEXT
-    line or ENTER, and the rule that NOT_RESTORED stops the series."""
+    line or ENTER, the rule that NOT_RESTORED stops the series, and the rule that a window verdict does."""
     return SILENCE_LINES
