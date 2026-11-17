@@ -5,12 +5,12 @@ the read-only survey S0 ran once on the unit (section 12), and its follow-up S0b
 Two later boots (6 and 7 of 2026-11-15, section 14) ran the third X2 test image and a payload that starts and stops the
 secondary cores, a three-step restart probe the same evening (section 14.1) ran a plain q1n1 page and that payload
 twice more, and a two-step restart control the next night ran only a read-only payload through the same runner; none
-of them read or wrote the stick's USB controller at EL2. Boot 14 (2026-11-17, section 15) ran the wrapper's GIC and stop variant and did not touch it either.**
-Nothing of the writer ran on a Surface Pro 11. When the study
+of them read or wrote the stick's USB controller at EL2. Boot 14 (2026-11-17, section 15) ran the wrapper's GIC and stop variant and did not touch it either. Boots 15 and 16 (2026-11-17, section 16) ran the A1 No-Op DMA test, the first xHC register stores at EL2, on `usb_1_ss1`: in the filmed boot the screen went off at the end of the wait before the first RUN store, the unit stayed dark and no No-Op completed (cause UNKNOWN, no restart seen; boot 15 is from the operator's memory only).**
+Nothing of the writer ran on a Surface Pro 11 beyond that test, a stand-alone payload of the q1n1 fork. When the study
 was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as an opt-in, read-only survey in
 the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`) and has run
 once on the unit: its results are OBSERVED (one unit, one boot) and are recorded in section 12. S0b is a payload for the
-fork's payload runner (`docs/SP11-PAYLOAD.md` there); its results are in section 13. Stages S1 and later do not
+fork's payload runner (`docs/SP11-PAYLOAD.md` there); its results are in section 13. Stage S1 exists only as the stand-alone test of A1 (section 16); S2 and later do not
 exist. It answers plan item B3 (a persistent log sink) and the
 first deliverable of B2 (EL2 USB host bring-up) of [SURFACE-PRO-11.md](SURFACE-PRO-11.md) and
 [SP11-HOST-LINK-STUDY.md](SP11-HOST-LINK-STUDY.md) as far as public sources and a host can: which controller the boot stick
@@ -100,7 +100,7 @@ guarded log writer, and their tests (section 8).
     one unit, one boot, from one video; section 15).** The wrapper's GIC variant of work item 8 ended `GIC VERDICT=IRQ_OK` with
     a clean restore: PPI 26 reached EL2 as an IRQ (four times in window 1, once from EL1 in window 2), the quarantine of the
     other enabled interrupts held, and the monitor was not called. The panel was again the only log channel, and A1 and A2 were
-    not exercised. Boots 8 to 13 are recorded elsewhere (section 15).
+    not exercised. Boots 8 to 13 are recorded elsewhere (section 15). Boots 15 and 16, the A1 test (granted for them), are in section 16: the screen went off at the end of the wait before the first RUN store and the unit stayed dark (cause UNKNOWN; A2 not exercised).
 
 ## 2. The problem and the requirements
 
@@ -398,7 +398,7 @@ All of it uses boot services and writes nothing. Any failure prints a reason and
 - **S0b outcome (OBSERVED once, section 13).** S0b read context bank 3: it is nested (stage 1 followed by stage 2) with stage 1
   off and no table base, so its walk is `UNSUPPORTED NESTED`, which is UNKNOWN. The SMMU condition is still not decided and
   SC2 is neither triggered nor cleared. What would decide it: a read-only stage-2 walker payload (it must first find the
-  stage-2 context, UNKNOWN how, with NUMS2CB 0), or the S1 No-Op, which needs A1 (NOT granted). S1 has not started.
+  stage-2 context, UNKNOWN how, with NUMS2CB 0), or the S1 No-Op, which needs A1 (NOT granted then; granted for boots 15 and 16, section 16). S1 had not started then.
 - **NO-GO** for (iv). (iii) only as the M10 experiment. (v) yes, in parallel.
 
 **Stop criteria.** Each is a point at which work on the stick writer stops and the plan is reviewed, not retried.
@@ -1255,6 +1255,147 @@ The reporter's block is the record's lines in the order of [SP11-STICK-GIC.md](S
 **What follows.** By the record, after any window verdict the series stops: the next work is the M1 stop design (D2), not a retry
 ([SP11-STICK-GIC.md](SP11-STICK-GIC.md) section 11). For this log nothing changes: the panel is still the only channel, no stick
 write at EL2 exists (S1 to S6 are UNIMPLEMENTED), and A1 and A2 were not exercised by this boot.
+
+## 16. Result of boots 15 and 16, the A1 xHCI S1 No-Op DMA test (`XHCI1.BIN`, `usb_1_ss1`), on the unit: the screen went off at the end of the wait before the first RUN store and the unit stayed dark (OBSERVED, one unit; boot 16 on video, boot 15 from memory)
+
+Boots 15 and 16 (2026-11-17) ran the plan `a1-xhci-s1`: authorisation point A1 (sections 5 and 11), the first xHC register stores at EL2,
+on the controller `usb_1_ss1` (the stage-S1 No-Op DMA test of [SP11-XHCI-S1.md](SP11-XHCI-S1.md); that runbook is pinned by the digest of
+the approved record and is not edited, so where it says that the unit's `DBOFF`, `RTSOFF` or scratchpad count are not recorded, or reads a
+page that stops after a `NEXT` line as a hang or a reset, this section is the later word). The operator approved the record of A1 (by its
+SHA-256, which this log does not repeat); A2 was neither granted nor exercised. The statements of sections 4.7, 12 and 13 that A1
+is NOT granted or that S1 has not started describe the time of those sections. Boot 16 was filmed in two videos (29 s and 42 s, 4 to 5 s
+apart); the page is cumulative, every line was read on several frames and the digits agree. Boot 15 was not filmed. Everything about boot
+16 below is OBSERVED (one unit, one boot) unless a label says otherwise; the decodes (what a value means) are INFERRED.
+
+**What ran.** The Shell's script ran one step (`AUTORUN a1-xhci-s1 STEP 1 OF 1`), then the bounce, q1n1's EL2 page and the payload runner
+with one payload, `XHCI1.BIN` (19,798 bytes; the page prints `SHA=989324B52E66C212`, the first 16 digits of the authorised file's SHA-256;
+loaded at `0xCEAB1000` in boot 16). The payload reads the controller and the SMMU, watches the PORTSC of both controllers for 30 s while the
+operator plugs the Mac's cable at an on-screen cue, then runs five groups of stores, each announced by a `NEXT ... AFTER 8 S` line and
+started after that wait: ARENA (RAM only), RESET, PROGRAM, RUN, NOOP. The stick was plugged straight into the unit; which port held it is not
+in the readings, so whether `usb_1_ss1` was the stick's controller is UNKNOWN (`usb_1_ss0` is the likely one, INFERRED, section 13).
+
+| Boot | Evidence | What is known |
+| --- | --- | --- |
+| 15 | none: not filmed; the operator's memory | The screen went off too (his first answer was that it ran to END; he has since said that both boots ended with the screen off, and that he is unsure of the details). Its page, VERDICT, arena and the moment the screen went off are UNKNOWN |
+| 16 | two videos, every line read on several frames | The page below; the screen went off at the end of the wait after `NEXT RUN AFTER 8 S`; no VERDICT, END or fault page |
+
+**The videos, in time (OBSERVED unless marked).** The payload's own clock starts the watch at 0 and puts the `NEXT` lines 8 s apart (the
+runbook's table, checked against the video).
+
+| Video, time | Payload, s | What is on the panel |
+| --- | --- | --- |
+| 1, 0 to about 12 s | before 0 | the Shell's countdown, the autorun lines, the bounce, q1n1's EL2 page (`EL2 CONFIRMED AFTER EXITBOOTSERVICES`) |
+| 1, about 25 s | watch T=14.7 s | the Mac's cable is plugged (INFERRED from the first `CHG` line; the camera leaves the panel at 26 s and the video ends at 29 s) |
+| 2, 0 to 7 s | about 23 to 30 (INFERRED) | the end of the watch: `WATCH 10 S LEFT`, `WATCH DONE CHANGED=U1P2 N=2` |
+| 2, about 7 s and about 15 s | 30 and 38 (INFERRED) | `NEXT ARENA`, `NEXT RESET` |
+| 2, 22.5 to 23.5 s | 46 | `NEXT PROGRAM` (read at 1 frame per second) |
+| 2, 30.9 to 31.2 s | 54 | `NEXT RUN AFTER 8 S` first on the page (4 frames per second) |
+| 2, 39.1 to 39.3 s | about 62 | the screen goes dark (10 frames per second) |
+| 2, to 41.8 s | | still dark: no further line |
+
+The screen went off 8.15 s (7.95 to 8.35 s) after `NEXT RUN AFTER 8 S` was drawn: the end of the 8 s wait that the payload makes before
+the first store of the RUN group, a single store, `USBCMD` with RS.
+
+**The page of boot 16** as read at 38.5 s of the second video (capital letters only, as the page folds case; the addresses are one boot's
+allocations, not constants):
+
+```text
+PAYLOAD LOADED INDEX=0 BASE=0XCEAB1000 BYTES=19798 SHA=989324B52E66C212 TYPE=1
+PAYLOAD READY FILES=1 RANGES=4 CODE=1
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 0 989324B52E66C212
+PAYLOAD XHCI U1 ID=0X33313130 CAPL=0X20 VER=0X110 HCS1=0X2000340 HCS2=0X140000F1 HCC1=0X110FFC5
+PAYLOAD XHCI U1 SCRATCH=2 PAGESZ=0X1 AC64=1 CSZ=64 DBOFF=0X2000 RTSOFF=0X1000
+PAYLOAD XHCI U1 CMD=0X0 STS=0X1:HCH CRCR=0X0 DCBAAP=0X0 CFG=0X0
+PAYLOAD XHCI SMMU STREAM=0X1460 SMR=4 TRANS CB=3 NCB=0X5F
+PAYLOAD XHCI SMMU0 GFSR=0X0 FSR=0X400 FAR=0X153F9FF8F7F3 FSYNR0=0X660D5D
+PAYLOAD XHCI ARENAS 2=OK 3=OK 4=OK
+PAYLOAD XHCI WATCH 30 S: CONNECT THE MAC USB-C CABLE TO THE FREE PORT NOW
+PAYLOAD XHCI BASE U0P1=0X20002A0 U0P2=0X24002C0 U1P1=0X20002A0 U1P2=0X20002A0
+PAYLOAD XHCI WATCH 20 S LEFT
+PAYLOAD XHCI CHG T=14.7 U1P2 FROM 0X20002A0 TO 0X20002E0:POLL
+PAYLOAD XHCI CHG T=15.7 U1P2 FROM 0X20002E0 TO 0X24002C0:INACT
+PAYLOAD XHCI WATCH 10 S LEFT
+PAYLOAD XHCI WATCH DONE CHANGED=U1P2 N=2
+PAYLOAD XHCI NEXT ARENA 2 STACK 0XCEA7B000 PAGES 3 AFTER 8 S
+PAYLOAD XHCI NEXT RESET AFTER 8 S
+PAYLOAD XHCI NEXT PROGRAM AFTER 8 S
+PAYLOAD XHCI NEXT RUN AFTER 8 S
+```
+
+Nothing follows: no `R1` line, no VERDICT, no END, no fault page; q1n1's left column is unchanged and the heartbeat was never reached
+(`UPTIME` read 0 S on its page).
+
+**What it answers.**
+
+| # | Question | Page lines | What the unit showed | Label |
+| --- | --- | --- | --- | --- |
+| 1 | Did the authorised file run? | `LOADED`, `VERIFY`, `CALL` | Yes: the 16 digits are the first of the file's SHA-256, `VERIFY=OK`, and q1n1's page confirmed EL2 | OBSERVED |
+| 2 | What does the xHC of `usb_1_ss1` report? | the three `U1` lines | `DBOFF` `0x2000`, `RTSOFF` `0x1000` and 2 scratchpad buffers (`HCS2` `0x140000F1`: count 2, restore bit set); 64 slots, 3 interrupters, 2 ports (`HCS1` `0x2000340`); 64-bit addressing, 64-byte contexts, 4 KiB pages supported (`PAGESZ` `0x1`), `CAPLENGTH` `0x20`, version `0x110`, `HCC1` `0x110FFC5`; halted (`STS` `0x1`, `HCH`) with `CMD`, `CRCR`, `DCBAAP` and `CONFIG` all 0 and no `HCE` or `HSE` | OBSERVED (`DBOFF`, `RTSOFF` and the scratchpad count are new: the simulator's `0x2000` and `0x1000` were INFERRED); INFERRED (the field decodes; bit 3 of `HCC1`, PPC, reads clear, so the record's hazard (f), `HCRST` removing port power, is not expected here) |
+| 3 | Is the SMMU state the one S0b read? | `SMMU`, `SMMU0` | Stream `0x1460` is `TRANS` through context bank 3 (`SMR=4`, `NCB=0x5F`); `GFSR` 0 and `FSR` `0x400` read as in S0b; `FAR` and `FSYNR0` differ from S0b's (section 13), so they are not a fixed leftover (INFERRED) and their meaning stays UNKNOWN | OBSERVED |
+| 4 | Which controller serves the free connector, and does a link form? | `BASE`, `CHG`, `WATCH DONE` | After the cable was plugged `U1P2`, port 2 of the payload's own controller, went from `0x20002A0` to `0x20002E0` at T=14.7 s and to `0x24002C0` at T=15.7 s; `U1P1`, `U0P1` and `U0P2` did not change. Decode: port power and wake-on-connect set throughout; link state 5 (RxDetect), then 7 (Polling), then 6 (Inactive) with the link-state-change bit. So the cable's port is wired to port 2 of `usb_1_ss1`, a SuperSpeed port, and its link went Inactive about a second after the first change: no link formed with the Mac (the page shape of O12, `CHANGED=U1P2`, but no connection, CCS, was ever set). `BASE` already showed `U0P2` at `0x24002C0` before the cable: why is UNKNOWN | OBSERVED (the values); INFERRED (the decode: the PORTSC layout is from memory) |
+| 5 | How far did the sequence get? | `NEXT ARENA` to `NEXT RUN` | The page advanced through `NEXT ARENA`, `NEXT RESET` and `NEXT PROGRAM` to `NEXT RUN`, 8 s apart, with no `R1`, VERDICT or END. By the runbook's page structure (a failure in those groups prints `R1`, a VERDICT and END), the ARENA group, the RESET group (HCRST, then HCRST and CNR clear within their bounds) and the PROGRAM group (the five read-backs held) completed: 11 register stores | OBSERVED (the page); INFERRED (the stores) |
+| 6 | What happened at `NEXT RUN`? | the screen | The screen went off 8.15 s (7.95 to 8.35 s) after `NEXT RUN AFTER 8 S` was drawn, the end of the wait before the first RUN-group store, and stayed off to the end of the video (2.6 s). That the store is what the screen followed is INFERRED from the payload's nominal wait; the cause is UNKNOWN | OBSERVED (the screen); INFERRED (the link to the store) |
+| 7 | What did the unit do afterwards? | not on video | The operator reports that it stayed dark and that he never turned it off; nothing came back, and no restart was seen. It was still a little warm about 30 minutes after the test (his impression, not a measurement). When and how it was powered off afterwards are not recorded | OBSERVED (operator report, from memory) |
+
+**The Mac side (OBSERVED).** The logger ran from before the boot until some minutes after the screen went off: 989 ticks, no USB device or
+network interface added or removed, 0 errors. A1 presents no device, so a quiet log was expected during the run; after the screen went off
+it also shows that the unit did not enumerate as a USB device on the plugged cable (INFERRED: that cable was in the port wired to
+`usb_1_ss1`; a mode that uses another port is not excluded).
+
+**Boot 15 (not filmed; the operator's memory).** The operator first answered that it ran to END; he has since said that both boots ended
+with the screen off, and that he is unsure of the details. Its VERDICT, its arena, whether it reached `NEXT RUN` and its `WRITES` count are
+UNKNOWN. In boot 15 the cable was plugged when the page said `WATCH 20 S LEFT` (about 10 to 11 s into the watch; boot 16: 14.7 s), so the
+cable's timing is not a known difference between the boots. The runner's payload base moved between the boots of
+this log (from `0xCE5E5000` to `0xCEC90000` in section 14 and Appendices D and E, and `0xCEAB1000` in boot 16), so arena 2, the runner's
+stack (`0xCEA7B000` in boot 16), probably moved too: boot 15's address and the port of its stick are UNKNOWN. That the ending repeated
+rests on the operator's memory for boot 15 and on one video for boot 16; whether it depends on the arena or on anything else is not tested.
+
+**The stop rules applied.**
+
+- O10 of the runbook (no VERDICT: the page stops, or it hangs): the page ended at `NEXT RUN AFTER 8 S` and the screen went off at the end
+  of the wait, the shape that O10 reads as the first store of that group having hung the bus or reset the SoC. No restart was seen, so of
+  those two readings the hang fits (INFERRED); a dead display with a live SoC is a third, which the runbook does not list. The runbook
+  marks O10 an SC1 candidate; nothing is authorised by that, and the clock, GDSC and PHY writes it would lead to stay UNIMPLEMENTED.
+- SC3 (five boots at S1 without a No-Op completing, or two boots with an unexplained Host System Error): boot 16 is one boot at S1 without
+  a No-Op completing; boot 15 is a second if it ended the same way, which is UNKNOWN (its page was not read): the count is 1 or 2 of 5.
+  No HSE was read in either boot, so the second limb is not counted.
+- The runbook's own rules (4.3, 4.4): no `XHCI0.BIN` boot, no retry in the same boot, the unit is power-cycled before any further boot,
+  and no further xHC write until the screen-off is understood.
+- The restarts of 14.1 (after two of three `cpuon` boots) are not this event: the firmware's normal boot followed them, and here the screen
+  never came back. Their question, what restarts the board after `cpuon`, is untouched.
+
+**What the run does not show.**
+
+- The cause. The hypotheses that nothing here separates, none tested (UNKNOWN): a bus or interconnect hang from the first xHC access after
+  RS (the CPU stuck on the store, or the whole SoC stalled); the display subsystem stopping (a scanout underrun, or a clock or power
+  domain) with the SoC alive; a live SoC and a dead display for another reason; a SoC reset that then failed to boot, stuck early with no
+  display; an action of the embedded controller or the PMIC.
+- Whether the SoC was alive after the screen went off: no probe of it exists (the panel was the only channel; no timer, counter or q1n1
+  heartbeat was reported after the last line). Whether a hardware watchdog was armed is UNKNOWN as well: nothing restarted the unit in the
+  30 minutes or more during which the operator found it dark.
+- Whether the RS store completed, whether the xHC started (`HCH` after the store was never read) and whether it fetched `DCBAA[0]` or the
+  scratchpad array: no DMA was observed. The question of A1 (does the xHC's DMA reach the runner's RAM: a TRB read and a completion
+  written back) stays UNKNOWN: no doorbell was rung, and SC2 is neither triggered nor cleared.
+- The `HSE` and `HCE` bits, the SMMU fault registers and the DWC3's bus-error address after the RS store: never read.
+- Boot 15's page, and whether the ending repeats on the same arena: UNKNOWN. The stick was not read back for this section: nothing is
+  claimed about its contents.
+
+**The hazards, as they fell (the record's section 8).** Written before the screen went off, as far as the page shows (INFERRED from its
+structure; the page has no END line, so the payload's own `WRITES` count was never printed): the words of one RAM arena (arena 2, the
+runner's own stack pages, the only arena tried); `HCRST`; the ten PROGRAM stores (`CONFIG`, `DCBAAP`, `CRCR`, `ERSTSZ`, `ERDP`, `ERSTBA`,
+the 64-bit ones as two stores each); and, at the end of the last wait, the RS store of `USBCMD`, the twelfth register store, after which the
+screen went off. Nothing else was written: no port, DWC3, glue, SMMU, clock, GDSC, PHY, retimer or stick register, no doorbell, `IMAN` or
+`ERDP`-with-EHB store (those belong to the NOOP group), and no stick sector (A2). Hazards that may have fallen, which nothing here separates: (a) an
+unclocked block hanging the bus (the clocks and GDSC read ON in S0), (b) an XPU or SMMU violation, (g) a store that faults, an exception at
+EL2 and a hang rather than a refusal (no fault page reached the screen). Not observed: (c) DMA into a page that is not the arena (no DMA
+was observed at all), (d) the effect of `HCRST` on a stick behind this controller (the stick's controller is not recorded), (f) the
+effect of `HCRST` on port power (the page read PORTSC only before it).
+
+**What follows.** By the runbook's rules (4.3, 4.4, O10) the sequence stops. No next step is decided or requested here, and any further xHC
+write needs the screen-off understood first and its own named authorisation. For this log the panel is still the only channel and could not
+show what followed the RUN store; the writer stays UNIMPLEMENTED, no completed No-Op has been seen (boot 16 ended at the wait before the first RUN store; boot 15's
+page is UNKNOWN), no USB DMA or live link has been demonstrated (cause UNKNOWN), and A2 was not exercised.
 
 ## Appendix A. The page lines of the survey boot (S0; EXPERIMENTAL in the q1n1 fork; ran once on the unit, section 12)
 

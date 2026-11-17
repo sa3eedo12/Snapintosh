@@ -14,9 +14,9 @@ exists, unqualified; **UNIMPLEMENTED** no code; **UNKNOWN** not established, a n
 Citations: `path:line` is this repository, `q1n1:path:line` the sibling q1n1 checkout (b875620; its platform/ equals d48b0af's);
 `fragment`[path:line] is a fragment that `tools/test-sp11-monitor-port.py` finds on that line. Boots: 3 and 6 = X2 images v2 and
 v3; 4 = payload chain psci, usbsmmu, timer; 5 = psci, usbsmmu; 7 = payload cpuon; 8 and 9 = plan memhash, 10 = plan DRYRUN-A, the
-wrapper dry run, 11 = plan timers, 12 to 14 = plans GICDRY-A, GICDRY-B and GICDRY-C, the GIC and stop dry run (12 and 13 on 2026-11-16, 14 on 2026-11-17); restart probe steps 1 to 3 = plain q1n1, cpuon, cpuon; restart control steps 1 and
+wrapper dry run, 11 = plan timers, 12 to 14 = plans GICDRY-A, GICDRY-B and GICDRY-C, the GIC and stop dry run (12 and 13 on 2026-11-16, 14 on 2026-11-17); 15 and 16 = plan a1-xhci-s1, the xHCI No-Op test of the USB link, not a monitor stage (2026-11-17); restart probe steps 1 to 3 = plain q1n1, cpuon, cpuon; restart control steps 1 and
 2 = psci only; X1 probe page = the first passive probe run (2026-11-11), a photograph. Unit facts come from the coordinator's fact
-files (photographs; videos for boots 8 to 11 and 13, one photograph for boot 12; none CRC-verified; boot 6: files read back from the stick), not from this repository.
+files (photographs; videos for boots 8 to 11, 13, 14 and 16, one photograph for boot 12, the operator's memory for boot 15; none CRC-verified; boot 6: files read back from the stick), not from this repository.
 
 ## 2. Milestone M1 and the verdict
 
@@ -298,7 +298,7 @@ address.
 | Stick boot, Shell, slbounce, EL2 takeover; the runner's read-only FAT access | as boots 4 to 7 | Secure Boot setting (`docs/SURFACE-PRO-11.md` section 8.1) | existing |
 | Wrapper stores to RAM, system registers and the GIC | new EL2 code | a payload that stores to device registers needs a named, SHA-pinned authorisation (`q1n1:docs/SP11-PAYLOAD.md`); `PIN.DAT` carries the store classes (D4) and the digest, zero refused (D7) | NEW; RAM stores ran once (boot 10); the dry-run variant's GIC and EL2 system-register stores ran twice (boots 13 and 14), held and were put back |
 | `_start` writes HCR, VBAR, TPIDR, VTCR, VTTBR, CNTHCTL, MDCR, OS lock; the guest then runs Apple code at EL1 | CPU state restored on return; guest MMIO limited by stage 2 to RAM (no panel: D9) | a documented stop and recovery path; no partition or firmware write reachable | NEW; two EL2 writes ran in boot 11 |
-| Disk, NVMe, USB, clock, voltage, DVFS | none: stage 2 omits them, no code path; the guest's `hvc` reaches firmware only for the GPU profile (`probes/xnuboot/trap_dispatch.c:702`), `smc` only for PSCI start (`probes/secondary.c:52`) and the GPU | A1 and A2 NOT granted, not touched; no unsafe clock or voltage operation | NOT RUN |
+| Disk, NVMe, USB, clock, voltage, DVFS | none: stage 2 omits them, no code path; the guest's `hvc` reaches firmware only for the GPU profile (`probes/xnuboot/trap_dispatch.c:702`), `smc` only for PSCI start (`probes/secondary.c:52`) and the GPU | A1 and A2 not touched by the monitor (A1 was granted for the xHCI No-Op test only, boots 15 and 16; A2 NOT granted); no unsafe clock or voltage operation | NOT RUN |
 | Attestation, prepared-equals-booted, one client | `cycle.py` ends every SP11 mode but the passive checks in `'unimplemented-flow'`[tools/cycle_lib/targets.py:600]: a stick boot is outside all its layers | AC or 50% battery, no change between prepare and boot | the builder carries the digests; the power attestation stays the operator's |
 
 ## 13. Ordered work plan to M1 (Q11)
