@@ -125,6 +125,15 @@ class Plan(unittest.TestCase):
         self.assertEqual(data, {'PAYLOAD.MAN': sha(plan_mod.manifest_for(1, PAYLOAD1)), 'XHCI1.BIN': sha(PAYLOAD1)})
         self.assertEqual(rec.staging_command(plan_mod.staging_files(0, PAYLOAD0))[3:5], ['--name', 'a1-xhci-s1'], 'the record names the plan of the first boot')
 
+    def test_the_staging_command_of_boot_17_names_the_plan_of_the_second_boot_and_the_plan_module_agrees(self):
+        stage = load('stage_sp11_for_xhci_s1_boot17', TOOLS / 'stage-sp11-boot-media.py')
+        argv = rec.staging_command(plan_mod.staging_files(0, PAYLOAD0), rec.PLAN_NAME_SS0)
+        args = stage.build_argparser().parse_args(['autorun'] + [a if a != '<scratch>' else str(BUILD / 'scratch') for a in argv[1:]])
+        self.assertEqual((args.name, args.step), (plan_mod.build(0, PAYLOAD0).name, ['SLBOUNCE-DEVHE-MARK.EFI Q1N1-PAYLOAD.EFI --el2']))
+        self.assertEqual(args.name, 'a1-xhci-s1-ss0', 'the name the supplement for boot 17 gives, and the Shell prints in its AUTORUN line')
+        self.assertEqual({name: digest for name, _, digest in args.data}, {'PAYLOAD.MAN': sha(plan_mod.manifest_for(0, PAYLOAD0)), 'XHCI0.BIN': sha(PAYLOAD0)})
+        self.assertEqual(plan_mod.PLAN_NAMES, {1: rec.PLAN_NAME, 0: rec.PLAN_NAME_SS0})
+
 
 @unittest.skipUnless(TREE and (Path(TREE) / 'tools' / 'sp11_payload_manifest.py').is_file() and (PAYLOADS / 'xhci1.bin').is_file() and (PAYLOADS / 'xhci0.bin').is_file(),
                      'Q1N1_SP11_TREE does not name a q1n1 tree with built xhci0.bin and xhci1.bin: the q1n1 manifest tool is not compared')

@@ -19,7 +19,7 @@ import sp11_autorun_fixtures as fx  # noqa: E402
 import sp11_xhci_s1_record as rec  # noqa: E402
 
 STEP = f'{rec.SLBOUNCE_NAME} {rec.RUNNER_NAME} --el2'
-PLAN_NAMES = {1: rec.PLAN_NAME, 0: rec.PLAN_NAME + '-ss0'}
+PLAN_NAMES = {1: rec.PLAN_NAME, 0: rec.PLAN_NAME_SS0}
 
 
 def sha256_hex(data):
