@@ -131,15 +131,15 @@ GIC_WRITES = (
     '    have set except bit 26 (PPI 26, the EL2 physical timer): SGI 0 and PPIs 23, 25, 27 and 30 where the unit\'s',
     '    ISENABLER0 read 0x4E800001 (OBSERVED, boot 12), so the value is 0x4A800001 there; no write when the value',
     '    is 0. Then RWP, then ISENABLER0 is read back and must be exactly PPI 26\'s bit as found, else Q_NOT_HELD',
-    '    (22, OUTCOME=0X16). Put back last, after the CPU interface and the distributor are, by ONE write of',
-    '    ISENABLER0 with exactly the bits Q cleared, verified against the whole register as found: the last',
-    '    register write of the stage, except that it is NOT made when the put-backs of both ICC_IGRPEN1_EL1 and',
-    '    GICD_CTLR failed (both group 1 gates left open): ISENABLER0 is then only read and named in FAILED, the',
-    '    foreign interrupts stay disabled and the run ends NOT_RESTORED (OUTCOME=0X30). The pending state of those',
-    '    interrupts is never written: a source that asserts through the run is pending, and, except in that case,',
-    '    enabled again, when the run ends. A gate found open is not counted: with EnableGrp1A found set (class G',
-    '    never begun) and ICC_IGRPEN1_EL1 stuck open the write IS made; both gates were found closed on the unit',
-    '    (GICD_CTLR 0x10, ICC_IGRPEN1_EL1 0: OBSERVED, boot 13).',
+    '    (22, OUTCOME=0X16). Put back last, after the CPU interface and the distributor are, by one write (a second',
+    '    only if the first does not read back) of ISENABLER0 with exactly the bits Q cleared, verified against the',
+    '    whole register as found: the last register write of the stage, except that it is NOT made when the put-backs',
+    '    of both ICC_IGRPEN1_EL1 and GICD_CTLR failed (both group 1 gates left open): ISENABLER0 is then only read and',
+    '    named in FAILED, the foreign interrupts stay disabled and the run ends NOT_RESTORED (OUTCOME=0X30). The',
+    '    pending state of those interrupts is never written: a source that asserts through the run is pending, and,',
+    '    except in that case, enabled again, when the run ends. A gate found open is not counted: with EnableGrp1A',
+    '    found set (class G never begun) and ICC_IGRPEN1_EL1 stuck open the write IS made; both gates were found closed',
+    '    on the unit (GICD_CTLR 0x10: OBSERVED, boots 12 and 13; ICC_IGRPEN1_EL1 0: OBSERVED, boot 13).',
     '  G, class G: GICD_CTLR, only when EnableGrp1A reads clear: the value read with 0x2 and 0x1 set when DS is',
     '    clear (a read of 0x10 is written 0x13; boot 13 read back 0x12, OBSERVED), with 0x2 set when DS is set; the',
     '    old value is put back.',
@@ -156,12 +156,12 @@ GIC_NEVER = (
     'other redistributor (only its GICR_TYPER is read). Of the interrupts but PPI 26 only the enable bits that Q',
     'cleared are written, by Q and its put-back (SGI 0 and PPIs 23, 25, 27 and 30 where ISENABLER0 read 0x4E800001):',
     'no priority or pending state of any of them is written, and IGROUPR0 and ICFGR1 are written whole, the other',
-    'bits as read, and only in the cases of R above (neither on this unit\'s reads in boot 13: DS 0, ICFGR1 level).',
-    'But a window takes whatever INTID arrives: ICC_IAR1_EL1 acknowledges it, ICC_EOIR1_EL1 ends it (ICC_DIR_EL1',
-    'too when EOImode is set; it was in boot 13), a foreign SPI included (INFERRED from the architecture: a level',
-    'source that still asserts is pending again, an edge or message interrupt is consumed). GICD_CTLR EnableGrp1A',
-    'is distributor-wide: group 1 is enabled for every interrupt while the stage holds it set. PPI 26\'s own are the',
-    'stage\'s: it sets them as the writes above say, and undoes them.')
+    'bits as read, and only in the cases of R above (neither on this unit\'s reads: DS 0 and ICFGR1 level, OBSERVED in',
+    'boots 12 and 13). But a window takes whatever INTID arrives: ICC_IAR1_EL1 acknowledges it, ICC_EOIR1_EL1 ends it',
+    '(ICC_DIR_EL1 too when EOImode is set; it was in boot 13), a foreign SPI included (INFERRED from the architecture:',
+    'a level source that still asserts is pending again, an edge or message interrupt is consumed). GICD_CTLR',
+    'EnableGrp1A is distributor-wide: while the stage holds it set, any enabled group 1 interrupt, an SPI included, can',
+    'be signalled to this CPU. PPI 26\'s own are the stage\'s: it sets them as the writes above say, and undoes them.')
 TOUCHES = {
     'ram': ('the placement (the copy of the chunks, zero fills), REPORT.DAT (outside the placement) and the',
             'wrapper\'s stack, as the dry-run wrapper. One more RAM store of the GIC and stop stage: its record, version 3,',
@@ -171,10 +171,10 @@ TOUCHES = {
     'gic': (*GIC_HEAD, *GIC_READS, *GIC_WRITES, *GIC_CHECK, *GIC_NEVER)}
 FACT_LINES = (
     '   Passes 5 and 6 and what they rest on (docs/SP11-STICK-GIC.md sections 4 and 12; the labels are that document\'s):',
-    '      Changed from the earlier attempts: the survey (reads), the quarantine (one ICENABLER0 write and the one',
-    '      ISENABLER0 write that undoes it, which pass 6 withholds when both group 1 gates stay open), the check of',
-    '      ICC_HPPIR1_EL1 before any window, record version 3 and two outcomes. The windows, the timer, the vector table',
-    '      and the EL1 excursion are as before.',
+    '      Changed from the earlier attempts: the survey (reads), the quarantine (one ICENABLER0 write and the ISENABLER0',
+    '      write that undoes it, which pass 6 withholds when both group 1 gates stay open), the check of ICC_HPPIR1_EL1',
+    '      before any window, record version 3 and two outcomes. The windows, the timer, the vector table and the EL1',
+    '      excursion are as before.',
     '      Outcomes (OUTCOME= on the page, in hex): 0X1 to 0XF a refusal, before any store except COUNTER at the second',
     '      8 s wait (after the stores, with a put-back); 0X10 to 0X1F a store that did not hold or a foreign interrupt',
     '      next, always after a store and so always with a put-back (new: Q_NOT_HELD 0X16, FOREIGN_PENDING 0X17); 0X20 to',
@@ -223,7 +223,7 @@ def time_lines(box_s):
 # and prints no REFUSED line, which the first bullet of the other records needs). HARDWARE_LINES replaces the last bullet of the other records, which speaks of
 # a guest that does not run here.
 SILENCE_LINES = (
-    '   - No page change for 15 s after a NEXT line or after ENTER (docs/SP11-STICK-GIC.md section 11): note the last line',
+    '   - No page change for 15 s at any point, a NEXT line or not (docs/SP11-STICK-GIC.md section 11): note the last line',
     '     and power cycle. A healthy run is silent for 8 s after NEXT GIC STORES AFTER 8 S and for about 10 s after NEXT GIC',
     '     EL1 EXCURSION AFTER 8 S (the 8 s wait, then window 2 of about 2 s; at most 12 s: section 4). This replaces the rule',
     '     of the other records, twice the time box.',
@@ -237,6 +237,6 @@ PLACEMENT_HEADER = '2. Placement (the range of the copy and the zero fills; REPO
 
 
 def silence_lines():
-    """The lines of section 5 of the record of --gic-quarantine that replace the generic silence rule: the 15 s of docs/SP11-STICK-GIC.md section 11 after a NEXT
-    line or ENTER, the rule that NOT_RESTORED stops the series, and the rule that a window verdict does."""
+    """The lines of section 5 of the record of --gic-quarantine that replace the generic silence rule: the 15 s of docs/SP11-STICK-GIC.md section 11 with no page
+    change at any point, a NEXT line or not, the rule that NOT_RESTORED stops the series, and the rule that a window verdict does."""
     return SILENCE_LINES

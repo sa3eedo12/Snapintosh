@@ -58,14 +58,19 @@ EARLIER = {'first attempt': ('build/sp11-gic/bin', '444329eedee71e680dba2db53a62
 # ELF, so another pair is a changed stage: the text has to be read again against it, and this pin is the reminder.
 FINAL = {'wrapper': (98236, 'ebac8675a246dfdbe1f0707e66b04b24e6d0b6fbdec383fdfebfee9eb6a960c2'),
          'reporter': (62000, '89b8fab1f6dadd72b39bdd07016b6436864af40551a2665074fbb2de2600b6d9')}
-# The text offered to the operator for the third attempt: the template that the local facts and the local run note (version 6) give with the final pair. The note's
-# line "Built from commit" ties the payload digests to their source, and Final checks that commit against the sources of the pair. A changed byte of the facts, the
-# note or the text is another record: the pin applies only to the facts file and the note it names by digest and size; with any other it is skipped, which is not a pass.
+# The text offered to the operator for the third attempt: the template that the local facts and the local run note (version 8) give with the final pair. The note's two
+# provenance sentences tie the payload digests to their sources: the sources of the pair are those of COMMIT (the model test, class Source, checks that against the tree), and
+# the payloads were built with the q1n1 checkout at Q1N1_COMMIT, which no tree of this repository holds: that commit is only pinned here, as the note says it. A changed byte
+# of the facts, the note or the text is another record: the pin applies only to the facts file and the note it names by digest and size; with any other it is skipped, which
+# is not a pass.
 LOCAL = dict(facts=('build/sp11-gic/facts-gicdry3.local.json', '6d278ac6837c96cc5125819e909a7fddb823ed6f83e5cd80577686218a8a5952'),
-             note=('build/sp11-gic/note-gicdry3.txt', 'ff4a422fbbf4bed2c6e053e30f2983f8526238085e7af1dba1beb2a5d8cab3fc', 5047), size=20663,
-             template='d80f817c50a349ff377e2c5993e8e440b9990791b290a95c00d40e2207bf7804')
+             note=('build/sp11-gic/note-gicdry3.txt', '8b2d99c5e0842a292cedcc22996ec793f522f0ad5290757d34013940a3b65756', 5379), size=21126,
+             template='167aac35795bc3ce608719c7b5f425d5591746b9bb080136e6cf64152fee27c3')
 COMMIT = '87da59673c9a59fc5709a57e2ef0581ff722c7c6'
-COMMIT_LINE = re.compile(r'^Built from commit ([0-9a-f]{40}) \(payloads 0 and 1 built twice from that tree, identical\)\.$', re.M)
+Q1N1_COMMIT = '32fbd1f0a7db62c96c0fa880a1801f816f7f8afe'
+COMMIT_LINES = (re.compile(r'The sources of the two payloads \(probes/sp11-stick-\*, the wrapper build tool and the M1 monitor profile\) are those of commit ([0-9a-f]{40}); the pair '
+                           r'was built twice from them, identical\.'),
+                re.compile(r'Built with the q1n1 checkout at commit ([0-9a-f]{40}) \(clean\): its Makefile, start\.S, payload\.ld, payload-util\.h and sha256\.c are inputs of the payloads\.'))
 # The census of the pass 5 wrapper: the 26 MSR instructions of 15 registers that docs/SP11-STICK-GIC.md section 8 lists, and what else it executes.
 MSR_COUNTS = {'VBAR_EL2': 5, 'SPSR_EL2': 4, 'ELR_EL2': 4, 'DAIFSet': 2, 'DAIFClr': 1, 'ICC_PMR_EL1': 1, 'ICC_BPR1_EL1': 1, 'ICC_IGRPEN1_EL1': 1, 'ICC_EOIR1_EL1': 1,
               'ICC_DIR_EL1': 1, 'CNTHP_CVAL_EL2': 1, 'CNTHP_CTL_EL2': 1, 'HCR_EL2': 1, 'VBAR_EL1': 1, 'SCTLR_EL1': 1}
@@ -81,7 +86,7 @@ EXTRA = {'msr tpidr_el2': (0xD51CD040, 'TPIDR_EL2'), 'tlbi vmalle1': (0xD508871F
 FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=7, time_box_s=5, label='GICDRY-C', monitor=(98236, '1' * 64), reporter=(62000, '2' * 64),
              note=None, gic_stop=True, gic_quarantine=True, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
 # The SHA-256 of record_text for FIXED: the text is what the operator approves by its digest, so a changed byte is another record.
-GOLDEN = 'ece5ebe68f7134d02c086a6399ebf19037261ad57a32ac33a4da9ca345117043'
+GOLDEN = 'fbdfe145d194a66b8f65787f55a151c70b3730eca7ee953cf40848de72b7b841'
 LOOKALIKES = ('ASSUMED CONFIRMED MEASURED PROVEN PROVED TESTED VALIDATED ESTABLISHED HYPOTHESIS GUESSED LIKELY SUSPECTED UNVERIFIED PRESUMED PROBABLE CERTAIN '
               'DEMONSTRATED QUALIFIED ASSERTED CLAIMED OBVIOUS TRIVIAL').split()
 
@@ -191,33 +196,15 @@ def exception_problems(flat):
     return problems + [f'still says: {PASS_5_SAID}'] * (PASS_5_SAID in flat)
 
 
-# The paragraph that says what the stage never touches, as it must say it (the quarantine writes the enable bits of the other interrupts; a window takes and ends whatever
-# INTID arrives), and the wording of the two versions before it.
-NEVER_SAYS = ('Never the ITS, SMMU, PCIe, USB or the framebuffer. No SPI register is written (the SPIs are only read) and no other redistributor (only its GICR_TYPER is read). '
-              'Of the interrupts but PPI 26 only the enable bits that Q cleared are written, by Q and its put-back (SGI 0 and PPIs 23, 25, 27 and 30 where ISENABLER0 read '
-              '0x4E800001): no priority or pending state of any of them is written, and IGROUPR0 and ICFGR1 are written whole, the other bits as read, and only in the cases of R '
-              'above (neither on this unit\'s reads in boot 13: DS 0, ICFGR1 level). But a window takes whatever INTID arrives: ICC_IAR1_EL1 acknowledges it, ICC_EOIR1_EL1 ends it '
-              '(ICC_DIR_EL1 too when EOImode is set; it was in boot 13), a foreign SPI included (INFERRED from the architecture: a level source that still asserts is pending '
-              'again, an edge or message interrupt is consumed). GICD_CTLR EnableGrp1A is distributor-wide: group 1 is enabled for every interrupt while the stage holds it set.')
-NEVER_SAID = ('Never the ITS, SMMU, PCIe, USB or the framebuffer. No SPI is written (the SPIs are only read) and no other redistributor (only its GICR_TYPER is read). '
-              'Of the interrupts but PPI 26 only the enable bits that Q cleared are written, by Q and its put-back (SGI 0 and PPIs 23, 25, 27 and 30 where ISENABLER0 read '
-              '0x4E800001): no priority, group, trigger or pending state of any of them is written.')
-NEVER_WAS = ('another interrupt\'s configuration', 'No SPI is written', 'no priority, group, trigger or pending state')
-
-
-def never_problems(flat):
-    return ([] if NEVER_SAYS in flat else ['the paragraph is not there']) + [f'still says: {old}' for old in NEVER_WAS if old in flat]
-
-
 def silence_problems(section, doc, worst_s):
     """What is wrong with section 5 (`section`, the text from "5. " on) of a --gic-quarantine record against the document's stop rule and the longest silence that an
-    orderly run of the stage has (`worst_s`): [str]. The rule must be the document's figure ("no page change for N s") for a NEXT line or ENTER, above that silence,
+    orderly run of the stage has (`worst_s`): [str]. The rule must be the document's figure ("no page change for N s") at any point of the page, above that silence,
     must not be the rule of the other records, and NOT_RESTORED must stop the series."""
     flat, problems = ' '.join(section.split()), []
-    rule = re.search(r'No page change for (\d+) s after a NEXT line or after ENTER', flat)
+    rule = re.search(r'No page change for (\d+) s at any point, a NEXT line or not', flat)
     doc_s = int(re.search(r'no page change for (\d+) s', ' '.join(doc.split())).group(1))
     if not rule:
-        problems.append('there is no rule of seconds for a NEXT line or ENTER')
+        problems.append('there is no rule of seconds for any point of the page')
     else:
         if int(rule.group(1)) != doc_s:
             problems.append(f'the rule says {rule.group(1)} s and the document {doc_s} s')
@@ -374,7 +361,8 @@ class Text(unittest.TestCase):
 
     def test_the_variant_says_what_pass_5_reads_writes_and_checks_and_the_earlier_text_does_not(self):
         for needle in ('1456 bytes (1376 before pass 5', 'version 3', 'GICD_ISENABLER[n] and GICD_ISPENDR[n] for n = 1 to the ITLinesNumber', 'ICENABLER0, once',
-                       '0x4E800001', '0x4A800001', 'by ONE write of ISENABLER0', 'the last register write of the stage', 'must be exactly PPI 26\'s bit as found',
+                       '0x4E800001', '0x4A800001', 'by one write (a second only if the first does not read back) of ISENABLER0', 'the last register write of the stage',
+                       'must be exactly PPI 26\'s bit as found',
                        'Q_NOT_HELD (22, OUTCOME=0X16)', 'FOREIGN_PENDING (23, OUTCOME=0X17)', 'only INTID 1023 (none) or 26 may be next',
                        'CNTV_CTL_EL0, CNTV_CVAL_EL0, CNTP_CTL_EL0 and CNTP_CVAL_EL0', 'ICC_IAR1_EL1', 'DAIFClr', 'The pending state of those interrupts is never written'):
             with self.subTest(needle):
@@ -440,14 +428,10 @@ class Text(unittest.TestCase):
         self.assertEqual(exception_problems(self.flat.replace(EXCEPTION_SAYS, PASS_5_SAID)), ['the pass 6 sentence is not there', f'still says: {PASS_5_SAID}'],
                          'the sentence of pass 5 fails the check')
         self.assertTrue(exception_problems(self.flat.replace('is NOT made', 'is made')), 'a text without the exception fails it')
-        for needle in ('by ONE write of ISENABLER0', 'the last register write of the stage'):
+        for needle in ('by one write (a second only if the first does not read back) of ISENABLER0', 'the last register write of the stage'):
             self.assertIn(needle, self.flat)
-
-    def test_the_never_paragraph_says_what_the_quarantine_writes_and_nothing_wider(self):
-        self.assertEqual(never_problems(self.flat), [])
-        self.assertTrue(never_problems(self.flat.replace(NEVER_SAYS, NEVER_SAID)), 'the wording of the first version fails the check')
-        self.assertEqual([i for i in range(32) if 0x4A800001 >> i & 1], [0, 23, 25, 27, 30], 'SGI 0 and PPIs 23, 25, 27 and 30 are the bits of the value Q writes')
-        self.assertIn('PPI 26\'s own are the stage\'s: it sets them as the writes above say, and undoes them.', self.flat)
+        self.assertNotIn('ONE write', self.flat)
+        self.assertNotIn('the one ISENABLER0 write', self.flat)
 
     def test_the_unknown_paragraph_names_the_extended_spis_and_the_lpis_in_the_documents_words(self):
         said = ('whether any extended SPI (GICD_TYPER.ESPI is 1, range 31) or LPI (GICR_TYPER.PLPIS is 1) is enabled and pending: neither is surveyed or quarantined; only the '
@@ -526,7 +510,7 @@ class Text(unittest.TestCase):
         section, worst = self.new.split('\n5. ', 1)[1], 12
         for seconds in (10, 12):
             with self.subTest(seconds):
-                problems = silence_problems(section.replace('No page change for 15 s after', f'No page change for {seconds} s after'), doc, worst)
+                problems = silence_problems(section.replace('No page change for 15 s at', f'No page change for {seconds} s at'), doc, worst)
                 self.assertEqual(len(problems), 2, problems)
                 self.assertIn(f'the rule says {seconds} s and the document 15 s', problems)
         self.assertEqual(silence_problems(section.replace(next(line for line in gq.SILENCE_LINES if 'NOT_RESTORED stops the series' in line) + '\n', ''), doc, worst),
@@ -651,16 +635,20 @@ class Final(Need):
         self.assertIn(f'(about {wait + 2 * box} s on a passing run, at most about {round(window_1 + wait + 2 * box)} s: {window_1:.2f} s + {wait} s + {2 * box} s)', flat_note)
         self.assertIn(f'is bounded at about {2 * box} s', flat_note)
         self.assertNotIn('about 20 s', flat_note, 'the 20 s is the whole stage, and the note gives it to nothing')
-        self.assertEqual(COMMIT_LINE.findall(note.read_text()), [COMMIT])
-        self.assertEqual(COMMIT_LINE.findall(note.read_text().replace(COMMIT, COMMIT[:39])), [], 'a short hash is no commit line')
+        for pattern, commit in zip(COMMIT_LINES, (COMMIT, Q1N1_COMMIT)):
+            self.assertEqual(pattern.findall(flat_note), [commit])
+            self.assertEqual(pattern.findall(flat_note.replace(commit, commit[:39])), [], 'a hash of 39 characters is no commit')
         codes = [number(rf'X\({name}, (\d+)\)') for name in ('EXCEPTION', 'EL1_EXCEPTION')]
         for says in (f'(EXCEPTION 0X{codes[0]:X} in window 1, EL1_EXCEPTION 0X{codes[1]:X} in window 2), ends the window and everything is put back',
                      'A data abort outside a window lands in q1n1\'s fault page', '(INFERRED: the write was ignored)', '; the decode is INFERRED)',
                      'The unit\'s GTDT (from its ACPI dump, not from boot 12 or 13)', '(but a window takes and ends whatever INTID arrives, an SPI included)',
                      'A gate found open is not counted (both were found closed on the unit: GICD_CTLR 0x10, IGRPEN1 0)',
+                     'one ISENABLER0 write (a second only if the first does not read back) of exactly the bits that ICENABLER0 cleared',
+                     'A freeze or reset leaves the last line on the page: in the video, then power cycle (that writes nothing).',
                      'RAM (the placement, REPORT.DAT with a 1456 byte record at 0x11000, and the wrapper\'s stack)'):
             self.assertIn(says, flat_note)
-        for old in ('ignored or scaled', 'up to 14 s', 'any SPI (read only)', 'A data abort lands in q1n1\'s fault page', 'not a boot)'):
+        for old in ('ignored or scaled', 'up to 14 s', 'any SPI (read only)', 'A data abort lands in q1n1\'s fault page', 'not a boot)', 'Built from commit',
+                    'leaves the last NEXT line', 'one ISENABLER0 write of exactly', '(a NEXT line from the first one on)'):
             self.assertNotIn(old, flat_note)
         other = self.generate(BT.write(SCRATCH / 'mutants' / 'note-edited.txt', note.read_bytes().replace(b'THIRD ATTEMPT', b'3RD ATTEMPT', 1)))
         self.assertEqual(other[0], 0, other[2])

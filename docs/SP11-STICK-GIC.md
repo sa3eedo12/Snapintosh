@@ -61,7 +61,7 @@ section 12). A QEMU run proves the sequence and the assembly, never the unit's E
     python3 tools/test-sp11-stick-bundle-record-gic.py | -bundle-record-gic-model.py     the tests of the record text of passes 5 and 6 (section 9)
 
 The bundle builder writes the two payloads into the bundle as SNAPMON.BIN and SNAPREP.BIN (the frozen file roles); the record names their
-sizes and digests. `--gic-stop` needs `gic` in `--stores` and changes only section 3 of the record: one line that says what the record is, and the three class texts. `--gic-quarantine`, which needs `--gic-stop`, chooses the text for passes 5 and 6 (`tools/sp11_stick_bundle_record_gic.py`) and changes more: section 3 (its head, the class texts register by register, and the facts they rest on), section 4 (the wrapper times itself and uses no PARAMS watchdog) and the silence rule of section 5 (15 s after a NEXT line or ENTER, and NOT_RESTORED stops the series). The builder refuses a wrapper that carries the outcome names of pass 5 (`Q_NOT_HELD`, `FOREIGN_PENDING`) under a `gic` record without the option (`GIC_QUARANTINE_REQUIRED`) and the option with any other wrapper (`GIC_QUARANTINE_ABSENT`); the records of the dry run and of the first two attempts are byte for byte as they were (`tools/test-sp11-stick-monitor-auth.py`).
+sizes and digests. `--gic-stop` needs `gic` in `--stores` and changes only section 3 of the record: one line that says what the record is, and the three class texts. `--gic-quarantine`, which needs `--gic-stop`, chooses the text for passes 5 and 6 (`tools/sp11_stick_bundle_record_gic.py`) and changes more: section 3 (its head, the class texts register by register, and the facts they rest on), section 4 (the wrapper times itself and uses no PARAMS watchdog) and the silence rule of section 5 (15 s at any point, a NEXT line or not, and NOT_RESTORED stops the series). The builder refuses a wrapper that carries the outcome names of pass 5 (`Q_NOT_HELD`, `FOREIGN_PENDING`) under a `gic` record without the option (`GIC_QUARANTINE_REQUIRED`) and the option with any other wrapper (`GIC_QUARANTINE_ABSENT`); the records of the dry run and of the first two attempts are byte for byte as they were (`tools/test-sp11-stick-monitor-auth.py`).
 
 ## 4. The stage, step by step
 
@@ -144,7 +144,7 @@ too). Stack: the state is under 2 KiB (static assert); the call graph and two ex
 
 Time. Each window's first timer is armed one time box (2 s) ahead, a later cycle 10 ms ahead. Window 1 takes about 2.03 s (hard bound 4.08 s),
 window 2 about 2 s (the stub's bound 4 s). With the two 8 s waits: about 20 s on a passing run, 22 s when window 2 sees no interrupt, 12 s when
-window 1 sees none.
+window 1 sees none, and at most about 24 s when both windows pass late (4.08 s + 8 s + 8 s + 4 s: the verdict fails an interrupt that comes early, not one that comes late).
 
 ## 5. The record in REPORT.DAT, and the extension-record convention
 
@@ -350,7 +350,7 @@ Boot 13 (OBSERVED, one unit, one boot, 2026-11-16, from one video read frame by 
 interrupt, INTID 27, not 26, about 2.0 s before the CNTHP deadline (`GIC IRQ INTID=27 LAT_US=-1999619/-/-/- OK=0--- FINAL=NONE`, `GIC VERDICT=WRONG_INTID
 OUTCOME=0X22 SUB=DONE`), and put everything back (`GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRCTV VBAR=OK EL1=NONE`); return 0, no fault, no reset;
 window 2 was not reached, as designed. Read for the first time on the unit: ICC_SRE_EL2 0xF, EOImode 1, PMR 0xF8, BPR1 3, IGRPEN1 0, CNTHP_CTL 0x2 (masked,
-disabled), IPRIORITYR[26] 0xA0, and ISPENDR0 0x08000000 before any store: INTID 27 was already pending, and enabled (ISENABLER0 bit 27). The stores held:
+disabled), IPRIORITYR[26] 0xA0, and ISPENDR0 0x08000000 before any store: INTID 27 was already pending, and enabled (ISENABLER0 bit 27). As in boot 12, GICD_CTLR read 0x10 (DS 0) and ICFGR1 0 (level). The stores held:
 GICD_CTLR written 0x13 read back 0x12 (EnableGrp1A held; bit 0 does not stick in the non-secure view with DS = 0), IPRIORITYR[26] 0xA0 to 0x80, IGRPEN1 1,
 PMR 0xF8 before and after the stage's write of 0xF0 (INFERRED that the write was ignored: the page shows 0xF8 twice; the held check passes because the
 priority is below the PMR read back); ISENABLER0 was not written (bit 26 was set). After EOIR1 and DIR HPPIR1 still read 27, a level source still asserting,
@@ -380,7 +380,7 @@ UNIMPLEMENTED: the monitor entry, the real M1 stop, secondaries, waking a redist
 PPI 26, whether the quarantine holds, the foreign sources the survey will find, the I-set EL1 entry (ICC and CNTHP access at EL2 held in boot 13, OBSERVED,
 one unit). Risks: the stub's fetch depends on the identity map and on
 cache maintenance that QEMU cannot show; a stuck-high line, or a foreign timer whose deadline passed during the run and is put back, can never clear
-its pending bit, so it ends NOT_RESTORED (loud; the series stops; model only); the quarantine switches SGI 0 and four PPIs of this CPU off from its first store to the put-back's last write, for about 12 s on a passing run (window 1, the second 8 s wait and window 2; the first 8 s wait comes before the first store, and the whole stage takes about 20 s), about 4 s when window 1 sees no interrupt, at most about 14 s when window 2 sees none and well under a second when a check after the stores refuses
+its pending bit, so it ends NOT_RESTORED (loud; the series stops; model only); the quarantine switches SGI 0 and four PPIs of this CPU off from its first store to the put-back's last write, for about 12 s on a passing run (window 1, the second 8 s wait and window 2; the first 8 s wait comes before the first store, and the whole stage takes about 20 s), about 4 s when window 1 sees no interrupt, at most about 14 s when window 2 sees none after an on-time window 1 (2 s + 8 s + 4 s), at most about 16 s with window 1 late (4.08 s + 8 s + 4 s) and well under a second when a check after the stores refuses
 (nothing else runs on this CPU then: INFERRED, the wrapper runs after the runner has left the firmware; no other CPU's redistributor is written), and the
 pending state of those interrupts is never written, so a source that asserts through the run is pending, and enabled again, when the run ends (not when both
 group 1 gates stay open: the quarantined interrupts then stay disabled and the run is NOT_RESTORED, section 4).

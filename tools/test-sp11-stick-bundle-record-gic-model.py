@@ -16,8 +16,9 @@ every register the text claims to write is written in some scenario, except SPSR
 case are held to the model, each with a case that fails it: a gate found open is not counted (so the last ISENABLER0 write IS made), a window takes and ends whatever
 INTID arrives and writes no SPI register, the bounds that the durations add up (4.08 s, 8 s, 4 s), no store before a refusal of 0X1 to 0XF, no REFUSED line after a
 window verdict, a data abort in a window ends it with everything put back, and the registers that are not read first. The class Source holds, with no model and no toolchain, the
-sentences that describe the stage's source and the documents (COUNTER, whole-register writes, the end of a foreign interrupt, the verdict return, the heading of section 2)
-and the commit that the note names against the sources of the pair. What the model proves is the stage's order and its accesses against the model, and
+sentences that describe the stage's source and the documents (COUNTER, whole-register writes, the end of a foreign interrupt, the verdict return, the heading of section 2, the paragraph
+of what the stage never touches, the silence rule for any point of the page, the boot attributions of the reads) and the commit that the note names against the sources of the
+pair, with the q1n1 files it names against the build tool's inputs. What the model proves is the stage's order and its accesses against the model, and
 nothing about the unit. It needs clang and a q1n1 checkout ($Q1N1_SP11_TREE) and SKIPs without them, which is not a pass. No hardware: NOT RUN. Everything is
 written below build/sp11-wrapper-test-scratch-record-gic-model/, deleted at the end."""
 import collections
@@ -323,7 +324,7 @@ class Model(unittest.TestCase):
         self.assertAlmostEqual(healthy, wait + box, delta=0.1)
         self.assertAlmostEqual(orderly, wait + 2 * box, delta=0.1)       # window 2 at the stub's bound, having seen no interrupt
         text = ' '.join(' '.join(gq.silence_lines()).split())
-        rule = int(re.search(r'No page change for (\d+) s after a NEXT line', text).group(1))
+        rule = int(re.search(r'No page change for (\d+) s at any point, a NEXT line or not', text).group(1))
         self.assertEqual(silence_problems(rule, healthy, orderly), [])
         for says in (f'silent for {wait} s after NEXT GIC STORES AFTER {wait} S', f'about {round(healthy)} s after NEXT GIC EL1 EXCURSION AFTER {wait} S', f'at most {round(orderly)} s: section 4'):
             self.assertIn(says, text)
@@ -517,8 +518,56 @@ class Source(unittest.TestCase):
         commit = re.search(r"^COMMIT = '([0-9a-f]{40})'", (TOOLS / 'test-sp11-stick-bundle-record-gic.py').read_text(), re.M).group(1)     # the one the note's line is held to
         files = pair_sources()
         self.assertGreaterEqual(len(files), 12)
+        self.assertEqual({'probes/sp11-stick-*' if f.startswith('probes/sp11-stick-') else f for f in files},
+                         {'probes/sp11-stick-*', 'tools/sp11_stick_wrapper_build.py', 'config/monitor-profile-sp11-m1.json'}, 'what the note names as the sources of the payloads')
         self.assertEqual(source_problems(commit, files), [])
         self.assertEqual(source_problems(commit, [*files, 'tools/sp11_stick_bundle_record_gic.py']), ['tools/sp11_stick_bundle_record_gic.py'])
+
+    def test_the_q1n1_files_the_note_names_are_inputs_of_the_payloads_in_the_build_tool(self):
+        named = ('Makefile', 'start.S', 'payload.ld', 'payload-util.h', 'sha256.c')
+        self.assertEqual([n for n in named if not any(i.endswith('/' + n) for i in wb.Q1N1_INPUTS)], [])
+        self.assertEqual(len(wb.Q1N1_INPUTS), 10, 'the ten INPUT lines of the build report: the note names five of them')
+        self.assertTrue([n for n in ('Makefile.in', 'start.c') if not any(i.endswith('/' + n) for i in wb.Q1N1_INPUTS)], 'a file that is no input is found out')
+
+    def test_the_silence_rule_is_for_any_point_of_the_page_and_the_documents_say_it_the_same_way(self):
+        rule = 'No page change for 15 s at any point, a NEXT line or not (docs/SP11-STICK-GIC.md section 11): note the last line and power cycle.'
+        section = self.new.split(' 5. Refusal and stop rules', 1)[1]
+        self.assertIn(rule, section)
+        self.assertIn('freeze on a NEXT line or no page change for 15 s', ' '.join((ROOT / 'docs/SP11-STICK-GIC.md').read_text().split()))
+        self.assertNotIn('ENTER', section, 'no ENTER line: the wrapper opens with SNAPMON STAGE=ENTERED')
+        self.assertEqual([f for f in pair_sources() if f.endswith('.c') and re.search(r'"ENTER\b', (ROOT / f).read_text())], [])
+        for name in ('SP11-STICK-BUILD.md', 'SP11-STICK-GIC.md'):
+            doc = ' '.join((ROOT / 'docs' / name).read_text().split())
+            self.assertIn('15 s at any point, a NEXT line or not', doc)
+            self.assertNotIn('after a NEXT line or ENTER', doc)
+
+    def test_the_boot_attributions_of_the_reads_are_the_documents_for_both_boots_and_igrpen1_is_boot_13_only(self):
+        doc = ' '.join((ROOT / 'docs/SP11-STICK-GIC.md').read_text().split())
+        boot12, boot13 = doc.split('Boot 12 (OBSERVED', 1)[1].split('Boot 13 (OBSERVED', 1)[0], doc.split('Boot 13 (OBSERVED', 1)[1].split('That is pass 5', 1)[0]
+        for paragraph in (boot12, boot13):
+            self.assertRegex(paragraph, r'GICD_CTLR (read )?0x10')
+            self.assertRegex(paragraph, r'ICFGR1 0 \((every PPI )?level\)')
+        self.assertIn('The CPU interface and the timer were never read in that boot', boot12)
+        self.assertRegex(boot13, r'BPR1 3, IGRPEN1 0')
+        for says in ('(GICD_CTLR 0x10: OBSERVED, boots 12 and 13; ICC_IGRPEN1_EL1 0: OBSERVED, boot 13)', '(neither on this unit\'s reads: DS 0 and ICFGR1 level, OBSERVED in boots 12 and 13)'):
+            self.assertIn(says, self.new)
+        for old in ('(GICD_CTLR 0x10, ICC_IGRPEN1_EL1 0: OBSERVED, boot 13)', 'in boot 13: DS 0, ICFGR1 level', 'ICC_IGRPEN1_EL1 0: OBSERVED, boots 12'):
+            self.assertNotIn(old, self.new)
+
+    def test_the_paragraph_that_says_what_the_stage_never_touches_is_as_it_must_be(self):
+        says = ('Never the ITS, SMMU, PCIe, USB or the framebuffer. No SPI register is written (the SPIs are only read) and no other redistributor (only its GICR_TYPER is read). '
+                'Of the interrupts but PPI 26 only the enable bits that Q cleared are written, by Q and its put-back (SGI 0 and PPIs 23, 25, 27 and 30 where ISENABLER0 read '
+                '0x4E800001): no priority or pending state of any of them is written, and IGROUPR0 and ICFGR1 are written whole, the other bits as read, and only in the cases of R '
+                'above (neither on this unit\'s reads: DS 0 and ICFGR1 level, OBSERVED in boots 12 and 13). But a window takes whatever INTID arrives: ICC_IAR1_EL1 acknowledges it, '
+                'ICC_EOIR1_EL1 ends it (ICC_DIR_EL1 too when EOImode is set; it was in boot 13), a foreign SPI included (INFERRED from the architecture: a level source that still '
+                'asserts is pending again, an edge or message interrupt is consumed). GICD_CTLR EnableGrp1A is distributor-wide: while the stage holds it set, any enabled group 1 '
+                'interrupt, an SPI included, can be signalled to this CPU. PPI 26\'s own are the stage\'s: it sets them as the writes above say, and undoes them.')
+        was = ('another interrupt\'s configuration', 'No SPI is written', 'no priority, group, trigger or pending state', 'group 1 is enabled for every interrupt')
+        problems = lambda text: [] if says in text and not [old for old in was if old in text] else ['wrong']       # noqa: E731
+        self.assertEqual(problems(self.new), [])
+        self.assertTrue(all(problems(f'{self.new} {old}') for old in was), 'a wording of the earlier versions that came back fails')
+        self.assertTrue(problems(self.new.replace('an SPI included, can be signalled', 'an SPI included, is signalled')))
+        self.assertEqual([i for i in range(32) if 0x4A800001 >> i & 1], [0, 23, 25, 27, 30], 'SGI 0 and PPIs 23, 25, 27 and 30 are the bits of the value Q writes')
 
 
 class Hygiene(unittest.TestCase):
