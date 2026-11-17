@@ -1,8 +1,10 @@
 # SP11 stick wrapper: the monitor entry (work item 4b, Phases A to E)
 
-Status: EXPERIMENTAL. Hardware NOT RUN. Nothing in this note authorises a run: the operator authorises by the SHA-256 of the record that
+Status: EXPERIMENTAL. Hardware: the monitor entry ran once on the unit, in boot 20 (M1 rung 1, 2026-11-18; OBSERVED, one unit, one boot; docs/SP11-STICK-LOG.md section 18: the stock kernel executed on one
+vCPU for the 5 s box and the monitor stopped it itself; the guest was, INFERRED, stuck in an early loop of the kernel's I/O Kit start-up). The sections below were written before that run: where one says Hardware NOT RUN it says what was true then, and it is not edited here.
+Nothing in this note authorises a run: the operator authorises by the SHA-256 of the record that
 `--m1-run` makes (sections 10 and 12), and only then. Labels: VERIFIED (a host test of this tree shows it; never a hardware result), OBSERVED (a run on the unit,
-one unit), INFERRED, EXPERIMENTAL, UNIMPLEMENTED, UNKNOWN. This work item has no hardware result, so nothing here is VERIFIED on the unit.
+one unit), INFERRED, EXPERIMENTAL, UNIMPLEMENTED, UNKNOWN. Before boot 20 this work item had no hardware result; since then nothing here is VERIFIED on the unit, and what boot 20 showed is OBSERVED, one unit, one boot.
 
 ## 1. What it is
 

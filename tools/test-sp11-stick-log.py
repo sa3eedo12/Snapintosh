@@ -1611,7 +1611,7 @@ class Document(unittest.TestCase):
 
     def test_section_17_keeps_the_facts_of_boots_17_18a_and_19(self):
         """Section 17 transcribes three pages read from videos and counts on them in sections 1 and 9: a drifted value or count fails here."""
-        body = self.text.split('## 17. Result of boots 17, 18A and 19', 1)[1].split('## Appendix A.', 1)[0]
+        body = self.text.split('## 17. Result of boots 17, 18A and 19', 1)[1].split('## 18. Result of boot 20', 1)[0]
         flat = ' '.join(body.split())
         pages = re.findall(r'```text\n(.*?)```', body, re.S)
         self.assertEqual([len(page.splitlines()) for page in pages], [21, 33, 19], 'the pages of boots 17, 18A and 19')
@@ -1636,6 +1636,175 @@ class Document(unittest.TestCase):
             self.assertIn(phrase, flat, phrase)
         self.assertIsNone(re.search(r'\b[0-9a-fA-F]{32,}\b', body), 'section 17 gives no record digest')
         self.assertEqual([pages[i].rstrip().splitlines()[-1] for i in (0, 2)], ['PAYLOAD XHCI NEXT RUN AFTER 8 S'] * 2, 'boots 17 and 19 end at NEXT RUN')
+
+    ROW_G = ('held: a host build comparison on 2026-11-18 showed the default A16 monitor build (four flag sets) byte-identical between revisions 87da59673c9a and ea593683db78 '
+             '(VERIFIED, host; says nothing about hardware); the monitor sources probes/ compat/ shadow/ config/ gpu/ drivers/ are also unchanged by git diff between 1e938a7 and ea59368')
+
+    @classmethod
+    def section_18_problems(cls, text):
+        """What is wrong with section 18, boot 20 (the first run of the SP11 monitor entry), or with the places that count on it; an empty list is a pass."""
+        body = text.split('## 18. Result of boot 20', 1)[1].split('## Appendix A.', 1)[0]
+        flat = ' '.join(body.split())
+        problems = []
+        pages = re.findall(r'```text\n(.*?)```', body, re.S)
+        if [len(page.splitlines()) for page in pages] != [76]:
+            return ['the page of boot 20 is not one block of 76 lines']
+        page = pages[0]
+        lines = page.splitlines()
+        for prefix, index in (('SNAPMON ', 0), ('SNAPREP ', 1)):
+            counted = re.search(rf'PAYLOAD DONE INDEX={index} .* LINES=(\d+)', page)
+            if not counted or int(counted.group(1)) != len([line for line in lines if line.startswith(prefix)]):
+                problems.append(f'{prefix.strip()} lines are not the LINES= count of PAYLOAD DONE INDEX={index}')
+        ticks = [int(n) for n in re.findall(r'MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=(\d+) STACK=8736/262144', page)]
+        if ticks != [96720173, 96720173]:
+            problems.append(f'the call is not 96,720,173 ticks on both lines: {ticks}')
+        elif not (ticks[0] - 96_000_000 == 720173 and abs(ticks[0] / 19_200_000 - 5.0375) < 5e-5):
+            problems.append('the arithmetic of the call')
+        if 0x20000 + 316783 != 447855 or 'BYTES=447855' not in page or 'OFF=0X20000 BYTES=316783' not in page:
+            problems.append('SNAPMON.BIN is not the offset of the monitor image plus its size')
+        for needle in ('MON STATUS=OK ENTERED=0X1', 'MON COUNTS EVENTS=512 TRAPS=3127 ABORTS=0 STEPS=0 CALLS=1443 DROPPED=834', 'MON STOP WATCHDOG PC=0XFFFFFE000C1EEF00 A=0X0 B=0X0 C=0XD3AA0A80',
+                       'MON EXIT PC=0XFFFFFE000C1EEF00 SPSR=0X804003C4 ESR=0X0 FAR=0X0', 'MON REGS RESTORED=YES', 'GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRC VBAR=NONE EL1=NONE',
+                       'MON VERDICT=RETURNED FLAGS=0XF SUB=7', 'PAYLOAD CALL 0 1D32F5071506A00C', 'PAYLOAD CALL 1 EE86676001D89CF6', 'PAYLOAD VERIFY=OK', 'PAYLOAD READY FILES=5 RANGES=8 CODE=2',
+                       'SNAPMON NEXT GIC STORES AFTER 8 S G=1 R=1 C=1 T=0 V=0 E=0', 'SNAPMON STAGE=PIN_OK LABEL=M1RUN-RUNG1 CHUNKS=44', 'SNAPREP GIC NEW GICD=0X13 RB=0X12 ISEN=0X4000000 PRIO=0X80 PMR=0XF8 IGRPEN1=1',
+                       'SNAPREP MON CON DARWIN KERNEL VERSION 27.0.0: TUE AUG 11 21:05:57 PDT 2026? ROOT', 'SNAPREP MON CON :XNU-13432.1.9?1/RELEASE_ARM64_T8140?',
+                       'SNAPREP MON CON VM BOOTSTRAP: 73 MAPS? 256 ENTRIES AND 64 NODES AVAILABLE?', 'PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=1 FAULTS=0 REFUSED=0 LINES=35 DROPPED=0'):
+            if needle not in page:
+                problems.append(f'the page lost {needle!r}')
+        if lines[-1] != 'PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=1 FAULTS=0 REFUSED=0 LINES=35 DROPPED=0':
+            problems.append('the page does not end at PAYLOAD DONE INDEX=1')
+        if [re.search(r'INDEX=(\d)', line).group(1) for line in lines if line.startswith('PAYLOAD LOADED ')] != list('01234'):
+            problems.append('the five LOADED lines are not indexes 0 to 4')
+        for phrase in (
+                # the verdict: rows a to g, with row g worded as the host comparison and labelled VERIFIED, host
+                cls.ROW_G, 'not exercised: nothing mismatched, so the page has no `REFUSED` line', 'held: `MON STOP WATCHDOG`; no hang and no reset',
+                'held by that rule: `TICKS=96720173` is 720,173 ticks (0.0375 s) above the box and the stop is `WATCHDOG`',
+                'The commands of row g: `python3 tools/monitor_baseline.py capture NAME`', '`python3 tools/monitor_baseline.py compare EARLIER LATER`',
+                'IDENTICAL for `bare` (368,439 bytes, ELF digest prefix `419fbd516138b03a`)', '`fast` (333,279 bytes, `4d1fbac34769b5c2`)',
+                'It is a pass of that record\'s rows and of nothing else; gate X4\'s "kernel executes" stands at PARTIAL (one vCPU, 5 s, early boot only',
+                # what it settles, and what it does not
+                'U3 of the plan, that the monitor\'s own stop path works, is answered once: it did',
+                'U10 was not seen: no stage-2 abort was counted (`ABORTS=0`)', 'so what a passing gate says about the regime is UNKNOWN',
+                'This boot does not show that macOS boots', 'The unit stayed up to `UPTIME 28 S`, with no restart and no fault page',
+                'A1 and A2 were neither run nor exercised', 'nothing is authorised by this section',
+                # what the sources say about the lines (VERIFIED, host or read in the sources) and what stays INFERRED
+                'the monitor records `WATCHDOG` when an interrupt reaches EL2 with the EL2 timer\'s `ISTATUS` set after the deadline (VERIFIED, read in `probes/xnuboot/async.c`)',
+                'the `ESR` and `FAR` of that line are zero by construction at an interrupt stop (VERIFIED, read in the same file) and carry no information',
+                'The console lines against the kernelcache (VERIFIED, host: read in the local copy of the J700 26A428 kernelcache, which is not committed)',
+                'the `?PTR?` after the first two `0X` is INFERRED to be the placeholder `<ptr>`', 'the monitor keeps its first 512 events and counts the later ones as dropped (VERIFIED, read in `probes/xnuboot/telemetry.c`)',
+                'One vCPU, as planned', 'INFERRED: the 720,173 ticks above the box are the prepare, the stop and the clean',
+                # the stop-site analysis (18.5): where the guest was, why, and what that settles and does not
+                'Result (INFERRED, high): the guest was not slow and not waiting, it was stuck.', 'source of the 26A428 kernel (xnu-13432, macOS 27) is not public, so every match with the public source is structural and INFERRED for this kernel',
+                '`tools/kc-symbolicate.py` needs the KDK, which is absent on the machine used: NOT RUN', 'the stop PC `0XFFFFFE000C1EEF00` is a link-time address in `__TEXT_EXEC`',
+                'it is `PE_init_iokit`, the kernel\'s I/O Kit start-up, called from the kernel\'s second thread after the banner and the VM bootstrap printfs',
+                'The PC is the head of a five-instruction loop that touches only registers', 'It matches structurally the progress-bar loop of the public `pexpert/arm/pe_init.c`',
+                '`while (((unsigned)(*delta + image_size)) >= (display_size / 2))`, which with `display_size` 0 compares an unsigned value with 0 and never ends',
+                'carries the command line `-v debug=0x8 serial=3 cluster_power=0 wdt=-1` and an all-zero `Boot_Video` block, because the panel is withheld (D9;',
+                'the register that holds it (`x10`) is 0 at the stop; no register was printed, so that is INFERRED', 'a withheld panel, meets a stock kernel that draws a progress bar',
+                'the quarantined guest timers (INTID 27 and 30) are not the cause', '`C=0XD3AA0A80` is a stale value, not a guest PC',
+                'The stop is past all of `kernel_bootstrap`, in the second thread', 'so the six lines are exactly the cap and hold about 330 of the 1,024 bytes the window keeps',
+                '`TRAPS=3127` and `CALLS=1443` are cumulative, not a rate', 'More time would not show more text or traps, because the loop ends only if the video block changes',
+                'That the kernel boots. It spun in an early loop (INFERRED, high)', 'a longer box on the withheld image only repeats the loop (INFERRED)',
+                'The monitor entry works on Oryon v1, once', 'early SPTM, TXM and GIC paths ran with `ABORTS=0`',
+                'The same stop PC again once the panel is handed, or once `-noprogress` is added', '`x10` not 0 or `x21` not 1 at the stop',
+                'The next run hands the panel to the guest (rung 2: a non-zero display size) or adds `-noprogress` to the guest\'s command line',
+                'The first stop is most likely `MON STOP S2_FAULT` with an IPA', 'CPU-start write to the power-management (PMGR) block, which the plan counts as success for M1',
+                'a `cpu N failed to boot` message (it says `waited 1 seconds`)', 'Any other device-tree node that I/O Kit probes could stop the run first (UNKNOWN which)',
+                'the guest ran 5 s, then spun in an early console loop, INFERRED, 18.5'):
+            if phrase not in flat:
+                problems.append(f'section 18 lost {phrase[:70]!r}')
+        if flat.count('macOS boots') != 1:
+            problems.append('"macOS boots" is not said exactly once, in the sentence that denies it')
+        if re.search(r'\b[0-9a-fA-F]{32,}\b', body) or '31e5d4c2' in text.lower():
+            problems.append('section 18 or the log gives a record digest')
+        if re.search(r'file offset|fileoff|51EAF00|88526AF00', body, re.I) or re.search(r'\bx(?:10|21)=0[xX]', body):
+            problems.append('section 18 gives a kernelcache file offset or a register value that was never read')
+        for place, needle in (('the top paragraph', 'Boot 20 (2026-11-18, section 18) ran the SP11 monitor entry for the first time'), ('item 14 of section 1', '14. **Boot 20 (2026-11-18; section 18; on video; OBSERVED, one unit, one boot)'),
+                              ('item 14 of section 1', '**The guest was stuck, not slow (INFERRED, high; a read-only analysis after the boot, 18.5):**'),
+                              ('the top paragraph', 'spinning in an early loop of the kernel\'s I/O Kit start-up that cannot end on an image with the panel withheld'),
+                              ('the evidence summary', 'The SP11 monitor entry, run once (boot 20, M1 rung 1, plan `M1RUN-RUNG1`)'),
+                              ('the evidence summary', 'the guest was, INFERRED (high), stuck in an early loop of the kernel\'s I/O Kit start-up (18.5)'),
+                              ('section 17.6', 'Boot 20 (section 18) was the first run of that monitor entry.')):
+            if needle not in ' '.join(text.split()):
+                problems.append(f'{place} does not count on boot 20')
+        return problems
+
+    def test_section_18_keeps_the_facts_of_boot_20(self):
+        """Section 18 transcribes one page read from one video (the first run of the monitor entry), records the stop-site analysis that followed it, and sections 1, 9 and 17.6 count on
+        both: a drifted value, count or label fails here, and each seeded fault below must be found."""
+        self.assertEqual(self.section_18_problems(self.text), [])
+        seeds = (('MON STOP WATCHDOG PC=0XFFFFFE000C1EEF00 A=0X0', 'MON STOP S2_FAULT PC=0XFFFFFE000C1EEF00 A=0X0'), ('TICKS=96720173', 'TICKS=96000000'), ('ABORTS=0 STEPS=0', 'ABORTS=3 STEPS=0'),
+                 ('byte-identical between revisions 87da59673c9a and ea593683db78 (VERIFIED, host;', 'byte-identical between revisions 87da59673c9a and ea593683db78 (OBSERVED, host;'),
+                 ('boot does not show that macOS boots:', 'boot shows that macOS boots:'), ('REFUSED=0 LINES=35 DROPPED=0', 'REFUSED=0 LINES=34 DROPPED=0'), ('U10 was not seen', 'U10 was seen'),
+                 ('so what a passing gate says about the regime is UNKNOWN', 'so what a passing gate says about the regime is VERIFIED'), ('stands at PARTIAL (one vCPU, 5 s, early boot only', 'stands at PASS (one vCPU, 5 s, early boot only'),
+                 ('not exercised: nothing mismatched', 'held: nothing mismatched'), ('SNAPREP MON CON :XNU-13432.1.9?1/', 'SNAPREP MON CON :XNU-13432.1.97/'),
+                 ('(VERIFIED, read in the same file) and carry no information', '(OBSERVED, read in the same file) and carry no information'), ('PAYLOAD LOADED INDEX=3 ', 'PAYLOAD LOADED INDEX=9 '),
+                 ('One vCPU, as planned', 'Two vCPUs'), ('## Appendix A.', 'Digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\n## Appendix A.'),
+                 # the stop-site analysis: each seeded fault upgrades a label, flips a result or drops a caveat
+                 ('Result (INFERRED, high): the guest was not slow and', 'Result (VERIFIED): the guest was not slow and'), ('The PC is the head of a five-instruction loop that touches only registers', 'The PC is the head of a five-instruction loop that reads memory'),
+                 ('which with `display_size` 0 compares an unsigned value with 0 and never ends', 'which with `display_size` 0 compares an unsigned value with 0 and ends at once'),
+                 ('is 0 at the stop; no register was printed, so that is INFERRED', 'is 0 at the stop (VERIFIED)'), ('are cumulative, not a rate', 'are a rate'),
+                 ('`x10` not 0 or `x21` not 1 at the stop', '`x10` not 0 at the stop'), ('That the kernel boots. It spun in an early loop (INFERRED, high)', 'That the kernel boots. It booted (VERIFIED)'),
+                 ('The next run hands the panel to the guest (rung 2: a non-zero display size) or adds `-noprogress`', 'The next run only repeats the box with a longer time'),
+                 ('The first stop is most likely `MON STOP S2_FAULT` with an IPA', 'The first stop is most likely a hang'), ('which is absent on the machine used: NOT RUN', 'which is absent on the machine used: PASS'),
+                 ('so every match with the public source is structural and INFERRED for this kernel', 'so every match with the public source is exact for this kernel'),
+                 ('the guest ran 5 s, then spun in an early console loop, INFERRED, 18.5', 'the guest ran 5 s and booted, 18.5'), ('## Appendix A.', 'The stop PC is at file offset 0x51EAF00.\n\n## Appendix A.'))
+        for old, new in seeds:
+            self.assertIn(old, self.text, f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.section_18_problems(self.text.replace(old, new, 1)), f'a seeded fault went unseen: {old!r} -> {new!r}')
+
+    @staticmethod
+    def status_problems(status, surface):
+        """What is wrong with the status text of boot 20 in STATUS.md and SURFACE-PRO-11.md (whitespace-collapsed texts); an empty list is a pass."""
+        problems = []
+        for where, text, needles in (
+                ('STATUS.md', status, (
+                    'SP11 monitor entry: ran once; the stock kernel executed on one vCPU for 5 s and printed its banner; hardware status per gate X4: kernel executes: PARTIAL (one vCPU, 5 s, early boot only); '
+                    'ran 5 s, then spun in an early console loop (INFERRED).',
+                    'the gate passed with it on the unit in boot 20 (OBSERVED, one boot; the SP11 monitor entry row below)',
+                    'the monitor\'s own guest regime ran once, in boot 20, with the guards passed (`STATUS=0X0`; the SP11 monitor entry row below)',
+                    'the GUEST.DAT it built ran on the unit once, in boot 20 (the SP11 monitor entry row below), hardware NOT RUN beyond the dry run and that run.',
+                    'The guest was, INFERRED (high), stuck in a loop of the kernel\'s I/O Kit start-up that a withheld panel makes endless', 'hardware NOT RUN beyond that one run',
+                    'and the first run of the SP11 monitor entry (2026-11-18, boot 20, M1 rung 1:')),
+                ('SURFACE-PRO-11.md', surface, (
+                    'the first run of the SP11 monitor entry (2026-11-18, boot 20, M1 rung 1; E71,', '(gate X4: kernel executes: PARTIAL).',
+                    'gate X4, kernel executes: PARTIAL (one vCPU, 5 s, early boot only)', 'it ran 5 s, then spun in an early console loop (INFERRED, high',
+                    '| E71 | The first run of the SP11 monitor entry (work item 11, M1 rung 1, plan `M1RUN-RUNG1`, 2026-11-18, boot 20;',
+                    '**Boot 20 (2026-11-18; OBSERVED on video, one unit, one boot; E71;', 'that the guest was stuck, not slow: the stop PC is the head of a five-instruction register-only loop in the kernel\'s I/O Kit start-up',
+                    'So the next run hands the panel (rung 2) or adds `-noprogress`, and a longer box on the same image only repeats the loop.',
+                    'Gate X4\'s "kernel executes" stands at PARTIAL (one vCPU, 5 s, early boot only; ran 5 s, then spun in an early console loop, INFERRED).',
+                    'the monitor\'s own guest regime ran once, in boot 20 (E71), and the conversion to 24 MHz is NOT RUN'))):
+            problems += [f'{where} lost {needle[:60]!r}' for needle in needles if needle not in text]
+        row = status.split('| SP11 monitor entry (work item 4b; M1 rung 1) |', 1)[-1].split(' | SP11 ', 1)[0]
+        paragraph = surface.split('**Boot 20 (2026-11-18; OBSERVED on video', 1)[-1].split('**Stick payload runner', 1)[0]
+        for where, text in (('the STATUS.md row of the monitor entry', row), ('the SURFACE-PRO-11.md paragraph of boot 20', paragraph)):
+            if re.search(r'desktop|macOS boots|kernel executes: PASS|kernel executes: DONE', text, re.I):
+                problems.append(f'{where} claims more than a partial early boot')
+        for where, text in (('STATUS.md', status), ('SURFACE-PRO-11.md', surface)):
+            if re.search(r'kernel executes: (?!PARTIAL)\w+', text):
+                problems.append(f'{where} gives the kernel executes of gate X4 a status other than PARTIAL')
+        if surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 5 s, early boot only)') != 2:
+            problems.append('SURFACE-PRO-11.md: the X4 row and E71 must both say kernel executes: PARTIAL (one vCPU, 5 s, early boot only)')
+        return problems
+
+    def test_status_and_the_surface_pro_document_carry_boot_20_with_the_exact_status_words(self):
+        """STATUS.md and SURFACE-PRO-11.md count boot 20 in their status text: gate X4's kernel executes stays PARTIAL, the early console loop stays INFERRED, nothing is said about a
+        desktop or that macOS boots, and each seeded fault below must be found."""
+        status, surface = (' '.join((ROOT / 'docs' / name).read_text().split()) for name in ('STATUS.md', 'SURFACE-PRO-11.md'))
+        self.assertEqual(self.status_problems(status, surface), [])
+        seeds = (('kernel executes: PARTIAL (one vCPU, 5 s, early boot only); ran 5 s', 'kernel executes: PASS (one vCPU, 5 s, early boot only); ran 5 s', 0),
+                 ('spun in an early console loop (INFERRED).', 'spun in an early console loop (VERIFIED).', 0), ('hardware NOT RUN beyond that one run', 'hardware PASS beyond that one run', 0),
+                 ('SP11 monitor entry: ran once;', 'SP11 monitor entry: ran twice;', 0), ('the gate passed with it on the unit in boot 20 (OBSERVED, one boot;', 'the gate passed with it on the unit in boot 20 (VERIFIED, one boot;', 0),
+                 ('and the kernel was still in its early boot at the stop', 'and the kernel booted macOS: macOS boots', 0),
+                 ('(gate X4: kernel executes: PARTIAL).', '(gate X4: kernel executes: PASS).', 1), ('kernel executes: PARTIAL (one vCPU, 5 s, early boot only). The stock kernel', 'kernel executes: DONE (one vCPU, 5 s, early boot only). The stock kernel', 1),
+                 ('it ran 5 s, then spun in an early console loop (INFERRED, high', 'it ran 5 s, then spun in an early console loop (VERIFIED, high', 1),
+                 ('a longer box on the same image only repeats the loop.', 'a longer box on the same image reaches the desktop.', 1),
+                 ('stands at PARTIAL (one vCPU, 5 s, early boot only; ran 5 s', 'stands at PASS (one vCPU, 5 s, early boot only; ran 5 s', 1),
+                 ('the monitor\'s own guest regime ran once, in boot 20 (E71), and', 'the monitor\'s own guest regime is NOT RUN (E71), and', 1))
+        for old, new, which in seeds:
+            texts = [status, surface]
+            self.assertIn(old, texts[which], f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            texts[which] = texts[which].replace(old, new, 1)
+            self.assertTrue(self.status_problems(*texts), f'a seeded fault went unseen: {old!r} -> {new!r}')
 
     def test_the_sentences_about_usb_1_ss1_not_being_started_carry_the_section_17_caveat(self):
         """Sections 1, 12, 13 and 14.2 say that usb_1_ss1 was never started by firmware, or untouched by it; they were read with the stick in the second
