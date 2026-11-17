@@ -557,28 +557,29 @@ APPROVED_XHCI0 = (19870, '63b11f901acbb4300dcd49a809841ccb5c1f626c777166547dc996
 APPROVED_RUNBOOK = (51154, '88d96c587f493b3a83683cffa2c4e24eb8bb0468a649a6a890feb5a373ab319d')
 APPROVED_RECORD = (21751, '6e21c40a0a0938860cf48d30be4a1a3e5ac398c94b511d322fe8791538e8f1ce')
 # Pinned on purpose, like PIN_BYTES: the operator approves the digest of the supplement's text, so an edit of the text must change this line in the same change.
-SUPPLEMENT_PIN_BYTES, SUPPLEMENT_PIN_SHA256 = 26162, 'ee0537639cbfe22ab30ca6c8b70cabfe072f940589b0d2f07ebf0253336910ff'
+SUPPLEMENT_PIN_BYTES, SUPPLEMENT_PIN_SHA256 = 28209, 'cfb8581f4e75b2840269256b7db5079bb83370e03bbcabee2bcc8ac1e4568c17'
 
 SUPPLEMENT_PHRASES = (
     # what it is, what it approves, and what it does not grant; how the operator approves it (the SHA-256 of the text and the 16 digits) and what A1 ran
-    'RECORD OF AUTHORISATION POINT A1, SUPPLEMENT FOR BOOT 17: XHCI0.BIN ON usb_1_ss0 (EXPERIMENTAL; hardware NOT RUN)',
+    'RECORD OF AUTHORISATION POINT A1, SUPPLEMENT FOR BOOT 17: XHCI0.BIN ON usb_1_ss0 (EXPERIMENTAL; XHCI0.BIN has not run on hardware)',
     'It approves ONE more boot, boot 17, with XHCI0.BIN only, and it amends one rule of the A1 record, for that boot only',
     'The operator approved point A1 in principle on 2026-11-17 02:10 and approved the A1 record by name; boots 15 and 16 ran under it with XHCI1.BIN '
     '(boot 16 repeated boot 15, which was not filmed)',
     'is what the operator approves, before boot 17, by quoting in writing the SHA-256 of this text (python3 tools/sp11_xhci_s1_record.py --supplement '
     '--xhci0 XHCI0.BIN --digest prints it) and the 16 digits 63B11F901ACBB430',
     'A2 (the first sector write to the stick) is NOT granted', 'the payload never touches a disk',
+    'Nothing else authorises it: not a file, a test, a tool, a plan, the approval of the A1 record, or the presence of a file on a stick',
     # the files, and the stick log cited as of its commit (not by digest)
     'plan a1-xhci-s1-ss0: one autorun step, `load` SLBOUNCE-DEVHE-MARK.EFI, then Q1N1-PAYLOAD.EFI --el2; one boot, one controller',
     'XHCI0.BIN is the file the A1 record names, byte for byte: no byte of the payload is new for boot 17', 'not staged, does not run',
-    'the runbook of sections 2, 6 and 8, UNCHANGED since the A1 record; read, not staged', 'A runbook of other bytes is another document',
+    'the runbook of sections 2 and 5 to 9, UNCHANGED since the A1 record; read, not staged', 'A runbook of other bytes is another document',
     'the text that boots 15 and 16 ran under, which this record amends and keeps (section 2)',
     'docs/SP11-STICK-LOG.md is cited as of commit 42017e2 of the Snapintosh fork (its sections 10, 12, 13, 14.2 and 16), not by digest',
     # approves, amends, keeps
     'It approves ONE boot, boot 17: the plan a1-xhci-s1-ss0 with XHCI0.BIN (usb_1_ss0, SMMU stream 0x1420), started once',
-    'with the Mac\'s USB-C cable connected to the free port at the on-screen cue, as in the A1 record, on AC power or at least 50% battery, with one hardware '
-    'client at a time',
-    'Boot 17 is the boot in which the runner prints PAYLOAD CALL 0 63B11F901ACBB430 (section 8)',
+    'with the Mac\'s USB-C cable connected to the free port at the on-screen cue (if the cue is missed the run goes on without the cable: section 8), as in '
+    'the A1 record, on AC power or at least 50% battery, with one hardware client at a time',
+    'Boot 17 is the boot in which the runner prints PAYLOAD CALL 0 63B11F901ACBB430; a start that never prints that line is not boot 17 (section 8)',
     'It approves nothing else: not a second boot, not a retry, not XHCI1.BIN again',
     'It amends rule 9 of the A1 record (its section 9, the stop rules), for boot 17 only',
     'The page of boot 16 ended at a NEXT line (section 3), so under that rule the sequence stopped there',
@@ -592,6 +593,7 @@ SUPPLEMENT_PHRASES = (
     'with the same payload bytes as the A1 record and so no new code',
     # boot 17 changes two things, so a stop separates and a success does not by itself
     'Boot 17 changes TWO things from boot 16: the controller, and the first arena (the firmware\'s own memory, not the runner\'s stack)',
+    '; and with the controller the attachments move: the Mac\'s cable is expected on the other controller and the stick on this one (section 6, WATCH DONE)',
     'A stop separates a cause that belongs to usb_1_ss1, which UEFI never brought up (PHY, glue, a vote or a power state; the clocks and GDSC of both '
     'controllers read ON in S0), from one that does not',
     'a success does not by itself separate them (section 6)',
@@ -615,6 +617,7 @@ SUPPLEMENT_PHRASES = (
     'when and how it was powered off are not recorded (docs/SP11-STICK-LOG.md section 16)',
     'No restart was seen', 'The Mac-side logger (989 ticks) saw no USB device or network interface added or removed',
     'UNKNOWN: the cause; whether the SoC stayed alive (nothing probes it: the panel was the only channel); whether a hardware watchdog was armed',
+    'so the count is 1 or 2 of 5',
     'A boot 17 in which no No-Op completes (any verdict but NOOP_OK, or none) makes it 3 of 5 (2 if boot 15 does not count); an HSE in boot 17 would also be '
     'the first of SC3\'s two unexplained HSEs',
     # what is specific to XHCI0.BIN
@@ -642,10 +645,12 @@ SUPPLEMENT_PHRASES = (
     'Arena 1 is RAM that the memory map calls free, not RAM the runner owns and declared (hazard (c) of the A1 record)',
     'Connecting the Mac to a download-mode device is read-only on our side: we add nothing to what macOS does by itself, install no driver and run no tool '
     'against it',
+    'only after a black-out and the wait of 4 minutes',
     'so removing it changes nothing of the verdict (INFERRED: the payload skips port events), but a running xHC may write event TRBs, which is why (c) waits',
     'DBOFF 0x2000, RTSOFF 0x1000 and two scratchpad buffers (HCS2 0x140000F1) were read on usb_1_ss1 only (OBSERVED, boot 16)',
     'REFUSED=OFFSET, SCRATCHPADS or HCE is possible, and a refusal writes nothing',
     # the outcome tree
+    '6. THE OUTCOME TREE FOR BOOT 17 (runbook O1 to O15 with U0 and U1 swapped; their Next columns authorise nothing)',
     'Every reading below is INFERRED until the unit has run',
     'Section 16 of docs/SP11-STICK-LOG.md is the later word on O10\'s reading of the cause: no restart was seen, so of O10\'s two readings, hang or reset, '
     'the hang fits, and a dead display with a live SoC is a third that the runbook does not list',
@@ -655,7 +660,8 @@ SUPPLEMENT_PHRASES = (
     'both give this page, and a success ends the run before arena 2 is tried (INFERRED: one boot of each file, one unit). A stop on arena 1 is the '
     'informative branch',
     'the runner\'s own stack as the first arena on usb_1_ss0 (a changed payload, a new record) would separate the two',
-    'NOOP_OK on another arena: if the ARENAS line did not offer arena 1, arena 2 is the first attempt (WRITES=17), the memory class of boot 16',
+    'NOOP_OK on another arena: if the ARENAS line did not offer arena 1, arena 2 is the first attempt (WRITES=17), the memory class of boot 16: DMA works '
+    'for it through stream 0x1420, so a cause tied to that class does not explain boot 16 (INFERRED: one boot of each file, one unit)',
     'the cause is not specific to usb_1_ss1 alone. A systemic cause (the SMMU\'s context bank 3, an XPU, the EL2 environment), the firmware\'s memory as the '
     'arena, or any start of an xHC at EL2 fits; which of them is UNKNOWN',
     'A board restart is recorded with its time and the last line of the page, and a restart alone is not an xHC result (docs/SP11-XHCI-S1.md, 4.3)',
@@ -664,61 +670,102 @@ SUPPLEMENT_PHRASES = (
     'At the RUN or NOOP stage the payload goes on to the next arena, which is the experiment; at RESET or PROGRAM the run ends (O4, O5, O7)',
     'SMMU programming needs its own named authorisation: neither the A1 record nor this one covers it',
     'NOOP_TIMEOUT or NOOP_HSE with SMMU=SAME or UNREAD: SC2 is not excluded',
+    'stop, and report the page (O8, O11)',
     'REFUSED=<name> (O9): nothing was written. REFUSED=OFFSET, SCRATCHPADS or HCE is possible on usb_1_ss0 (hazard (n); S0 saw HCE there behind a hub: '
     'docs/SP11-XHCI-S1.md, 6.2)',
+    'expect CHANGED=U1P2',
     'that is O13, the other controller, and this boot\'s verdict is about usb_1_ss0\'s DMA only',
-    'CHANGED=U0P1 or U0P2 is O12: the free port is on the controller under test, the Mac\'s cable sat on the controller being reset (hazard (f) of the A1 '
-    'record), the stick is not on usb_1_ss0, and the premise of section 2 fails. CHANGED=NONE is O14; FAULT= is O15: stop',
+    'CHANGED=U0P1 or U0P2 is O12: the free port may be on the controller under test (or the stick\'s own link moved: U0P2 sat Inactive at BASE in boot 16), '
+    'so the stick may not be on usb_1_ss0; the page is listed, so the run goes on: say which port held the stick',
+    'CHANGED=NONE is O14 and is also what a missed cue gives (section 8); FAULT= is O15: stop',
     # the stop rules after this boot: STORE is added to the WHY values for boot 17 only, and the approval is spent once the payload has been called
     'The stop rules of section 9 of the A1 record apply to the page of boot 17 as written, with STORE added for boot 17 to its WHY= values (the runbook\'s '
     'O11 lists it)',
-    'a WHY= of READ, CLOCK, STORE, BUDGET or LINES', 'The waiver of section 2 covers the page of boot 16 only',
+    'a fault page, a board restart', 'STORE_REFUSED on the END line', 'a WHY= of READ, CLOCK, STORE, BUDGET or LINES',
+    'or after NOOP_OK when nothing accounts for it',
+    'a VERDICT NOOP_BAD_COMPLETION, any REFUSED that the runbook does not list, and any line that its outcome tree does not list',
+    'The waiver of section 2 covers the page of boot 16 only',
     'Whatever the boot that printed PAYLOAD CALL 0 63B11F901ACBB430 shows, it is the last boot of A1 and of this record: there is no retry of a payload in the '
     'same boot, no second boot of this record, no XHCI1.BIN again and no other file, controller or arena order',
-    'Any further xHC write, in any boot, needs a new record that the operator approves by name', 'SC3 counts as section 3 says',
+    'Any further xHC write, in any boot, needs a new record that the operator approves by name', 'after a success the sequence also ends',
+    'SC3 counts as section 3 says',
     # the operator's actions and what is not authorised
     'read its plan a1-xhci-s1 as a1-xhci-s1-ss0, its XHCI1.BIN as XHCI0.BIN, and its second boot as boot 17',
-    'The Shell\'s line reads AUTORUN a1-xhci-s1-ss0 STEP 1 OF 1', 'compare the digits with 63B11F901ACBB430, the first 16 of the digest of XHCI0.BIN in section 1',
+    'and no SP11\\DONE1.TXT',
+    'The Shell\'s line reads AUTORUN a1-xhci-s1-ss0 STEP 1 OF 1',
+    '(another name means that the stick is not the one of this record: power off in the 5 s the Shell gives)',
+    'compare the digits with 63B11F901ACBB430, the first 16 of the digest of XHCI0.BIN in section 1',
+    'a mismatch, or no VERIFY=OK, means power off, and nothing of A1 has been written',
     'a boot that did not print PAYLOAD CALL 0 63B11F901ACBB430 did not run the payload and is not boot 17: delete the marker and start again',
-    'once that line has printed, the approval is spent',
-    'If you did not plug the Mac\'s cable by WATCH DONE, power off in the 8 s after NEXT ARENA: a run without the cable is not approved, and that counts as '
-    'the page being wrong',
+    '(none exists if you powered off in the 5 s)',
+    'Once that line has printed, the approval is spent, even if you then cancel, the payload refuses or the unit restarts before any write: another boot '
+    'needs a new record',
+    'Plug the Mac\'s cable only during the 30 s watch, at the on-screen cue.', 'The only exception is E0(c3), after a black-out',
+    'in it the operator powers off only if the page itself is wrong',
+    'If you did not plug the Mac\'s cable by WATCH DONE, do not plug it later and do not power off: the run goes on without it (runbook O14, CHANGED=NONE '
+    'N=0), which this record covers; say so on the video',
+    'If you plug it late by mistake, leave it and say so on the video',
+    'If at any time the unit is too hot to hold comfortably, power it off at once (E0(c4) says how); that outranks the cancel-window rule and the '
+    'missed-cue rule, and once PAYLOAD CALL has printed, the approval is spent',
+    'Apart from that, touch nothing until END; power-cycle afterwards.',
+    'Before any VERDICT or END line, a black panel, a restart or a page that stops changing is the case of E0 below',
     'A2; any write beyond sections 2 and 3 of the A1 record; a second boot of this record, a retry, XHCI1.BIN again',
-    'every register class docs/SP11-XHCI-S1.md section 7 lists: each needs its own named authorisation', 'a run without the Mac\'s cable',
+    'every register class docs/SP11-XHCI-S1.md section 7 lists: each needs its own named authorisation',
+    'a cable plugged after WATCH DONE (E0(c3) apart)',
     'sending anything to a device that appears on the Mac after a black-out (E0(c) only looks)')
 
 E0_PHRASES = (
     'E0, the extra actions of boot 17 (the operator\'s own; the payload writes nothing more for them)',
-    'Before the boot: (e) Put the stick straight into the unit (no hub) and see which physical port holds it',
+    'Before the boot: (e) Put the stick straight into the unit (no hub), see which physical port holds it, and have the Mac\'s cable in your hand, ready '
+    'for the cue',
     '(a) After the stick has left the Mac (otherwise its removal shows as USB_REMOVED), start the Mac-side logger: python3 tools/sp11_mac_usb_watch.py '
     '(add --allow-empty-usb if the Mac has no other USB device), as for A1',
     'Keep the Mac awake and unlocked, and the logger running, through (c)',
-    '(b) Film as before, at 60 frames per second if the phone allows', 'Say on the video which physical port holds the stick',
-    'After a black-out: (c) applies only to a black panel before any VERDICT or END line',
-    'A logo or boot screen means that the unit restarted: skip (c), say the time, the last line of the page and the last UPTIME shown',
-    'A lit page that does not change for 30 s after a NEXT line: skip (c), say the last line',
-    'say the Mac\'s clock on the video and touch no cable for 4 minutes (a payload that is alive in the dark runs on for up to about 200 s, and a running xHC '
-    'writes event TRBs that a moved cable or stick would change)',
-    'force the unit off at once, as below, only if it feels hot, and then skip the rest of (c)',
-    'After the 4 minutes, unplug the stick (hazard (m) says why that is safe) and plug the Mac\'s cable into THAT port (move it from the free port)',
+    '(b) Film as before, at 60 frames per second if the phone allows',
+    'Say on the video which physical port holds the stick and whether and when the Mac\'s cable was plugged',
+    'After a black-out keep filming until (c) is done',
+    'After a black-out: (c) applies only to a black panel before any VERDICT or END line; then the steps (c0)-(c4)',
+    '(c0) A logo or boot screen means that the unit restarted: skip the rest of (c), say the time, the last line of the page and the last UPTIME shown, and '
+    'power-cycle as the runbook says (4.3)',
+    'A lit page that has not changed for 30 s and shows no VERDICT or END line: skip the rest of (c), say the last line, and power-cycle as the runbook says '
+    '(4.3)',
+    '(c1) Otherwise say the Mac\'s clock on the video and touch no cable for 4 minutes (a payload that is alive in the dark runs on for up to about 200 s, '
+    'and a running xHC writes event TRBs that a moved cable or stick would change)',
+    '(c2) If the unit is too hot to hold comfortably at any time, force it off at once (as (c4) says) and stop: skip (c3)',
+    '(c3) After the 4 minutes, unplug the stick (hazard (m) says why that is safe) and plug the Mac\'s cable into THAT port (moving it from the free port '
+    'if it is there)',
     'Wait 60 s and read the logger and System Information for any NEW USB device: vendor 05C6 (Qualcomm), for example product 9008 (its download mode; a Mac '
     'may list it as QHSUSB__BULK or QUSB__BULK), or any device you do not know',
     'macOS enumerates any device by itself; add nothing to that: no driver, no flashing or Terminal tool, no Disk Utility; do not open, mount, initialise, '
     'erase or copy from any disk that appears (eject it unopened) and accept no app, driver, profile or Photos prompt',
-    'If macOS asks "Allow accessory to connect", choose Allow once (INFERRED: it lets macOS read the descriptors only, while Don\'t Allow would blind the '
-    'logger) and say it on the video',
+    'If macOS shows a dialog with the buttons "Don\'t Allow" and "Allow" (Apple Support 102282 shows it asking "Do you want to connect the USB accessory to '
+    'this Mac?"; there is no once-only button), click Allow and say it on the video',
+    'After Don\'t Allow the Mac does not recognise the accessory and the logger would show nothing; a mistaken Don\'t Allow is undone by unplugging and '
+    'replugging the cable',
+    'The dialog is documented for Mac laptops with Apple silicon only; the title on this Mac may differ (INFERRED)',
     'Report what the logger and System Information show (sanitise both: they list the Mac\'s own accessories)',
-    'Then force the unit off: hold Volume-Up and Power together for about 15 s until the screen stays off (the Surface logo may flash: keep holding), then '
-    'release both',
-    'Holding Power alone for about 20 s restarts the Surface to its logo instead (Microsoft\'s "Force a shutdown and restart your Surface"); that is also '
-    'acceptable, Windows may then start: shut it down from Windows',
+    '(c4) Then force the unit off: hold Power alone for about 20 s by the clock (the screen may be dark already) until the Surface logo or Windows appears, '
+    'then release; if Windows starts, shut it down from Windows (Microsoft, "Force a shutdown and restart your Surface", Surface Pro 5th Gen and later). '
+    'If nothing has appeared 30 s after you first pressed Power, hold Volume-Up and Power together for about 15 s (listed there for earlier models only; its '
+    'effect on the Pro 11 is UNKNOWN), then release both',
     'Optional: (d) Only if the charger is not on a USB-C port: an inline power meter on the charger; note the draw while the screen is dark, and after the '
     'power-off if you can')
 # Wording that must not come back: the event is "the screen went off", never a reset or a restart (boot 15's "ran to END" is quoted in the text as the
-# operator's first answer, so only the claim that it did is withdrawn), and the old power-off, download-mode and "send nothing" sentences are replaced.
+# operator's first answer, so only the claim that it did is withdrawn), and the old power-off, download-mode and "send nothing" sentences are replaced. So are
+# the readings that the review of draft 2 replaced: the missed cue that cancels the run, "Allow once", Volume-Up and Power first, the stick that is not on
+# usb_1_ss0 for sure, the answer of the first reading for the memory class of boot 16, and the hardware-NOT-RUN header; and the wording that the review of
+# draft 3 replaced: the quoted title "Allow accessory to connect" (the article's prose, not the dialog's title), "names only Don't Allow", the other button's
+# name as INFERRED, and a force-off timing that has no start; and the wording of draft 4 that was loose or misreadable: "the approval is then spent" (wrong for
+# a power-off before PAYLOAD CALL) and "does not change for 30 s before any VERDICT or END line" (it reads as 30 s before a VERDICT line that is still to come).
 SUPPLEMENT_WITHDRAWN = ('the board reset', 'the unit reset', 'the SoC reset', 'reset itself', 'rebooted', 'shut itself down', 'boot 15 ran to END', 'may be on neither',
                         'crashed', 'bricked', 'REPORTED', 'holding Power for about 20 s.', 'we send nothing', 'QDLoader', 'powered it off by hand', 'Note the time',
-                        'applies as written', 'the rings that the firmware\'s driver built')
+                        'applies as written', 'the rings that the firmware\'s driver built',
+                        'power off in the 8 s after NEXT ARENA', 'a run without the cable is not approved', 'that counts as the page being wrong',
+                        'a run without the Mac\'s cable', 'choose Allow once', 'it lets macOS read the descriptors only', 'until the screen stays off',
+                        'only if it feels hot', 'and the premise of section 2 fails', 'the answer is that of the first reading above',
+                        'the runbook of sections 2, 6 and 8', '(EXPERIMENTAL; hardware NOT RUN)',
+                        'names only Don\'t Allow', 'Allow accessory to connect', 'the name of the other button is INFERRED', 'If nothing appears after 30 s',
+                        'and the approval is then spent', 'does not change for 30 s before any VERDICT or END line')
 # The numbers the supplement repeats from the A1 record: each must be in both texts.
 SHARED_WITH_A1 = ('0xCF412000', 'four pages', '30 s + 20 x 8 s = 190 s plus at most 10.2 s', 'about 200 s', 'window 0x0a600000', 'SMMU stream 0x1420',
                   'after a success at arena 4 from one CHG line on, at arena 3 from two, at arena 2 from three, never at arena 1',
@@ -908,19 +955,21 @@ class Supplement(unittest.TestCase):
 
     def test_the_extra_actions_fit_one_screen_and_are_in_the_operators_section_in_the_order_of_the_work(self):
         text = self.render()
-        self.assertLessEqual(len(rec.E0), 36)
+        self.assertLessEqual(len(rec.E0), 44)
         block = '\n'.join(rec.E0)
         self.assertEqual(text.count(block), 1)
         section_8 = text.split("\n8. THE OPERATOR'S ACTIONS")[1].split('\n9. NOT AUTHORISED')[0]
         self.assertIn(block, section_8)
-        marks = [line[3:] for line in rec.E0 if re.match(r'   (\([a-e]\) |Before the boot:|After a black-out:|Optional:)', line)]
-        self.assertEqual([mark.split(' ')[0] for mark in marks], ['Before', '(e)', '(a)', '(b)', 'After', '(c)', 'Optional:', '(d)'],
-                         'before the boot (e), then (a) after the stick has left the Mac, then (b); after a black-out (c); optional (d)')
+        marks = [line[3:] for line in rec.E0 if re.match(r'   (\([a-e][0-4]?\) |Before the boot:|After a black-out:|Optional:)', line)]
+        self.assertEqual([mark.split(' ')[0] for mark in marks],
+                         ['Before', '(e)', '(a)', '(b)', 'After', '(c)', '(c0)', '(c1)', '(c2)', '(c3)', '(c4)', 'Optional:', '(d)'],
+                         'before the boot (e), then (a) after the stick has left the Mac, then (b); after a black-out (c) and its steps (c0) to (c4), the '
+                         'force-off last; optional (d)')
         for line in rec.E0:
             self.assertLessEqual(len(line), 118)
 
     def test_the_record_stays_compact(self):
-        self.assertLessEqual(len(self.render().splitlines()), 270)
+        self.assertLessEqual(len(self.render().splitlines()), 290)
 
     def test_the_numbers_the_supplement_repeats_are_those_of_the_a1_record(self):
         a1_text = ' '.join(rec.digest([rec.A1.xhci1, rec.A1.xhci0], rec.A1.runbook)[0].split())
@@ -1103,15 +1152,95 @@ SUPPLEMENT_MUTATIONS = (
     ('drops-the-waiver', 'waives that stop, for boot 17 only', 'keeps that stop for boot 17', 'missing: This record waives that stop, for boot 17 only'),
     ('drops-the-two-variables-sentence', 'Boot 17 changes TWO things from boot 16', 'Boot 17 changes the controller',
      'missing: Boot 17 changes TWO things from boot 16'),
+    ('drops-the-attachments-clause', 'and with the controller the attachments move', 'and nothing else moves', 'missing: ; and with the controller the attachments move'),
     ('drops-the-advice-only-sentence', 'is advice for a later request', 'is the plan for the next boot', 'missing: is advice for a later request and authorises nothing'),
+    ('drops-and-authorises-nothing', 'is advice for a later request and authorises nothing', 'is advice for a later request',
+     'missing: is advice for a later request and authorises nothing'),
+    ('drops-the-next-columns-heading', 'their Next columns authorise nothing', 'their Next columns are the plan',
+     'missing: 6. THE OUTCOME TREE FOR BOOT 17 (runbook O1 to O15 with U0 and U1 swapped; their Next columns authorise nothing)'),
+    # the approval is spent once the payload has been called: each clause of the rule has its own mutant
     ('drops-the-not-boot-17-rule', 'did not run the payload and is not boot 17: delete the marker and start again', 'did not run the payload: start again',
      'missing: a boot that did not print PAYLOAD CALL 0 63B11F901ACBB430 did not run the payload and is not boot 17'),
-    ('drops-the-spent-rule', 'once that line has printed, the approval is spent', 'once that line has printed, go on',
-     'missing: once that line has printed, the approval is spent'),
-    ('drops-the-missed-cue-rule', 'power off in the 8 s after NEXT ARENA', 'carry on after NEXT ARENA',
-     "missing: If you did not plug the Mac's cable by WATCH DONE, power off in the 8 s after NEXT ARENA"),
+    ('drops-the-no-marker-clause', '(none exists if you powered off in the 5 s)', '', 'missing: (none exists if you powered off in the 5 s)'),
+    ('drops-the-spent-rule', 'Once that line has printed, the approval is spent', 'Once that line has printed, go on',
+     'missing: Once that line has printed, the approval is spent'),
+    ('lowercases-the-spent-rule', 'Once that line has printed, the approval is spent', 'once that line has printed, the approval is spent',
+     'missing: Once that line has printed, the approval is spent, even if you then cancel'),
+    ('drops-what-spends-the-approval', 'even if you then cancel, the payload refuses or the unit restarts before any write: another boot needs a new record',
+     'for the rest of the boot', 'missing: Once that line has printed, the approval is spent, even if you then cancel, the payload refuses or the unit '
+                                  'restarts before any write: another boot needs a new record'),
+    ('drops-the-pointer-of-section-2-to-the-call-line', '; a start that never prints that line is not boot 17 (section 8)', '',
+     'missing: Boot 17 is the boot in which the runner prints PAYLOAD CALL 0 63B11F901ACBB430; a start that never prints that line is not boot 17 (section 8)'),
+    # the cable: the cue, the missed cue (the run goes on without the cable) and the one exception to the cue
+    ('drops-the-missed-cue-rule', 'do not plug it later and do not power off: the run goes on without it', 'carry on after NEXT ARENA',
+     "missing: If you did not plug the Mac's cable by WATCH DONE, do not plug it later and do not power off: the run goes on without it"),
+    ('restores-the-old-missed-cue-rule', 'do not plug it later and do not power off: the run goes on without it',
+     'power off in the 8 s after NEXT ARENA: a run without the cable is not approved', 'withdrawn wording is back: a run without the cable is not approved'),
+    ('adds-the-old-power-off-to-the-missed-cue-rule', 'which this record covers; say so on the video.',
+     'which this record covers; say so on the video. Or power off in the 8 s after NEXT ARENA.',
+     'withdrawn wording is back: power off in the 8 s after NEXT ARENA'),
+    ('drops-the-missed-cue-pointer-of-section-2', '(if the cue is missed the run goes on without the cable: section 8)', '',
+     "missing: with the Mac's USB-C cable connected to the free port at the on-screen cue (if the cue is missed the run goes on without the cable: section 8)"),
+    ('drops-the-late-plug-instruction', 'If you plug it late by mistake, leave it and say so on the video.', '',
+     'missing: If you plug it late by mistake, leave it and say so on the video'),
+    ('drops-the-hot-rule-of-section-8', 'If at any time the unit is too hot to hold comfortably, power it off at once',
+     'If at any time the unit is too hot to hold comfortably, wait for END',
+     'missing: If at any time the unit is too hot to hold comfortably, power it off at once (E0(c4) says how); that outranks the cancel-window rule and the '
+     'missed-cue rule, and once PAYLOAD CALL has printed, the approval is spent'),
+    ('drops-what-the-hot-rule-outranks', 'that outranks the cancel-window rule and the missed-cue rule', 'that changes nothing',
+     'missing: If at any time the unit is too hot to hold comfortably, power it off at once (E0(c4) says how); that outranks the cancel-window rule and the '
+     'missed-cue rule'),
+    ('drops-the-missed-cue-rule-from-the-hot-rule', 'cancel-window rule and the missed-cue rule', 'cancel-window rule',
+     'missing: If at any time the unit is too hot to hold comfortably, power it off at once (E0(c4) says how); that outranks the cancel-window rule and the '
+     'missed-cue rule'),
+    ('drops-the-spent-approval-of-the-hot-rule', 'and once PAYLOAD CALL has printed, the approval is spent', 'and nothing else',
+     'missing: If at any time the unit is too hot to hold comfortably, power it off at once (E0(c4) says how); that outranks the cancel-window rule and the '
+     'missed-cue rule, and once PAYLOAD CALL has printed, the approval is spent'),
+    ('brings-back-the-loose-tail-of-the-hot-rule', 'and once PAYLOAD CALL has printed, the approval is spent', 'and the approval is then spent',
+     'withdrawn wording is back: and the approval is then spent'),
+    ('drops-the-missed-cue-reading-of-o14', 'CHANGED=NONE is O14 and is also what a missed cue', 'CHANGED=NONE is O14 and nothing else than a dead link',
+     'missing: CHANGED=NONE is O14 and is also what a missed cue gives (section 8); FAULT= is O15: stop'),
+    ('brings-back-the-run-without-the-cable-of-section-9', 'a cable plugged after WATCH DONE ', 'a run without the cable ',
+     'missing: a cable plugged after WATCH DONE (E0(c3) apart)'),
+    ('drops-the-exception-of-section-9', '(E0(c3) apart); the ', '; the ', 'missing: a cable plugged after WATCH DONE (E0(c3) apart)'),
+    ('drops-plug-only-at-the-cue', 'cable only during the 30 s watch, at the on-screen cue.', 'cable at any time.',
+     "missing: Plug the Mac's cable only during the 30 s watch, at the on-screen cue."),
+    ('drops-the-exception-to-the-cue', 'The only exception is E0(c3), after a black-out.', '', 'missing: The only exception is E0(c3), after a black-out'),
+    # the rest of the actions of section 8
+    ('drops-the-wrong-plan-check', 'another name means that the stick is not the one of this record', 'another name is fine',
+     'missing: (another name means that the stick is not the one of this record: power off in the 5 s the Shell gives)'),
+    ('drops-the-5-s-of-the-wrong-plan-check', 'the 5 s the Shell gives', 'the Shell gives',
+     'missing: (another name means that the stick is not the one of this record: power off in the 5 s the Shell gives)'),
+    ('drops-the-cancel-rule-of-the-8-s-windows',
+     'line are the cancel window, and nothing of that group is written yet: in it the operator powers off only if the page itself is wrong',
+     'line are the cancel window, and nothing of that group is written yet: in it the operator powers off at will',
+     'missing: in it the operator powers off only if the page itself is wrong'),
+    ('drops-apart-from-that', 'Apart from that, touch nothing until END; power-cycle afterwards.', '',
+     'missing: Apart from that, touch nothing until END; power-cycle afterwards.'),
+    ('drops-the-pointer-to-e0', 'is the case of E0 below', 'is of no concern',
+     'missing: Before any VERDICT or END line, a black panel, a restart or a page that stops changing is the case of E0 below'),
+    # the stop rules after boot 17, and the count of SC3
+    ('drops-the-fault-page-from-the-stop-rules', 'power-cycled, on a page that ends at a NEXT line, a fault page, a board ',
+     'power-cycled, on a page that ends at a NEXT line, a board ', 'missing: a fault page, a board restart'),
+    ('drops-store-refused-from-the-stop-rules', 'STORE_REFUSED on the END line, a WHY= of READ, CLOCK, STORE', 'a WHY= of READ, CLOCK, STORE',
+     'missing: STORE_REFUSED on the END line'),
     ('drops-store-from-the-why-list', 'a WHY= of READ, CLOCK, STORE, BUDGET or LINES', 'a WHY= of READ, CLOCK, BUDGET or LINES',
      'missing: a WHY= of READ, CLOCK, STORE, BUDGET or LINES'),
+    ('drops-the-unaccounted-lines-cut-clause', 'or after NOOP_OK when nothing accounts for it', 'or after nothing',
+     'missing: or after NOOP_OK when nothing accounts for it'),
+    ('drops-the-count-of-sc3', 'so the count is 1 or 2 of 5', 'so the count is 5', 'missing: so the count is 1 or 2 of 5'),
+    # the outcome tree: the stick may not be on usb_1_ss0 (the run goes on), and the memory class of boot 16
+    ('brings-back-the-premise-fails-reading', 'the page is listed, so the run goes on: say which port held the stick',
+     'the stick is not on usb_1_ss0, and the premise of section 2 fails',
+     'missing: CHANGED=U0P1 or U0P2 is O12: the free port may be on the controller under test'),
+    ('brings-back-the-answer-of-the-first-reading', 'so a cause tied to that class does not explain boot 16',
+     'and the answer is that of the first reading above, for that class', 'missing: NOOP_OK on another arena: if the ARENAS line did not offer arena 1'),
+    ('names-the-old-runbook-sections', 'the runbook of sections 2 and 5 to 9', 'the runbook of sections 2, 6 and 8',
+     'missing: the runbook of sections 2 and 5 to 9, UNCHANGED since the A1 record'),
+    ('brings-back-the-hardware-not-run-header', "'(EXPERIMENTAL; XHCI0.BIN has not run on hardware)'", "'(EXPERIMENTAL; hardware NOT RUN)'",
+     'missing: RECORD OF AUTHORISATION POINT A1, SUPPLEMENT FOR BOOT 17: XHCI0.BIN ON usb_1_ss0 (EXPERIMENTAL; XHCI0.BIN has not run on hardware)'),
+    ('drops-the-store-addition-of-the-stop-rules', 'with STORE added for boot 17', 'with nothing added for boot 17',
+     "missing: The stop rules of section 9 of the A1 record apply to the page of boot 17 as written, with STORE added for boot 17"),
     ('drops-the-boot-15-contradiction', 'his first answer was that it ran to END, a later one that both boots ', 'he says that both boots ',
      'missing: OBSERVED, boot 15 (by the operator, from memory only, not filmed; his first answer'),
     ('quotes-the-reset-again', 'No restart was seen.', 'No restart was seen, though the unit reset itself.', 'withdrawn wording is back: reset itself'),
@@ -1119,12 +1248,87 @@ SUPPLEMENT_MUTATIONS = (
      'missing: docs/SP11-STICK-LOG.md is cited as of commit 42017e2'),
     ('drops-the-download-mode-sentence', 'Connecting the Mac to a download-mode device is read-only on our side', 'Connecting the Mac to a download-mode device is fine',
      'missing: Connecting the Mac to a download-mode device is read-only on our side'),
-    # the extra actions of the operator
+    # the extra actions of the operator: before the boot, the wait and the branches after a black-out, the macOS prompt and the force-off
+    ('drops-the-cable-in-hand', 'cable in your hand, ready for', 'cable in the bag, ready for',
+     "missing: Before the boot: (e) Put the stick straight into the unit (no hub), see which physical port holds it, and have the Mac's cable in your hand"),
+    ('drops-when-the-cable-was-plugged', 'and whether and when the Mac', 'and the Mac',
+     "missing: Say on the video which physical port holds the stick and whether and when the Mac's cable was plugged"),
+    ('drops-the-keep-filming-rule', 'After a black-out keep filming until (c) is done.', '', 'missing: After a black-out keep filming until (c) is done'),
+    ('drops-the-black-panel-condition-of-c', 'applies only to a black panel before any VERDICT or END line', 'applies to any panel',
+     'missing: After a black-out: (c) applies only to a black panel before any VERDICT or END line; then the steps (c0)-(c4)'),
+    ('drops-the-restart-branch', 'A logo or boot screen means that the unit restarted: skip the rest of (c)',
+     'A logo or boot screen means that the unit restarted: carry on with (c)',
+     '(c0) A logo or boot screen means that the unit restarted: skip the rest of (c)'),
+    ('drops-the-power-cycle-of-the-restart-branch', 'UPTIME shown, and power-cycle as the runbook says (4.3)', 'UPTIME shown',
+     'missing: (c0) A logo or boot screen means that the unit restarted: skip the rest of (c), say the time'),
+    ('drops-the-frozen-lit-branch', 'A lit page that has not changed for 30 s and shows no VERDICT or END line', 'A lit page that changes',
+     'missing: A lit page that has not changed for 30 s and shows no VERDICT or END line: skip the rest of (c)'),
+    ('narrows-the-frozen-lit-branch-to-a-next-line', 'for 30 s and shows no VERDICT or END line', 'for 30 s after a NEXT line',
+     'missing: A lit page that has not changed for 30 s and shows no VERDICT or END line: skip the rest of (c)'),
+    ('brings-back-the-misreadable-frozen-lit-wording', 'has not changed for 30 s and shows no VERDICT or END line',
+     'does not change for 30 s before any VERDICT or END line',
+     'withdrawn wording is back: does not change for 30 s before any VERDICT or END line'),
+    ('drops-the-power-cycle-of-the-frozen-lit-branch', '(c), say the last line, and power-cycle as the runbook says (4.3)', '(c), say the last line',
+     'missing: A lit page that has not changed for 30 s and shows no VERDICT or END line: skip the rest of (c), say the last line, and power-cycle'),
     ('drops-the-four-minute-wait', 'touch no cable for 4 minutes', 'touch no cable for 4 seconds',
-     "missing: say the Mac's clock on the video and touch no cable for 4 minutes"),
-    ('drops-the-force-off-wording', 'hold Volume-Up and Power together for about 15 s', 'hold Power for about 20 s',
-     'missing: Then force the unit off: hold Volume-Up and Power together for about 15 s'),
-    ('drops-the-allow-once-sentence', 'choose Allow once', 'choose Allow always', 'missing: If macOS asks "Allow accessory to connect", choose Allow once'),
+     "missing: (c1) Otherwise say the Mac's clock on the video and touch no cable for 4 minutes"),
+    ('weakens-the-too-hot-rule', 'too hot to hold comfortably at any time', 'warm',
+     'missing: (c2) If the unit is too hot to hold comfortably at any time, force it off at once'),
+    ('drops-the-skip-of-the-unplugging-when-too-hot', 'and stop: skip (c3).', 'and go on.', 'missing: (c2) If the unit is too hot to hold comfortably at any time, '
+                                                                                          'force it off at once (as (c4) says) and stop: skip (c3)'),
+    ('drops-the-wait-before-the-unplugging', 'After the 4 minutes, unplug the stick', 'Unplug the stick', 'missing: (c3) After the 4 minutes, unplug the stick'),
+    ('moves-the-cable-to-the-free-port', 'into THAT port', 'into the free port',
+     "missing: (c3) After the 4 minutes, unplug the stick (hazard (m) says why that is safe) and plug the Mac's cable into THAT port"),
+    ('drops-the-allow-sentence', 'click Allow and say it on the video', "click Don\\'t Allow and say it on the video",
+     'missing: If macOS shows a dialog with the buttons "Don\'t Allow" and "Allow" (Apple Support 102282 shows it asking'),
+    ('drops-the-label-of-the-other-button', 'there is no once-only button', 'the other button is Allow once',
+     'missing: If macOS shows a dialog with the buttons "Don\'t Allow" and "Allow" (Apple Support 102282 shows it asking'),
+    ('drops-the-source-of-the-dialog', '(Apple Support 102282 shows it asking "Do you want to connect', '(it asks "Do you want to connect',
+     'missing: If macOS shows a dialog with the buttons "Don\'t Allow" and "Allow" (Apple Support 102282 shows it asking'),
+    ('drops-the-recovery-from-a-mistaken-dont-allow', 'is undone by unplugging and replugging', 'cannot be undone',
+     "missing: After Don't Allow the Mac does not recognise the accessory and the logger would show nothing; a mistaken Don't Allow is undone by unplugging "
+     "and replugging the cable"),
+    ('drops-the-effect-of-dont-allow', 'does not recognise the accessory and the logger would show nothing', 'shows the accessory',
+     "missing: After Don't Allow the Mac does not recognise the accessory and the logger would show nothing"),
+    ('drops-the-inferred-label-of-the-dialog-title', 'the title on this Mac may differ (INFERRED)', 'the title on this Mac is the same',
+     'missing: The dialog is documented for Mac laptops with Apple silicon only; the title on this Mac may differ (INFERRED)'),
+    ('brings-back-the-inexact-apple-wording', 'power-off if you can.', "power-off if you can. Apple Support names only Don\\'t Allow.",
+     "withdrawn wording is back: names only Don't Allow"),
+    ('brings-back-the-quoted-title-of-the-article', 'power-off if you can.', 'power-off if you can. If macOS asks "Allow accessory to connect", click Allow.',
+     'withdrawn wording is back: Allow accessory to connect'),
+    ('brings-back-allow-once', 'power-off if you can.', 'power-off if you can. If macOS asks, choose Allow once.', 'withdrawn wording is back: choose Allow once'),
+    ('drops-the-force-off-wording', 'hold Power alone for about 20 s by the clock', 'hold Volume-Up and Power together for about 15 s until the screen stays off',
+     'missing: (c4) Then force the unit off: hold Power alone for about 20 s by the clock'),
+    ('drops-the-label-of-the-second-force-off', 'its effect on the Pro 11 is UNKNOWN', 'its effect on the Pro 11 is known',
+     'missing: (c4) Then force the unit off: hold Power alone for about 20 s by the clock (the screen may be dark already) until the Surface logo or Windows '
+     'appears, then release; if Windows starts, shut it down from Windows (Microsoft, "Force a shutdown and restart your Surface", Surface Pro 5th Gen and '
+     'later). If nothing has appeared 30 s after you first pressed Power, hold Volume-Up and Power together for about 15 s (listed there for earlier models '
+     'only; its effect on the Pro 11 is UNKNOWN), then release both'),
+    ('drops-the-start-of-the-30-s-of-the-force-off', 'If nothing has appeared 30 s after you first pressed Power', 'If nothing appears after 30 s',
+     'missing: (c4) Then force the unit off: hold Power alone for about 20 s by the clock (the screen may be dark already) until the Surface logo or Windows '
+     'appears, then release; if Windows starts, shut it down from Windows (Microsoft, "Force a shutdown and restart your Surface", Surface Pro 5th Gen and '
+     'later). If nothing has appeared 30 s after you first pressed Power'),
+    ('brings-back-the-30-s-without-a-start', 'then release both.', 'then release both. If nothing appears after 30 s, wait.',
+     'withdrawn wording is back: If nothing appears after 30 s'),
+    ('brings-back-until-the-screen-stays-off', 'then release both.', 'then release both, until the screen stays off.',
+     'withdrawn wording is back: until the screen stays off'),
+    # the sentences that only the byte pin guarded (U1 to U8 of the review of draft 3)
+    ('drops-power-off-on-a-mismatch', 'means power off, and nothing of A1 has been written', 'means carry on, and nothing of A1 has been written',
+     'missing: a mismatch, or no VERIFY=OK, means power off, and nothing of A1 has been written'),
+    ('drops-the-end-of-the-sequence-after-a-success', 'after a success the sequence also ends', 'after a success the sequence goes on',
+     'missing: after a success the sequence also ends'),
+    ('drops-the-lines-the-tree-does-not-list', 'that the runbook does not list, and any line that its outcome tree does not list', 'that the runbook does not list',
+     'missing: a VERDICT NOOP_BAD_COMPLETION, any REFUSED that the runbook does not list, and any line that its outcome tree does not list'),
+    ('drops-the-refused-names-of-the-stop-rules', 'that the runbook does not list, and any line', 'and any line',
+     'missing: a VERDICT NOOP_BAD_COMPLETION, any REFUSED that the runbook does not list, and any line that its outcome tree does not list'),
+    ('drops-the-nothing-else-authorises-it-sentence', 'a plan, the approval of the A1 record, or the presence of a file on a stick',
+     'or the presence of a file on a stick',
+     'missing: Nothing else authorises it: not a file, a test, a tool, a plan, the approval of the A1 record, or the presence of a file on a stick'),
+    ('drops-no-done-marker-from-the-stick', 'and PAYLOAD.MAN) and no SP11', 'and PAYLOAD.MAN) and an SP11', 'missing: and no SP11\\DONE1.TXT'),
+    ('drops-the-stop-of-the-page-the-tree-does-not-list', 'stop, and report the page (O8, O11)', 'go on (O8, O11)', 'missing: stop, and report the page (O8, O11)'),
+    ('drops-the-4-minutes-from-the-unplugging-of-the-stick', 'only after a black-out and the wait of 4 minutes', 'at any time',
+     'missing: only after a black-out and the wait of 4 minutes'),
+    ('expects-the-wrong-port-with-the-cable-in-boot-16s-port', 'expect CHANGED=U1P2', 'expect CHANGED=NONE', 'missing: expect CHANGED=U1P2'),
     # the pins of the A1 record
     ('pins-another-xhci0', "PayloadFile(0, 19870, '63b11f901acbb4300dcd49a809841ccb5c1f626c777166547dc9967693f81e7f')",
      "PayloadFile(0, 19870, '63b11f901acbb4300dcd49a809841ccb5c1f626c777166547dc9967693f81e70')", 'the pinned facts of the A1 record are not the approved ones'),

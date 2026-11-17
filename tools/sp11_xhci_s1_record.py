@@ -350,29 +350,36 @@ def item(label, text):
 # The operator's extra actions of boot 17, short enough for one screen; section 8 of the supplement carries them.
 E0 = (["   E0, the extra actions of boot 17 (the operator's own; the payload writes nothing more for them):",
        '   Before the boot:'] +
-      item('(e)', 'Put the stick straight into the unit (no hub) and see which physical port holds it.') +
+      item('(e)', 'Put the stick straight into the unit (no hub), see which physical port holds it, and have the Mac\'s cable in your hand, ready for '
+                  'the cue.') +
       item('(a)', 'After the stick has left the Mac (otherwise its removal shows as USB_REMOVED), start the Mac-side logger: python3 tools/sp11_mac_usb_watch.py '
                   '(add --allow-empty-usb if the Mac has no other USB device), as for A1. Keep the Mac awake and unlocked, and the logger running, '
                   'through (c).') +
       item('(b)', 'Film as before, at 60 frames per second if the phone allows: the whole panel in frame, from the Shell countdown to the first UPTIME '
-                  'heartbeat after the END line. Say on the video which physical port holds the stick.') +
+                  'heartbeat after the END line. Say on the video which physical port holds the stick and whether and when the Mac\'s cable was plugged. '
+                  'After a black-out keep filming until (c) is done.') +
       ['   After a black-out:'] +
-      item('(c)', 'applies only to a black panel before any VERDICT or END line. A logo or boot screen means that the unit restarted: skip (c), say the time, '
-                  'the last line of the page and the last UPTIME shown. A lit page that does not change for 30 s after a NEXT line: skip (c), say the last '
-                  'line. Otherwise say '
-                  'the Mac\'s clock on the video and touch no cable for 4 minutes (a payload that is alive in the dark runs on for up to about 200 s, and a '
-                  'running xHC writes event TRBs that a moved cable or stick would change); force the unit off at once, as below, only if it feels hot, '
-                  'and then skip the rest of (c). After the 4 minutes, unplug the stick (hazard (m) says why that is safe) and plug the Mac\'s cable into '
-                  'THAT port (move it from the free port). Wait '
-                  '60 s and read the logger and System Information for any NEW USB device: vendor 05C6 (Qualcomm), for example product 9008 (its '
-                  'download mode; a Mac may list it as QHSUSB__BULK or QUSB__BULK), or any device you do not know. macOS enumerates any device by '
-                  'itself; add nothing to that: no driver, no flashing or Terminal tool, no Disk Utility; do not open, mount, initialise, erase or copy '
-                  'from any disk that appears (eject it unopened) and accept no app, driver, profile or Photos prompt. If macOS asks "Allow accessory to '
-                  'connect", choose Allow once (INFERRED: it lets macOS read the descriptors only, while Don\'t Allow would blind the logger) and say it on '
-                  'the video. Report what the logger and System Information show (sanitise both: they list the Mac\'s own accessories). Then force the '
-                  'unit off: hold Volume-Up and Power together for about 15 s until the screen stays off (the Surface logo may flash: keep holding), then '
-                  'release both. Holding Power alone for about 20 s restarts the Surface to its logo instead (Microsoft\'s "Force a shutdown and restart '
-                  'your Surface"); that is also acceptable, Windows may then start: shut it down from Windows.') +
+      item('(c)', 'applies only to a black panel before any VERDICT or END line; then the steps (c0)-(c4):') +
+      item('(c0)', 'A logo or boot screen means that the unit restarted: skip the rest of (c), say the time, the last line of the page and the last '
+                   'UPTIME shown, and power-cycle as the runbook says (4.3). A lit page that has not changed for 30 s and shows no VERDICT or END line: '
+                   'skip the rest of (c), say the last line, and power-cycle as the runbook says (4.3).') +
+      item('(c1)', 'Otherwise say the Mac\'s clock on the video and touch no cable for 4 minutes (a payload that is alive in the dark runs on for up to '
+                   'about 200 s, and a running xHC writes event TRBs that a moved cable or stick would change).') +
+      item('(c2)', 'If the unit is too hot to hold comfortably at any time, force it off at once (as (c4) says) and stop: skip (c3).') +
+      item('(c3)', 'After the 4 minutes, unplug the stick (hazard (m) says why that is safe) and plug the Mac\'s cable into THAT port (moving it from '
+                   'the free port if it is there). Wait 60 s and read the logger and System Information for any NEW USB device: vendor 05C6 (Qualcomm), '
+                   'for example product 9008 (its download mode; a Mac may list it as QHSUSB__BULK or QUSB__BULK), or any device you do not know. macOS '
+                   'enumerates any device by itself; add nothing to that: no driver, no flashing or Terminal tool, no Disk Utility; do not open, mount, '
+                   'initialise, erase or copy from any disk that appears (eject it unopened) and accept no app, driver, profile or Photos prompt. '
+                   'If macOS shows a dialog with the buttons "Don\'t Allow" and "Allow" (Apple Support 102282 shows it asking "Do you want to connect '
+                   'the USB accessory to this Mac?"; there is no once-only button), click Allow and say it on the video. After Don\'t Allow the Mac '
+                   'does not recognise the accessory and the logger would show nothing; a mistaken Don\'t Allow is undone by unplugging and replugging '
+                   'the cable. The dialog is documented for Mac laptops with Apple silicon only; the title on this Mac may differ (INFERRED). '
+                   'Report what the logger and System Information show (sanitise both: they list the Mac\'s own accessories).') +
+      item('(c4)', 'Then force the unit off: hold Power alone for about 20 s by the clock (the screen may be dark already) until the Surface logo or '
+                   'Windows appears, then release; if Windows starts, shut it down from Windows (Microsoft, "Force a shutdown and restart your '
+                   'Surface", Surface Pro 5th Gen and later). If nothing has appeared 30 s after you first pressed Power, hold Volume-Up and Power '
+                   'together for about 15 s (listed there for earlier models only; its effect on the Pro 11 is UNKNOWN), then release both.') +
       ['   Optional:'] +
       item('(d)', 'Only if the charger is not on a USB-C port: an inline power meter on the charger; note the draw while the screen is dark, and after the '
                   'power-off if you can.'))
@@ -412,7 +419,7 @@ def _supplement_files(payload, runbook, a1):
               f'      {a1.xhci1.size} bytes; {other_device}, window 0x{other_base:08x}, SMMU stream {other_stream:#x}; boots 15 and 16; not staged, does not run.']
     lines += para(f'{name} is the file the A1 record names, byte for byte: no byte of the payload is new for boot 17. PAYLOAD.MAN lists exactly one '
                   'payload, the one of the boot: the file name tells the operator which controller is under test.')
-    lines += _runbook_lines(runbook, 'the runbook of sections 2, 6 and 8, UNCHANGED since the A1 record; read, not staged.')
+    lines += _runbook_lines(runbook, 'the runbook of sections 2 and 5 to 9, UNCHANGED since the A1 record; read, not staged.')
     lines += [f'   {"the A1 record":<24} sha256 {a1.record_sha256}',
               f'      {a1.record_bytes} bytes; the text that boots 15 and 16 ran under, which this record amends and keeps (section 2).']
     lines += para(f'docs/SP11-STICK-LOG.md is cited as of commit {STICK_LOG_COMMIT} of the Snapintosh fork (its sections 10, 12, 13, 14.2 and 16), not by digest.')
@@ -427,7 +434,7 @@ def render_supplement(payload, runbook, a1=None):
     check_supplement(payload, runbook, a1)
     name, device, base, stream = CONTROLLERS[payload.controller]
     digits = payload.sha256[:16].upper()
-    t = ['RECORD OF AUTHORISATION POINT A1, SUPPLEMENT FOR BOOT 17: XHCI0.BIN ON usb_1_ss0 (EXPERIMENTAL; hardware NOT RUN)', '']
+    t = ['RECORD OF AUTHORISATION POINT A1, SUPPLEMENT FOR BOOT 17: XHCI0.BIN ON usb_1_ss0', '(EXPERIMENTAL; XHCI0.BIN has not run on hardware)', '']
     t += para(f'This is a supplement to the record of authorisation point A1 (the A1 record). It approves ONE more boot, boot 17, with {name} only, and it '
               f'amends one rule of the A1 record, for that boot only. The operator approved point A1 in principle on {OPERATOR_APPROVAL} and approved the '
               'A1 record by name; boots 15 and 16 ran under it with XHCI1.BIN (boot 16 repeated boot 15, which was not filmed). This text, with the '
@@ -438,10 +445,12 @@ def render_supplement(payload, runbook, a1=None):
     t += ['', '1. THE FILES (SHA-256 of the staged bytes, the runbook and the A1 record; the operator compares them with these lines)']
     t += _supplement_files(payload, runbook, a1) + ['']
     t += ['2. WHAT THIS SUPPLEMENT APPROVES, WHAT IT AMENDS AND WHAT IT KEEPS']
-    t += para(f'It approves ONE boot, boot 17: the plan {PLAN_NAME_SS0} with {name} ({device}, SMMU stream {stream:#x}), started once, with the Mac\'s USB-C '
-              'cable connected to the free port at the on-screen cue, as in the A1 record, on AC power or at least 50% battery, with one hardware client '
-              f'at a time. Boot 17 is the boot in which the runner prints PAYLOAD CALL 0 {digits} (section 8). It approves nothing else: not a '
-              'second boot, not a retry, not XHCI1.BIN again, not another file, arena order or controller, not any other write.')
+    t += para(f'It approves ONE boot, boot 17: the plan {PLAN_NAME_SS0} with {name} ({device}, SMMU stream {stream:#x}), started once, with the '
+              'Mac\'s USB-C cable connected to the free port at the on-screen cue (if the cue is missed the run goes on without the cable: section 8), '
+              'as in the A1 record, on AC power or at least 50% battery, with one hardware client at a time. Boot 17 is the boot in which the runner '
+              f'prints PAYLOAD CALL 0 {digits}'
+              '; a start that never prints that line is not boot 17 (section 8). It approves nothing else: not a second boot, not a retry, not '
+              'XHCI1.BIN again, not another file, arena order or controller, not any other write.')
     t += para('It amends rule 9 of the A1 record (its section 9, the stop rules), for boot 17 only. That rule says that the sequence stops, and the unit is '
               'power-cycled, on a page that ends at a NEXT line, and that XHCI0.BIN is run only after the page of XHCI1.BIN was read and the operator '
               'named the second file. The page of boot 16 ended at a NEXT line (section 3), so under that rule the sequence stopped there. '
@@ -455,10 +464,11 @@ def render_supplement(payload, runbook, a1=None):
               'controller instances and 0x0A800000, the window of usb_1_ss1, is not among them (OBSERVED: section 14.2 of docs/SP11-STICK-LOG.md; '
               'section 12 reads usb_1_ss1 as never started by the firmware). So XHCI0.BIN asks the question of boot 16 of a controller that firmware '
               'brought up, with the same payload bytes as the A1 record and so no new code. '
-              'Boot 17 changes TWO things from boot 16: the controller, and the first arena (the firmware\'s own memory, not the runner\'s stack). '
-              'A stop separates a cause that belongs to usb_1_ss1, which UEFI never brought up (PHY, glue, a vote or a power state; the clocks and '
-              'GDSC of both controllers read ON in S0), from one that does not (the SMMU\'s context bank, an XPU, the EL2 environment, or any start '
-              'of an xHC at EL2); a success does not by itself separate them (section 6).')
+              'Boot 17 changes TWO things from boot 16: the controller, and the first arena (the firmware\'s own memory, not the runner\'s stack); '
+              'and with the controller the attachments move: the Mac\'s cable is expected on the other controller and the stick on this one '
+              '(section 6, WATCH DONE). A stop separates a cause that belongs to usb_1_ss1, which UEFI never brought up (PHY, glue, a vote or a '
+              'power state; the clocks and GDSC of both controllers read ON in S0), from one that does not (the SMMU\'s context bank, an XPU, the EL2 '
+              'environment, or any start of an xHC at EL2); a success does not by itself separate them (section 6).')
     t += para('Everything else of the A1 record stands as written, for XHCI0.BIN: its sections 2 to 8, 10 and 11, with the additions of sections 5 and 8 '
               'below to its sections 8 and 10; the runbook docs/SP11-XHCI-S1.md by the size and SHA-256 of section 1, UNCHANGED, whose outcome tree '
               'O1 to O15 applies with U0 and U1 swapped for XHCI0.BIN, except that the Next column of its rows (O1, O9, O13) '
@@ -547,9 +557,10 @@ def render_supplement(payload, runbook, a1=None):
                    'tied to the runner-stack memory class (an SMMU stage 2 or an XPU range) both give this page, and a success ends the run before arena '
                    '2 is tried (INFERRED: one boot of each file, one unit). A stop on arena 1 is the informative branch. Next, not authorised here: the '
                    'runner\'s own stack as the first arena on usb_1_ss0 (a changed payload, a new record) would separate the two.')
-    t += item('-', 'NOOP_OK on another arena: if the ARENAS line did not offer arena 1, arena 2 is the first attempt (WRITES=17), the memory class of boot 16, '
-                   'and the answer is that of the first reading above, for that class; if WRITES is above 17, an earlier arena failed first, and DMA works '
-                   'for that memory class and not for the ones before it: read the R<k> lines of those attempts as O2, O3 and O7 say.')
+    t += item('-', 'NOOP_OK on another arena: if the ARENAS line did not offer arena 1, arena 2 is the first attempt (WRITES=17), the memory class of boot 16: '
+                   'DMA works for it through stream 0x1420, so a cause tied to that class does not explain boot 16 (INFERRED: one boot of each file, one '
+                   'unit); if WRITES is above 17, an earlier arena failed first, and DMA works for that memory class and not for the ones before it: '
+                   'read the R<k> lines of those attempts as O2, O3 and O7 say.')
     t += item('-', 'No VERDICT and no END, the page ending at a NEXT line, with the screen going off again (as in boot 16 and, by the operator\'s memory, '
                    'boot 15) or frozen and lit (O10): the cause is not specific to usb_1_ss1 alone. A systemic cause (the SMMU\'s context bank 3, an XPU, '
                    'the EL2 environment), the firmware\'s memory as the arena, or any start of an xHC at EL2 fits; which of them is UNKNOWN. Say which '
@@ -562,15 +573,16 @@ def render_supplement(payload, runbook, a1=None):
                    'record nor this one covers it.')
     t += item('-', 'NOOP_TIMEOUT or NOOP_HSE with SMMU=SAME or UNREAD: SC2 is not excluded (the SMMU records only the first fault of a context bank until '
                    'its FSR is cleared, which A1 never does: INFERRED); the stage and the WHY decide (O3 to O8).')
-    t += item('-', 'NOOP_BAD_COMPLETION, or any other stop of section 7: the payload ended the run itself, or the page is not one the tree lists: stop, '
-                   'and report the page (O8, O11).')
+    t += item('-', 'NOOP_BAD_COMPLETION, or any other stop of section 7: the payload ended the run itself, or the page is not one the tree lists: '
+                   'stop, and report the page (O8, O11).')
     t += item('-', 'REFUSED=<name> (O9): nothing was written. REFUSED=OFFSET, SCRATCHPADS or HCE is possible on usb_1_ss0 (hazard (n); S0 saw HCE there '
                    'behind a hub: docs/SP11-XHCI-S1.md, 6.2), and the payload does not reset a controller found in error.')
     t += item('-', 'WATCH DONE: O12 to O15 are written for XHCI1.BIN, whose own controller is U1; for XHCI0.BIN the own controller is U0 and the other is '
                    'U1. If the Mac\'s cable is in the same port as in boot 16 (OBSERVED there: U1P2 changed after the plug), expect CHANGED=U1P2: that '
-                   'is O13, the other controller, and this boot\'s verdict is about usb_1_ss0\'s DMA only. CHANGED=U0P1 or U0P2 is O12: the free port is '
-                   'on the controller under test, the Mac\'s cable sat on the controller being reset (hazard (f) of the A1 record), the stick is not on '
-                   'usb_1_ss0, and the premise of section 2 fails. CHANGED=NONE is O14; FAULT= is O15: stop.')
+                   'is O13, the other controller, and this boot\'s verdict is about usb_1_ss0\'s DMA only. CHANGED=U0P1 or U0P2 is O12: the free port may '
+                   'be on the controller under test (or the stick\'s own link moved: U0P2 sat Inactive at BASE in boot 16), so the stick may not be on '
+                   'usb_1_ss0; the page is listed, so the run goes on: say which port held the stick. CHANGED=NONE is O14 and is also what a missed cue '
+                   'gives (section 8); FAULT= is O15: stop.')
     t += ['', '7. THE STOP RULES AFTER BOOT 17 (rule 9 of the A1 record, amended as section 2 says)']
     t += para('The stop rules of section 9 of the A1 record apply to the page of boot 17 as written, with STORE added for boot 17 to its WHY= values (the '
               'runbook\'s O11 lists it): the sequence stops, and the unit is power-cycled, on a page that ends at a NEXT line, a fault page, a board '
@@ -589,19 +601,29 @@ def render_supplement(payload, runbook, a1=None):
               f'{PLAN_NAME_SS0}, the four files of the plan (the two EFI files and {name} of section 1, and PAYLOAD.MAN) and no SP11\\DONE1.TXT. The '
               f'Shell\'s line reads AUTORUN {PLAN_NAME_SS0} STEP 1 OF 1 (another name means that the stick is not the one of this record: power off in '
               'the 5 s the Shell gives). At the runner\'s lines PAYLOAD LOADED ... SHA=<16 hex digits>, PAYLOAD VERIFY=OK and PAYLOAD CALL 0 <the same '
-              f'16 digits>, compare the digits with {digits}, the first 16 of the digest of {name} in section 1: a mismatch, or no VERIFY=OK, means '
-              'power off, and nothing of A1 has been written (the marker SP11\\DONE1.TXT has been written; '
-              f'a boot that did not print PAYLOAD CALL 0 {digits} did not run the payload and is not boot 17: delete the marker and start again; '
-              'once that line has printed, the approval is spent). Plug the Mac\'s cable only at the on-screen cue. The eight seconds after each NEXT '
+              f'16 digits>, compare the digits with {digits}, the first 16 of the digest of {name} in section 1: '
+              'a mismatch, or no VERIFY=OK, means power off, and nothing of A1 has been written (the marker SP11\\DONE1.TXT has been written; '
+              f'a boot that did not print PAYLOAD CALL 0 {digits} did not run the payload and is not boot 17: delete the marker and start again '
+              '(none exists if you powered off in the 5 s)). '
+              'Once that line has printed, the approval is spent, '
+              'even if you then cancel, the payload refuses or the unit restarts before any write: another boot needs a new record. '
+              'Plug the Mac\'s cable only during the 30 s watch, at the on-screen cue. The only exception is E0(c3), after a black-out. '
+              'The eight seconds after each NEXT '
               'line are the cancel window, and nothing of that group is written yet: in it the operator powers off only if the page itself is wrong, '
               'as the runbook says. '
-              'If you did not plug the Mac\'s cable by WATCH DONE, power off in the 8 s after NEXT ARENA: a run without the cable is not approved, and '
-              'that counts as the page being wrong. Apart from that, touch nothing until END; power-cycle afterwards.')
+              'If you did not plug the Mac\'s cable by WATCH DONE, do not plug it later and do not power off: the run goes on without it (runbook O14, '
+              'CHANGED=NONE N=0), which this record covers; say so on the video. If you plug it late by mistake, leave it and say so on the video. '
+              'If at any time the unit is too hot to hold comfortably, power it off at once (E0(c4) says how); '
+              'that outranks the cancel-window rule and the missed-cue rule, '
+              'and once PAYLOAD CALL has printed, the approval is spent. '
+              'Apart from that, touch nothing until END; power-cycle afterwards. Before any VERDICT or END line, a black panel, a restart or a page '
+              'that stops changing is the case of E0 below.')
     t += E0 + ['']
     t += ['9. NOT AUTHORISED BY THIS RECORD']
     t += para('A2; any write beyond sections 2 and 3 of the A1 record; a second boot of this record, a retry, XHCI1.BIN again, any other payload, build, '
               'controller or arena order; the port reset, the enumeration of the Mac, the NCM driver, the SMMU programming and every register class '
-              'docs/SP11-XHCI-S1.md section 7 lists: each needs its own named authorisation. Also not covered: a run without the Mac\'s cable; the '
+              'docs/SP11-XHCI-S1.md section 7 lists: each needs its own named authorisation. Also not covered: a cable plugged after WATCH DONE '
+              '(E0(c3) apart); the '
               'read-only snapshot payload of section 6, a payload that restarts the unit by itself, or any read of a watchdog, PMIC or TCSR register; '
               'sending anything to a device that appears on the Mac after a black-out (E0(c) only looks).')
     return _checked(t)
