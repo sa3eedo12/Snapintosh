@@ -88,7 +88,7 @@ SECONDARY_STATE = ('0X200 0X300 0X10000 0X10100 0X10300 0X20000 0X20100 0x800000
 GUARD_HEADER, BUNDLE_DOC = 'compat/sp11-timer-guard.h', 'docs/SP11-STICK-BUNDLE.md'
 BUNDLE_FILES = ('SNAPMON.BIN', 'SNAPREP.BIN', 'GUEST.DAT', 'PIN.DAT', 'REPORT.DAT')
 BUNDLE_SIZES = (('`PIN.DAT` (1024 bytes', 1024), ('`REPORT.DAT` (528,384 zero bytes', 528384))
-# Built is not run: what each work item may claim (its row must keep these words). WI 7, 9 and 8 ran (boots 10, 11, 12 and 13); WI 8's pass 5 did not.
+# Built is not run: what each work item may claim (its row must keep these words). WI 7, 9 and 8 ran (boots 10, 11 and 12 to 14); WI 8's passes 5 and 6 ran in boot 14, the exception of pass 6 did not.
 WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                     2: ('DONE (q1n1 d8a5d2b; ran twice, boots 8 and 9, OBSERVED)', 'all returned at EL2'),
                     3: ('`real` RAN end to end on the real kernelcache, host only, not a hardware result', 'answered U9',
@@ -100,9 +100,9 @@ WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                         '`AT S1E2W` accepted 337 of 337 probes', 'matched 13 of 13 digests',
                         "the stick unchanged but for the Shell's marker (nothing written by the unit)",
                         'answered U1 (writability), U6 (base); U1 stays open for `DC CVAC` alone'),
-                    8: ('BUILT host-side, EXPERIMENTAL', 'RAN twice on the unit (boots 12 and 13, 2026-11-16, OBSERVED', 'pass 2 done',
-                        'pass 3 done', 'host-tested only, hardware NOT RUN, its run GICDRY-C prepared and NOT authorised', 'before 4b',
-                        'resolves U3; D2 (decided), D4', 'U3 open'),
+                    8: ('BUILT host-side, EXPERIMENTAL', 'RAN three times on the unit (boots 12, 13 and 14, 2026-11-16 and 2026-11-17, OBSERVED', 'pass 2 done',
+                        'pass 3 done', 'ran in boot 14 (OBSERVED: the quarantine held', 'before 4b',
+                        'resolves U3; D2 (decided), D4', 'U3 answered by boot 14'),
                     9: ('DONE (q1n1 b875620; boot 11, 2026-11-16 11:44, OBSERVED', 'first runner payload to run code below EL2',
                         '`BITS13_14_STUCK=YES`', '`VERDICT=TRAPS_EFFECTIVE`', 'answered U2 (EL1 stub only)',
                         'resolved D3 for these two payloads')}
@@ -174,12 +174,12 @@ Gaps G1 to G9
 8 -> 4b -> 6 -> 11
 its MMFR4 is 0 as read in X2 run 4 T01, but the gate has not run with it: a pass is INFERRED
 D6 NV2 record: which record, and whether its regime matters: UNKNOWN
-APPROVED for the GIC dry run only, by SHA-256, twice
+APPROVED for the GIC dry run only, by SHA-256, three times
 for the monitor entry OPEN, asked by SHA-256 with the M1 record
-nor does the GIC dry run, WI 8, which ran twice, boots 12 and 13
-12 and 13 = plans GICDRY-A and GICDRY-B
+nor does the GIC dry run, WI 8, which ran three times, boots 12 to 14
+12 to 14 = plans GICDRY-A, GICDRY-B and GICDRY-C
 SGI 0 and PPIs 23, 25, 26, 27 and 30 enabled by the firmware
-PPI 26's own delivery is UNKNOWN until a window reaches CNTHP's deadline
+PPI 26's own delivery was OBSERVED in boot 14
 quarantines this CPU's other enabled interrupts first
 GUEST.DAT 118,870,336 B (44 chunks)
 '''.splitlines()
@@ -855,9 +855,11 @@ is five files, the runner's whole manifest => is four files, the runner's whole 
 | 4a, 7 | => | 4, 6, 7 |
 | 1, 8 | => | 1 |
 | 3, 4, 5, 6, 8, 9 | => | 3, 5, 8, 9 |
-host-tested only, hardware NOT RUN, its run GICDRY-C => host-tested only, hardware PASS, its run GICDRY-C
-RAN twice on the unit (boots 12 and 13 => BUILT, NOT RUN (boots 12 and 13
-APPROVED for the GIC dry run only, by SHA-256, twice => OPEN, asked by SHA-256 with the dry-run record
+ran in boot 14 (OBSERVED: the quarantine held => is host-tested only (OBSERVED: the quarantine held
+RAN three times on the unit (boots 12, 13 and 14 => BUILT, NOT RUN (boots 12, 13 and 14
+APPROVED for the GIC dry run only, by SHA-256, three times => OPEN, asked by SHA-256 with the dry-run record
+U3 answered by boot 14 => U3 open
+PPI 26's own delivery was OBSERVED in boot 14 => PPI 26's own delivery is UNKNOWN
 D2 Stop: DECIDED 2026-11-16 with D5 => D2 Stop: OPEN with D5
 N2 Descriptor policy (new): DECIDED => N2 Descriptor policy (new): proposed
 is a DEFAULT, not an operator decision => is the operator's decision

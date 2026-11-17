@@ -488,7 +488,7 @@ class Hygiene(unittest.TestCase):
                 with self.subTest(path.name):
                     self.assertIn('SPDX-License-Identifier: MIT', '\n'.join(path.read_text().splitlines()[:3]))
 
-    def test_every_c_and_python_file_stays_under_1500_lines_and_50_kib_and_the_note_under_58600_bytes(self):
+    def test_every_c_and_python_file_stays_under_1500_lines_and_50_kib_and_the_note_under_65600_bytes(self):
         for path in own_files():
             with self.subTest(path.name):
                 text = path.read_text()
@@ -496,7 +496,7 @@ class Hygiene(unittest.TestCase):
                     self.assertLess(len(text.splitlines()), 1500)
                     self.assertLess(len(text.encode()), 50 * 1024)
                 else:
-                    self.assertLessEqual(len(path.read_bytes()), 58600)     # raised from 58,400 for the durations with late passes and the boot 13 reads of the review of part 4 (58,530 B); from 56,000 for the record text of passes 5 and 6 (58,203 B: --gic-quarantine, the 12 s of the quarantine, the two new tests); from 48,000 in pass 6 (33,000 in pass 5, 30,000 before pass 3): the committed text was at 46,966 B and pass 6 adds statements
+                    self.assertLessEqual(len(path.read_bytes()), 65600)     # raised from 58,600 for the record of boot 14, the third attempt (65,404 B: its page, what it answers and what stays UNKNOWN, section 12, and the statements it changed in sections 1, 2, 4, 7, 10 and 11); from 58,400 for the durations with late passes and the boot 13 reads of the review of part 4 (58,530 B); from 56,000 for the record text of passes 5 and 6 (58,203 B: --gic-quarantine, the 12 s of the quarantine, the two new tests); from 48,000 in pass 6 (33,000 in pass 5, 30,000 before pass 3): the committed text was at 46,966 B and pass 6 adds statements
                     self.assertTrue(text.isascii())
 
     def test_no_file_names_the_build_host_a_person_a_network_a_key_or_an_unfinished_marker(self):
@@ -548,7 +548,7 @@ class Document(unittest.TestCase):
         cls.flat = cls.text.replace('\n', ' ')
 
     def test_the_note_is_ascii_and_within_its_size_budget(self):
-        self.assertLessEqual(len(self.data), 58600)         # raised from 58,400 for the durations with late passes and the boot 13 reads of the review of part 4 (58,530 B), from 56,000 for the record text of passes 5 and 6 (58,203 B), from 48,000 in pass 6 (33,000 in pass 5; 30,000 before pass 3)
+        self.assertLessEqual(len(self.data), 65600)         # raised from 58,600 for the record of boot 14 (65,404 B), from 58,400 for the durations with late passes and the boot 13 reads of the review of part 4 (58,530 B), from 56,000 for the record text of passes 5 and 6 (58,203 B), from 48,000 in pass 6 (33,000 in pass 5; 30,000 before pass 3)
 
     def test_it_says_hardware_not_run_uses_the_labels_and_claims_no_hardware_result(self):
         for needle in ('Hardware NOT RUN', 'EXPERIMENTAL', 'VERIFIED', 'OBSERVED', 'INFERRED', 'UNIMPLEMENTED', 'UNKNOWN'):

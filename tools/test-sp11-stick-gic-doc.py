@@ -54,7 +54,7 @@ NEEDS = {
         ('the new tests (putback)', '`tools/test-sp11-stick-gic-putback.py`'),
         ('the new tests (hppir)', '`tools/test-sp11-stick-gic-hppir.py`'),
         ('the new tests (doc)', '`tools/test-sp11-stick-gic-doc.py`'),
-        ('hardware not run', 'Hardware status: NOT RUN.'),
+        ('hardware status', 'Hardware status: the stage ran on the unit in boots 12, 13 and 14 (section 12, OBSERVED, one unit, one boot each); the monitor entry, the M1 stop and any guest are NOT RUN.'),
     ],
     GIC_H: [
         ('the contract of the put-back', 'That last write is NOT made when the put-backs of both group 1 gates, ICC_IGRPEN1_EL1 and GICD_CTLR, failed'),

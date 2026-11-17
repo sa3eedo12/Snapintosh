@@ -5,7 +5,7 @@ the read-only survey S0 ran once on the unit (section 12), and its follow-up S0b
 Two later boots (6 and 7 of 2026-11-15, section 14) ran the third X2 test image and a payload that starts and stops the
 secondary cores, a three-step restart probe the same evening (section 14.1) ran a plain q1n1 page and that payload
 twice more, and a two-step restart control the next night ran only a read-only payload through the same runner; none
-of them read or wrote the stick's USB controller at EL2.**
+of them read or wrote the stick's USB controller at EL2. Boot 14 (2026-11-17, section 15) ran the wrapper's GIC and stop variant and did not touch it either.**
 Nothing of the writer ran on a Surface Pro 11. When the study
 was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as an opt-in, read-only survey in
 the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`) and has run
@@ -96,6 +96,11 @@ guarded log writer, and their tests (section 8).
     read-only `psci` payload through the same runner, in two boots: both pages were photographed alive, at `UPTIME 224 S`
     and `268 S`, and no restart was reported (the state after each photograph is unknown). The panel is still the only
     log channel, so whatever it showed after the last photograph is lost. A1 and A2 stay NOT granted.
+12. **Boot 14, the third GIC and stop dry run (`GICDRY-C`), ran on the unit and did not touch the stick's controller (OBSERVED,
+    one unit, one boot, from one video; section 15).** The wrapper's GIC variant of work item 8 ended `GIC VERDICT=IRQ_OK` with
+    a clean restore: PPI 26 reached EL2 as an IRQ (four times in window 1, once from EL1 in window 2), the quarantine of the
+    other enabled interrupts held, and the monitor was not called. The panel was again the only log channel, and A1 and A2 were
+    not exercised. Boots 8 to 13 are recorded elsewhere (section 15).
 
 ## 2. The problem and the requirements
 
@@ -1128,6 +1133,128 @@ cores `0x20200` and `0x20300` (their lines were dropped from both panels); `TCR_
 `DCZID_EL0` on a secondary; anything about a secondary with the MMU on, interrupts or the guest; why the PCIe SMMU
 registers fault at EL2; why `MIDR_EL1` and the entry state differ between cores, or why the high-half `VBAR_EL2` differs
 between boots (no cause is claimed); any controller reset or DMA on the NVMe.
+
+## 15. Result of boot 14, the third GIC and stop dry run (`GICDRY-C`), on the unit (OBSERVED, one unit, one boot)
+
+Boots 8 to 13 (2026-11-16: the memhash, dry-run, timers and first two GIC boots) are recorded in
+[SP11-STICK-WRAPPER.md](SP11-STICK-WRAPPER.md), [SP11-STICK-GIC.md](SP11-STICK-GIC.md) (section 12) and the evidence table of
+[SURFACE-PRO-11.md](SURFACE-PRO-11.md) (E65 to E69), not in this log. This section adds the next boot. It touches this study's
+question (a log from EL2 to the stick) in two ways only: the panel was again the only record, and it was read from a video. Everything
+below is OBSERVED, from one video (60 s, 4K, one take; frames at 1 fps and the final page at full resolution; the camera moved and the
+page was stable), one unit, one boot; the decodes (arithmetic on printed values, and what a value means) are INFERRED where said.
+
+**What ran.** On 2026-11-17 the autorun plan `GICDRY-C` ran one step in one boot: the Shell's startup script (its countdown is on the
+first frame; the stick at `Pci(0x80,0x0)/USB(0x1,0x0)`: one USB node, the direct connection of boots 3 to 7), q1n1's EL2 page, then
+the payload runner with five files and the wrapper's GIC and stop variant of work item 8 ([SP11-STICK-GIC.md](SP11-STICK-GIC.md):
+passes 5 and 6, the quarantine of the foreign enabled interrupts and its put-back rule). The bundle was the authorised one: the
+operator named its record by its SHA-256 for this boot (this log does not repeat the digest) and the committed tree is 6ef8dbd. The wrapper
+never calls the monitor. A1 and A2 were not exercised: the wrapper touches no xHC register and no stick sector, the step's marker
+`SP11\DONE1.TXT` was written by the Shell before the step (the bundle is single-shot), and nothing else was written by the run (the
+results note).
+
+| Index | File | Bytes | SHA-256 prefix on the page |
+| --- | --- | --- | --- |
+| 0 | the wrapper, `SNAPMON-GIC.BIN` | 98,236 | `EBAC8675A246DFDB` |
+| 1 | the reporter, `SNAPREP-GIC.BIN` | 62,000 | `89B8FAB1F6DADD72` |
+| 2 | `GUEST.DAT` | 144,665,408 | `0E32E28F3ABCBD97` |
+| 3 | `PIN.DAT` | 1,024 | `AA1397BB81C60EAC` |
+| 4 | `REPORT.DAT` | 528,384 | `2AF25E8AC647A885` |
+
+The runner printed `PAYLOAD VERIFY=OK` and the wrapper `PIN_OK LABEL=GICDRY-C CHUNKS=16`.
+
+**The video, in time (OBSERVED).**
+
+| Video time | What is on the panel |
+| --- | --- |
+| 1 s | the UEFI Shell: "Press ESC in 2 seconds to skip startup.nsh" |
+| 17 s | q1n1's EL2 page right after ExitBootServices, `UPTIME 0 S` |
+| 22 to 24 s | the runner's page: the `PAYLOAD` lines, the `SNAPMON` stages and `NEXT GIC STORES AFTER 8 S` (the first NEXT line, at about 24 s) |
+| 34 s | `NEXT GIC WINDOW 2 S`, the IRQ line and `NEXT GIC EL1 EXCURSION AFTER 8 S` |
+| 46 s | the VERDICT and the reporter's block, about 21 s after the first NEXT line (the record said about 20 s and at most about 24 s) |
+| 53 to 57 s | the page alternates with q1n1's page, whose `UPTIME` reads 37 S and 38 S (17 s + 37 s = 54 s): no restart |
+
+**The page lines that matter** (capital letters only, as the page folds case; the addresses of the stub and its table are one boot's
+allocation, not constants). The wrapper:
+
+```text
+SNAPMON PLACE BASE=0X880000000 SIZE=0X2A000000 DESC=217 DBASE=0X880000000 DPAGES=0X780000
+SNAPMON STAGE=COPIED COPIED=16 BYTES=148284944 HASHED=13 HASHED_BYTES=144664080
+SNAPMON GIC GICD CTLR=0X10 ARE=1 DS=0 G1A=0 NEED_G=1 TYPER=0XF87F051E IIDR=0X401043B
+SNAPMON GIC GICR IDX=0 TYPER=0XD0000E7 WAKER=0X0 ISEN=0X4E800001 PEND=0 ACT=0
+SNAPMON GIC CPU SRE=0XF EOIMODE=1 PMR=0XF8 BPR1=0X3 IGRPEN1=0 PRIO=0XA0 CFG=0X0 GRP=0 CTL=0X2
+SNAPMON NEXT GIC STORES AFTER 8 S G=1 R=1 C=1 T=1 V=1 E=1
+SNAPMON NEXT GIC WINDOW 2 S GICD=0X12 ISEN=0X4000000 PRIO=0X80 PMR=0XF8 IGRPEN1=1 HPPIR=1023
+SNAPMON GIC IRQ INTID=26 LAT_US=0/0/0/0 OK=1111 FINAL=CLEAR
+SNAPMON NEXT GIC EL1 EXCURSION AFTER 8 S HCR=0X80000010 SCTLR1=0X30500800 VBAR1=0XCEA8F000 PCT=1
+SNAPMON GIC EL1 INTID=26 LAT_US=0 ON_TIME ELR=0XCEA8F798 SPSR=0X345 OK=1
+SNAPMON GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRCTVE VBAR=OK EL1=OK
+SNAPMON GIC VERDICT=IRQ_OK OUTCOME=0X20 SUB=DONE
+SNAPMON TICKS HZ=19200000 PLACED=47666 COPIED=37684016 HASHED=56123297
+SNAPMON STAGE=DONE RETURN=0
+SNAPMON MONITOR NOT CALLED: UNIMPLEMENTED IN THIS BUILD
+PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=2 FAULTS=0 REFUSED=0 LINES=29 DROPPED=0
+```
+
+The reporter, which decodes the record the wrapper left in RAM:
+
+```text
+SNAPREP DRY RUN COMPLETE STAGE=DONE: THE MONITOR WAS NOT CALLED
+SNAPREP GIC VERDICT=IRQ_OK OUTCOME=0X20 SUB=DONE
+SNAPREP GIC OLD PRIO=0XA0 ICFGR1=0X0 IGROUPR0=0X0 ISPEND=0X8000000 ISACT=0X0
+SNAPREP GIC SPI LINES=30 EN=3 PEND=9 BOTH=0 FIRST=0 SECOND=0
+SNAPREP GIC PPIP P23=0XA0 P25=0XA0 P27=0XA0 P30=0XA0
+SNAPREP GIC TIMERS VCTL=0X5 VCVAL=0X2843B1D7 PCTL=0X0 PCVAL=0X0
+SNAPREP GIC QUAR MASK=0X4A800001 DONE=0X4000000 HPPIR=1023
+SNAPREP GIC NEW GICD=0X13 RB=0X12 ISEN=0X4000000 PRIO=0X80 PMR=0XF8 IGRPEN1=1
+SNAPREP GIC IRQ INTID=26 LAT_US=0/0/0/0 OK=1111 FINAL=CLEAR
+SNAPREP GIC CYC0 IAR=26 HPPIR=26 POST=1023 F=100 TICKS=1 US=0
+SNAPREP GIC CYC1 IAR=26 HPPIR=26 POST=1023 F=100 TICKS=0 US=0
+SNAPREP GIC CYC2 IAR=26 HPPIR=26 POST=1023 F=100 TICKS=0 US=0
+SNAPREP GIC CYC3 IAR=0 HPPIR=26 POST=1023 F=100 TICKS=0 US=0
+SNAPREP GIC EL1 INTID=26 LAT_US=0 ON_TIME ELR=0XCEA8F798 SPSR=0X345 OK=1
+SNAPREP GIC CYC4 IAR=26 HPPIR=26 POST=1023 F=100 TICKS=2 US=0
+SNAPREP GIC HCR OLD=0X88000010 RB=0X80000010 FIN=0X88000010
+SNAPREP GIC VBAR1 OLD=0XA7004000 RB=0XCEA8F000 FIN=0XA7004000
+SNAPREP GIC SCTLR1 OLD=0X100030D0198D RB=0X30500980 FIN=0X100030D0198D
+SNAPREP GIC FINAL GICD=0X10 ISEN=0X4E800001 PRIO=0XA0 PMR=0XF8 IGRPEN1=0 RPR=0XFF DAIF=0X3C0
+SNAPREP GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRCTVE VBAR=OK EL1=OK
+PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=1 FAULTS=0 REFUSED=0 LINES=32 DROPPED=0
+```
+
+`CYC3` is the final deadline taken without an acknowledge, by design (`IAR=0`: none read), as the monitor's stop path takes it.
+The reporter's block is the record's lines in the order of [SP11-STICK-GIC.md](SP11-STICK-GIC.md) section 6.
+
+**What it answers, against the record's UNKNOWN list.**
+
+| # | Question | Page lines | What the unit showed | Label |
+| --- | --- | --- | --- | --- |
+| 1 | Is PPI 26, the EL2 physical timer's interrupt, delivered to EL2 as an IRQ (U3)? | `GIC IRQ`, `CYC0` to `CYC3` | Yes, once group 1 and the CPU interface are on (`GICD_CTLR` written `0x13`, read back `0x12`; `IGRPEN1` 1; `PMR` `0xF8`; priority `0x80`): four deliveries in window 1, each with `HPPIR=26` at the vector and `POST=1023` afterwards, `IAR=26` in the first three, `F=100` (ISTATUS 1 and the other two flags 0, in the format of [SP11-STICK-GIC.md](SP11-STICK-GIC.md) section 6) | OBSERVED |
+| 2 | How late after the programmed deadline? | `LAT_US`, `TICKS` | `LAT_US=0/0/0/0`; 1, 0, 0 and 0 counter ticks in window 1 and 2 in window 2 (19.2 MHz): at most about 0.1 microsecond, by arithmetic on the printed values | OBSERVED (the figures); INFERRED (the conversion) |
+| 3 | Did the quarantine of the other enabled interrupts hold? | `QUAR`, `NEXT GIC WINDOW 2 S` | The non-secure write of `ICENABLER0` with `0x4A800001` left `ISENABLER0` `0x04000000` (PPI 26 only) and `ICC_HPPIR1_EL1` read 1023; no `Q_NOT_HELD`, no `FOREIGN_PENDING` | OBSERVED |
+| 4 | Is an interrupt taken while the CPU runs at EL1 routed to EL2? | `GIC EL1`, `CYC4` | Yes: INTID 26, `ON_TIME`, `ELR` inside the stub, `SPSR` `0x345` (EL1h with I clear) under `HCR_EL2` `0x80000010` (IMO 1, TGE clear), `IAR=26`, `HPPIR=26`, `POST=1023` | OBSERVED; INFERRED (the decode of `SPSR`) |
+| 5 | Was everything put back, the quarantined enables last? | `HCR`, `VBAR1`, `SCTLR1`, `FINAL`, `RESTORE` | Yes: `ISENABLER0` `0x4E800001`, `GICD_CTLR` `0x10`, `IGRPEN1` 0, `PMR` `0xF8`, `HCR_EL2` `0x88000010`, `VBAR_EL1` `0xA7004000`, `SCTLR_EL1` `0x100030D0198D`, `DAIF` `0x3C0` and `RPR` `0xFF`, each as found; `CLEAN=YES FAILED=0X0 RETRIED=0X0` | OBSERVED |
+| 6 | What was the foreign interrupt of boot 13? | `TIMERS`, `OLD` | `CNTV_CTL_EL0` `0x5` (ENABLE 1, IMASK 0, ISTATUS 1), `CNTV_CVAL_EL0` `0x2843B1D7`, `CNTP_CTL_EL0` 0, and `ISPENDR0` `0x08000000` again before any store: the EL1 virtual timer was asserting. That it is the source of INTID 27 follows from the GTDT's Virtual EL1 GSIV 27 | OBSERVED (the timer asserting); INFERRED (that INTID 27 is its) |
+| 7 | Is any SPI both enabled and pending? | `GIC SPI` | `LINES=30` (INTIDs 32 to 991): 3 SPIs enabled, 9 pending, none both (`BOTH=0`); the counts are of INTIDs, as the stage's survey makes them | OBSERVED |
+| 8 | The priorities of the other enabled PPIs | `GIC PPIP` | `0xA0` for each of PPIs 23, 25, 27 and 30 | OBSERVED |
+| 9 | How long did the stage take? | the video | About 21 s from the first NEXT line to the VERDICT; the tick marks of the copy and the hash, 37,684,016 and 56,123,297 (1.96 s and 2.92 s at 19.2 MHz), as in the earlier boots | OBSERVED |
+| 10 | Did the page stay up? | q1n1's `UPTIME` | 37 S and 38 S at 53 to 57 s of the video; no restart in the video, and nothing is known beyond its end | OBSERVED (alive to `UPTIME` 38 S); UNKNOWN (after) |
+
+**What it does not show.**
+
+- Extended SPIs and LPIs (`GICD_TYPER` ESPI 1, `GICR_TYPER` PLPIS 1; the decode of the two registers is INFERRED) were neither
+  surveyed nor quarantined; the one `ICC_HPPIR1_EL1` read before window 1 saw 1023, at one instant. UNKNOWN whether any is enabled and pending.
+- Which SPIs are enabled or pending: the page holds counts, not the registers (UNKNOWN).
+- The I-set entry: window 2 ran with PSTATE.I clear, while the monitor enters its guest with it set (UNKNOWN).
+- Anything about a guest: nothing of it ran and the monitor was not called (`UNIMPLEMENTED IN THIS BUILD`). Whether the interrupt state
+  survives a guest is UNKNOWN.
+- The exception of pass 6, the withheld last write behind two open group 1 gates, was not exercised: both gates went back.
+- PPI 26's group, beyond what `IAR=26` implies (INFERRED, the specification was not re-read), and the `PEND` field of the `GICR` line,
+  which this transcription does not decode (`ISPEND` `0x8000000` is the whole `ISPENDR0`).
+- The restarts of 14.1: this boot ran no `CPU_ON`. It adds one page seen alive (to `UPTIME` 38 S, then the video ends), not a restart time.
+
+**What follows.** By the record, after any window verdict the series stops: the next work is the M1 stop design (D2), not a retry
+([SP11-STICK-GIC.md](SP11-STICK-GIC.md) section 11). For this log nothing changes: the panel is still the only channel, no stick
+write at EL2 exists (S1 to S6 are UNIMPLEMENTED), and A1 and A2 were not exercised by this boot.
 
 ## Appendix A. The page lines of the survey boot (S0; EXPERIMENTAL in the q1n1 fork; ran once on the unit, section 12)
 
