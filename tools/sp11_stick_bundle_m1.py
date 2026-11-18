@@ -45,6 +45,15 @@ D9_PANELS = tuple(PANEL_MARKS)  # the --panel choices this record is written for
 BOOT_ARGS = {'cpus=1': 'CPUS1-'}
 BOOT_ARG_PANEL = 'console'
 ch.KNOWN_REFUSALS.add('BOOT_ARG_REFUSED')
+# The one PARAMS word of the monitor's own that a record of this tool sets: let_panic, word 23 of struct params at offset 0xB8 (probes/xnuboot/report_layout.c), which the monitor reads at
+# one place only (probes/xnuboot/trap_dispatch.c:370-387) to run XNU's own handler for a guest EL1 exception that it would otherwise stop at (docs/SP11-STICK-MONITOR.md section 20, K12).
+# --let-panic is for the panel as the console with cpus=1 and the 5 s box, in this order (--panel, --boot-arg, --time-box-s), and for no other combination; its record's label carries
+# LET_PANIC_MARK in place of CPUS1-. permissive and skip_undef are the monitor's other diagnostic words of this kind: no record sets them.
+LET_PANIC_FORM = ch.LET_PANIC_FORM
+LET_PANIC_MARK = 'LETPANIC-'
+DIAG_WORDS = (('permissive', 21), ('let_panic', 23), ('skip_undef', 28))
+LET_PANIC_AT = 8 * 23
+ch.KNOWN_REFUSALS.add('LET_PANIC_REFUSED')
 PIN_LABEL_MAX = 23              # sp11sb_string_ok: build_label is 24 bytes and a string of 1 to 23 characters
 EFI_NAMES = ('SLBOUNCE-DEVHE-MARK.EFI', 'Q1N1-PAYLOAD.EFI')       # the two files that run at EL2 before the wrapper: the builder's SLBOUNCE and RUNNER
 REPORT_CAP = 1 << 20
@@ -86,12 +95,13 @@ def _no_duplicates(pairs):
     return out
 
 
-def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None, boot_arg=None):
+def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None, boot_arg=None, let_panic=False):
     """--m1-run runs the wrapper's GIC arm (gic), the monitor (el2_sysreg) and RAM stores, with the time box the wrapper's pre-call check accepts. With `real`
     (panel and hvc_calls given) D9 admits a stock kernel (--sptm-hvc-calls 0) with the panel withheld (the first choice), handed (the second) or handed as the
     kernel's console (`console`: serial=2 in the command line, as probes/run.py makes it for the A16's native panel console)
     (tools/sp11_stick_bundle_panel.py; docs/SP11-STICK-MONITOR.md section 20): the record says which, from the bytes of the guest, and says nothing true of
-    a patched kernel, so --sptm-hvc-calls 1 stays refused for all three. `boot_arg` is one word of BOOT_ARGS for the panel as the console (check_boot_arg)."""
+    a patched kernel, so --sptm-hvc-calls 1 stays refused for all three. `boot_arg` is one word of BOOT_ARGS for the panel as the console (check_boot_arg), and
+    `let_panic` the option of check_let_panic."""
     need = sb.STORE_RAM | sb.STORE_EL2_SYSREG | sb.STORE_GIC
     if stores & need != need:
         raise ch.Refused('OPTIONS_BAD', '--m1-run stores in all three classes: --stores must include ram, el2_sysreg and gic')
@@ -104,6 +114,20 @@ def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None, boot
                                         f'as the kernel\'s console), each with --sptm-hvc-calls 0 (a stock kernel), and this record is written for no other choice; '
                                         f'got --panel {panel} and --sptm-hvc-calls {hvc_calls}')
     check_boot_arg(boot_arg, panel)
+    check_let_panic(let_panic, panel, boot_arg, time_box_s)
+
+
+def check_let_panic(let_panic, panel, boot_arg, time_box_s, is_m1=True):
+    """--let-panic is the record of LET_PANIC_FORM, the panel as the console with cpus=1 and the 5 s box, in the monitor entry run: LET_PANIC_REFUSED for any other combination or
+    kind of record, before any guest is built. False is no option."""
+    if not let_panic:
+        return
+    if not is_m1:
+        raise ch.Refused('LET_PANIC_REFUSED', '--let-panic is a choice of the monitor entry run (docs/SP11-STICK-MONITOR.md section 20, K12): it needs --m1-run')
+    if (panel, boot_arg, time_box_s) != LET_PANIC_FORM:
+        panel_arg, word, box = LET_PANIC_FORM
+        raise ch.Refused('LET_PANIC_REFUSED', f'--let-panic is for --panel {panel_arg} --boot-arg {word} --time-box-s {box} and no other combination; '
+                                              f'got --panel {panel} --boot-arg {boot_arg} --time-box-s {time_box_s}')
 
 
 def check_boot_arg(boot_arg, panel, is_m1=True):
@@ -119,13 +143,13 @@ def check_boot_arg(boot_arg, panel, is_m1=True):
         raise ch.Refused('BOOT_ARG_REFUSED', f'--boot-arg {boot_arg} is a word of --panel {BOOT_ARG_PANEL} only; got --panel {panel}')
 
 
-def pinned_label(label, is_m1, choice='withheld', boot_arg=None):
+def pinned_label(label, is_m1, choice='withheld', boot_arg=None, let_panic=False):
     """The build_label PIN.DAT carries. For this kind the marker comes first (the wrapper of this kind refuses a PIN.DAT without it, D2) and, for a guest that is
     handed the panel, the marker of that choice (PANEL_MARKS) after it, so that the three choices of D9 have three labels, or, for a guest with a boot-arg word of its own
-    (BOOT_ARGS), that word's marker in its place, so that the record of that guest has a label of its own; for every other kind the label is the
-    facts' and may not start with the marker, or a PIN.DAT of another kind would pass for this one. The facts label of this kind may not start with a marker of
-    a choice or of a word either: M1RUN-PANEL- is then the label of the choice that hands the panel, M1RUN-CONSOLE- that of the panel as the console and M1RUN-CPUS1- that
-    of the panel as the console with cpus=1, and of no other.
+    (BOOT_ARGS), that word's marker in its place, or, for the guest of --let-panic, LET_PANIC_MARK in place of that, so that the record of that guest has a label of its own;
+    for every other kind the label is the facts' and may not start with the marker, or a PIN.DAT of another kind would pass for this one. The facts label of this kind may
+    not start with a marker of a choice, of a word or of --let-panic either: M1RUN-PANEL- is then the label of the choice that hands the panel, M1RUN-CONSOLE- that of the
+    panel as the console, M1RUN-CPUS1- that of the panel as the console with cpus=1 and M1RUN-LETPANIC- that of the same with let_panic, and of no other.
     PIN_STRING: it does not fit."""
     if label.startswith(LABEL_PREFIX):
         raise ch.Refused('PIN_STRING', f'build_label starts with {LABEL_PREFIX}, which only --m1-run adds')
@@ -135,9 +159,13 @@ def pinned_label(label, is_m1, choice='withheld', boot_arg=None):
     for word, mark in BOOT_ARGS.items():
         if is_m1 and label.startswith(mark):
             raise ch.Refused('PIN_STRING', f'build_label starts with {mark}, which only --m1-run with --boot-arg {word} adds after {LABEL_PREFIX}')
+    if is_m1 and label.startswith(LET_PANIC_MARK):
+        raise ch.Refused('PIN_STRING', f'build_label starts with {LET_PANIC_MARK}, which only --m1-run with --let-panic adds after {LABEL_PREFIX}')
     if boot_arg is not None:
         check_boot_arg(boot_arg, choice, is_m1)
-    front = LABEL_PREFIX + (BOOT_ARGS[boot_arg] if boot_arg is not None else PANEL_MARKS[choice])
+    if let_panic and (not is_m1 or (choice, boot_arg) != LET_PANIC_FORM[:2]):
+        raise ch.Refused('LET_PANIC_REFUSED', f'the label of --let-panic is the one of --panel {LET_PANIC_FORM[0]} --boot-arg {LET_PANIC_FORM[1]} in the monitor entry run; got --panel {choice} --boot-arg {boot_arg}')
+    front = LABEL_PREFIX + (LET_PANIC_MARK if let_panic else BOOT_ARGS[boot_arg] if boot_arg is not None else PANEL_MARKS[choice])
     if is_m1 and len(front + label) > PIN_LABEL_MAX:
         raise ch.Refused('PIN_STRING', f'--m1-run puts {front} in front of build_label and the pinned label holds {PIN_LABEL_MAX} characters: the facts label holds '
                                        f'{PIN_LABEL_MAX - len(front)}')
@@ -306,8 +334,10 @@ def read_report(data, image, reporter, efi=None):
                 nv2=dict(sha256=nv2_digest, header_sha256=header, **{k: fields[k] for k in NV2_KEYS}), test_record=fields['tool'] == TEST_TOOL, efi=efi)
 
 
-def check_launch(chunks):
-    """PARAMS_LAUNCH: the PARAMS chunk of the guest holds zero in every word of LAUNCH_WORDS. PARAMS_ANS: none of the MODEL_MAX slots of its device models holds
+def check_launch(chunks, let_panic_reference=None):
+    """PARAMS_LAUNCH: the PARAMS chunk of the guest holds zero in every word of LAUNCH_WORDS and in the monitor's diagnostic words of DIAG_WORDS, except let_panic for the
+    guest of --let-panic: that guest is given as `let_panic_reference` the PARAMS bytes that the same build has with let_panic at 0 (rung 3's PARAMS chunk), and its chunk equals
+    them in every word but let_panic, which is 1 (what was built is what the record says: K12). PARAMS_ANS: none of the MODEL_MAX slots of its device models holds
     a DEVICE_ANS_* kind, the slots past model_count included (the monitor does not read those, but a PARAMS that has one is not a PARAMS this builder wrote; the
     whole 64-bit word is the kind, as the monitor compares it). A chunk too short to hold them, or a model_count that struct params has no slots for, is
     BUILT_SHAPE, as for the words check_params reads."""
@@ -318,6 +348,15 @@ def check_launch(chunks):
     if bad := [f'{name} (offset {at:#x})' for name, at, size in LAUNCH_WORDS if any(data[at:at + size])]:
         raise Refused('PARAMS_LAUNCH', f'PARAMS is not zero in {", ".join(bad)}: this run opens none of the paths those words open')
     word = lambda at: int.from_bytes(data[at:at + 8], 'little')     # noqa: E731
+    wanted = {'let_panic': int(let_panic_reference is not None)}
+    if bad := [f'{name} (offset {8 * i:#x}) is {word(8 * i)}, not {wanted.get(name, 0)}' for name, i in DIAG_WORDS if word(8 * i) != wanted.get(name, 0)]:
+        raise Refused('PARAMS_LAUNCH', f'PARAMS {"; ".join(bad)}: the monitor\'s diagnostic words are zero in every record of this kind but --let-panic\'s, which sets let_panic to 1 and no other')
+    if let_panic_reference is not None:
+        size = len(let_panic_reference)
+        different = [i for i in range(size // 8) if data[8 * i:8 * i + 8] != let_panic_reference[8 * i:8 * i + 8]]
+        if size < PARAMS_BYTES or len(data) < size or different != [LET_PANIC_AT // 8] or any(data[size:]):
+            raise Refused('PARAMS_LAUNCH', f'PARAMS of --let-panic differs from the one that the same build has without it in the words {different} (after its {size} bytes '
+                                           f'only zero padding may follow): the guest differs in the let_panic word (index {LET_PANIC_AT // 8}) and in no other')
     if (count := word(MODEL_COUNT_AT)) > MODEL_MAX:
         raise Refused('BUILT_SHAPE', f'PARAMS lists {count} device models and struct params has {MODEL_MAX} slots')
     for slot in range(MODEL_MAX):

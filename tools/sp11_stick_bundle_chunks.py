@@ -25,6 +25,7 @@ PARAMS_WORDS, PARAMS_WATCHDOG, PARAMS_MEM_LOW, PARAMS_MEM_HIGH = 1154, 24, 30, 3
 AFFINITY = 0xFF00FFFFFF     # Aff3:Aff2:Aff1:Aff0 of MPIDR_EL1, the part ACPI states
 ZERO_MIN = 0x10000      # a shorter zero stretch stays data: every ZERO chunk is a table entry, and a table holds 1024
 KNOWN_REFUSALS = {n for _, n, _ in sb.ERRORS} | {'BUILT_SHAPE', 'PARAMS_MISMATCH', 'TIME_BOX_MISMATCH', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING'}   # the builder adds its own
+LET_PANIC_FORM = ('console', 'cpus=1', 5)       # (--panel, --boot-arg, --time-box-s) of the one record that sets the monitor's let_panic PARAMS word: tools/sp11_stick_bundle_m1.py, K12
 
 
 class Refused(Exception):
@@ -276,6 +277,10 @@ def real_built(a, xb, place, facts):
     except (ValueError, SystemExit):
         raise Refused('BUILT_SHAPE', 'an APF device slice of the guest\'s device tree overlaps the guest, the panel or the work area') from None
     built['watchdog'] = a.time_box_s
+    if getattr(a, 'let_panic', False):      # the monitor's PARAMS word let_panic: set for the one record of LET_PANIC_FORM, which the caller's option check has already held it to
+        if (a.panel, boot_arg, a.time_box_s) != LET_PANIC_FORM:
+            raise Refused('LET_PANIC_REFUSED', f'let_panic is for --panel {LET_PANIC_FORM[0]} --boot-arg {LET_PANIC_FORM[1]} --time-box-s {LET_PANIC_FORM[2]} only')
+        built['let_panic'] = True
     built['chunks'][xb.PARAMS_PA] = xb.params_blob(built)       # run.py serialises the parameters once more, after its run-time overrides
     return built
 

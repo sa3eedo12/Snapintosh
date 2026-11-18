@@ -26,6 +26,7 @@ import sp11_stick_bundle_m1 as m1  # noqa: E402
 import sp11_stick_bundle_record_m1 as m1t  # noqa: E402
 import sp11_stick_bundle_panel_rung2 as r2  # noqa: E402
 import sp11_stick_bundle_panel_rung3 as r3  # noqa: E402
+import sp11_stick_bundle_panel_panic as rp  # noqa: E402
 REFUSALS = ('PANEL_MISMATCH',)      # beside m1.REFUSALS: docs/SP11-STICK-MONITOR.md section 20 lists it
 ch.KNOWN_REFUSALS.update(REFUSALS)
 Refused = ch.Refused
@@ -57,8 +58,9 @@ def command_line(choice, boot_arg=None):
 
 
 def kind_key(real):
-    """The key of the guide's PANEL table for the facts of a real build: its choice, and `+word` when its command line has a word of its own, which is a record of its own."""
-    return real['panel'] + (f'+{real["boot_arg"]}' if real.get('boot_arg') else '')
+    """The key of the guide's PANEL table for the facts of a real build: its choice, `+word` when its command line has a word of its own, which is a record of its own, and
+    `+let_panic` when the monitor's let_panic PARAMS word is set (K12)."""
+    return real['panel'] + (f'+{real["boot_arg"]}' if real.get('boot_arg') else '') + ('+let_panic' if real.get('let_panic') else '')
 
 # What section 3c cites and what each citation rests on: (file, first line, last line, fragments that must all be somewhere on those lines). The text below
 # is held to this table by tools/test-sp11-stick-monitor-panel.py in both directions: a path:line in the text that is not here, and an entry whose fragment is
@@ -195,6 +197,7 @@ GUIDE_WORDS = {
         decides=r3.DECIDES, hazard=r3.hazard, step7=r2.step7_console, rung=r3.RUNG, why=r3.why_lines, stand=r3.stand_extra, film=r2.FILM_STEP, also_reads=('5d',), evidence_to='3c',
         stand_head=r3.STAND_HEAD, stand_loop=r3.STAND_LOOP, stand_stick=False,
         console=r3.CONSOLE, ran=r3.RAN, stop_seen=r3.STOP_SEEN, fault_seen=r3.FAULT_SEEN, film_until=r3.film_until, **{**r2.SHARED_WORDS, 'step4': r3.step4, 'step6': r3.STEP6, 'row_e': r3.row_e})}
+GUIDE_WORDS['console+cpus=1+let_panic'] = rp.guide_words(GUIDE_WORDS['console+cpus=1'])      # rung 4 (K12): rung 3's words, except those that tools/sp11_stick_bundle_panel_panic.py says again
 
 
 def reading_lines(panel):
@@ -202,7 +205,7 @@ def reading_lines(panel):
     that the operator reads; for the panel as the console it is section 5d, and 3c is the evidence for it."""
     if panel['choice'] == 'console':
         return m1t.wrap('This text also asks the operator to read section 5d: it says what to film, what is new beyond section 0b and what counts as a result of rung '
-                        f'{3 if panel.get("boot_arg") else 2}. Section 3c is the evidence for it, which the coordinator reads.', 0, 0)
+                        f'{4 if panel.get("let_panic") else 3 if panel.get("boot_arg") else 2}. Section 3c is the evidence for it, which the coordinator reads.', 0, 0)
     return m1t.wrap('This text also asks the operator to read section 3c: it says what the panel choice is, what the film must show and what counts as a pass of it.', 0, 0)
 
 
@@ -237,11 +240,11 @@ def bytes_at(chunks, pa, size):
     return None
 
 
-def read_panel(chunks, lay, facts, choice, real, board=None, boot_arg=None):
+def read_panel(chunks, lay, facts, choice, real, board=None, boot_arg=None, let_panic=False):
     """What the guest of the built `chunks` is given of the panel, from its bytes: None for a guest with none, else the dict that the text below is made from.
     PANEL_MISMATCH when it is not what `choice` (withheld, handed or console) says it is: the PARAMS words, boot_args.Video and the command line each must be the
     choice's, and for the console with `boot_arg` (a word of m1.BOOT_ARGS) the line with that word after it and no other. PARAMS is read for every guest of this kind; boot_args only for `real` (the synthetic guest's boot_args is filler). `facts` are the builder's (the
-    GOP, PIN.DAT's fb_*), `board` the descriptor that the build used."""
+    GOP, PIN.DAT's fb_*), `board` the descriptor that the build used. `let_panic` (--let-panic) is only said in the dict that it returns: the PARAMS word itself is held by m1.check_launch."""
     wanted_line = command_line(choice, boot_arg)
     handed, say = choice in GIVEN_THE_PANEL, SAYS[choice] + (f' and the word {boot_arg} in its command line' if boot_arg else '')
     params = [c for c in chunks if c['kind'] == sb.KIND_PARAMS]
@@ -267,7 +270,7 @@ def read_panel(chunks, lay, facts, choice, real, board=None, boot_arg=None):
     if not handed:
         return None
     devices = board.devices if board else {}
-    return dict(choice=choice, boot_arg=boot_arg, gop={key: facts[f'fb_{key}'] for key in ('base', 'bytes', 'width', 'height', 'stride', 'format')}, fb_pa=given[0], fb_span=given[1],
+    return dict(choice=choice, boot_arg=boot_arg, **({'let_panic': True} if let_panic else {}), gop={key: facts[f'fb_{key}'] for key in ('base', 'bytes', 'width', 'height', 'stride', 'format')}, fb_pa=given[0], fb_span=given[1],
                 video=video, cmdline=wanted_line, present=sorted(n for n, (state, _, _) in devices.items() if state == 'present'),
                 absent=sorted(n for n, (state, _, _) in devices.items() if state == 'absent'))
 
@@ -275,7 +278,7 @@ def read_panel(chunks, lay, facts, choice, real, board=None, boot_arg=None):
 def real_lines(panel):
     """The line that section 1a of the record adds for this choice, after the D9 lines."""
     g = panel['gop']
-    console = (', the kernel\'s console (serial=2)' + (f' and {panel["boot_arg"]} in its command line' if panel.get('boot_arg') else '')) if panel['choice'] == 'console' else ''
+    console = (', the kernel\'s console (serial=2)' + (f' and {panel["boot_arg"]} in its command line' if panel.get('boot_arg') else '') + (', let_panic=1 in PARAMS' if panel.get('let_panic') else '')) if panel['choice'] == 'console' else ''
     return [f'   panel        {panel["fb_pa"]:#x} + {panel["fb_span"]:#x} bytes, {g["width"]} x {g["height"]}, text mode{console}: section 3c']
 
 
@@ -306,9 +309,14 @@ def _row(label, text):
     return (f'      {label:<14}{first}', *(' ' * 20 + line for line in rest))
 
 
+def _rung(panel):
+    """The module whose words a record of the console with a word of its own is written in: rung 3's, or rung 4's, which sets let_panic as well (K12)."""
+    return rp if panel.get('let_panic') else r3
+
+
 def _in_short(panel):
     if panel.get('boot_arg'):
-        return r3.in_short(panel)
+        return _rung(panel).in_short(panel)
     lo, span = panel['fb_pa'], panel['fb_span']
     if panel['choice'] == 'console':
         return (f'In short. This record is rung 2: the first run again with the unit\'s framebuffer, {span} bytes at {lo:#x}, handed to the guest to read and write, and with '
@@ -325,7 +333,7 @@ def _in_short(panel):
 
 def _intro(panel):
     if panel.get('boot_arg'):
-        return r3.intro(panel)
+        return _rung(panel).intro(panel)
     run = panel['run']
     same = r2.same_text(run)
     other = '' if not r2.differs(run) else ', and not only those (below)'
@@ -346,7 +354,7 @@ def _intro(panel):
 
 def _label(panel, label):
     if panel.get('boot_arg'):
-        return r3.label(panel, label)
+        return _rung(panel).label(panel, label)
     mark = m1.PANEL_MARKS[panel['choice']]
     others = 'the labels of the other two choices' if panel['choice'] == 'console' else 'the label of the withheld choice'
     refuse = f'it or with {m1.PANEL_MARKS["handed"]}' if panel['choice'] == 'console' else 'it'
@@ -358,7 +366,7 @@ def _label(panel, label):
 
 def _other_differences(panel):
     if panel.get('boot_arg'):
-        return r3.other_differences(panel)
+        return _rung(panel).other_differences(panel)
     text = ('Other differences from the withheld guest follow from the panel\'s address, which lies below the bank: the guest\'s frame map and tables are wider '
             '(docs/SP11-STICK-REAL.md section 2: 46 chunks against 44 in the host run that table records).')
     if panel['choice'] == 'console':
@@ -466,7 +474,7 @@ def section_3c(panel, label):
     lo, span = panel['fb_pa'], panel['fb_span']
     shown = f'{span / MIB:.1f}'
     return (
-        r3.HEADER if boot_arg else HEADERS[choice],
+        _rung(panel).HEADER if boot_arg else HEADERS[choice],
         *_p(_in_short(panel)),
         *_p(_intro(panel)),
         *_p(_label(panel, label)),
@@ -475,6 +483,7 @@ def section_3c(panel, label):
                      f'{g["format"]} ({FORMATS.get(g["format"], "?")}): the framebuffer that the runner reports (OBSERVED: docs/SP11-STICK-BUNDLE.md section 3, PIN.DAT fb_*); '
                      'the wrapper compares it with the live GOP before the call (GOP_MISMATCH) and the builder held these facts to the firmware dumps it was given'),
         *_row('PARAMS', f'fb_pa {lo:#x}, fb_span {span:#x} ({span} bytes, {shown} MiB): that range on 16 KiB pages (words {FB_PA_WORD} and {FB_SPAN_WORD} of struct params)'),
+        *(_row('let_panic', rp.PARAMS_ROW) if panel.get('let_panic') else ()),
         *_row('boot_args', f'Video: v_baseAddr {base:#x}, v_display {mode} (text mode), v_rowBytes {row}, v_width {width}, v_height {height}, v_depth {depth}'),
         *_row('command line', panel['cmdline']),
         *_p(_other_differences(panel)),
@@ -484,7 +493,7 @@ def section_3c(panel, label):
             'pointing outside the guest\'s memory (probes/xnuboot/sptm_dispatch.c:983-988). The firmware\'s reserved descriptor around the GOP is 0x21c0000 bytes '
             '(OBSERVED: docs/SURFACE-PRO-11.md, section WS-B); the guest gets the first part of it and nothing else is mapped.'),
         *_p(_console_for(panel)),
-        *((*_p(r3.boot21_text()), *_p(r3.word_text())) if boot_arg else ()),
+        *((*_p(r3.boot21_text()), *_p(_rung(panel).word_text()), *(line for text in rp.extra_paragraphs(panel) for line in _p(text))) if boot_arg else ()),
         *_p('What stays withheld. Stage 2 maps no display, GPU or DCP register for the guest: its ranges are its RAM and reserve, this panel range and the monitor\'s '
             'work area read-only (probes/xnuboot/stage2.c:186-199); the Adreno windows exist only with gpu.flags, which the builder requires zero (PARAMS_LAUNCH), and '
             'the windows of the display timing, input and Wi-Fi models are not in this monitor (section 3b). So no guest driver can start the display pipeline: it stays '
@@ -503,7 +512,7 @@ def section_3c(panel, label):
             'wrote the panel. How the runner maps this memory at EL2 is not known here, so the time of those reads and whether any dirty line is written back are '
             'UNKNOWN' + (r3.READS_SEEN if boot_arg else '') + '. Both reads lie outside the time box.'),
         *_p(_screen(panel)),
-        *((*_p(r2.public_text()), *_p(r3.expect_text(panel['run']) if boot_arg else r2.expect_text(panel['run']))) if choice == 'console' else (*_p(_film(panel)), *_hazards(panel))),
+        *((*_p(r2.public_text()), *_p(_rung(panel).expect_text(panel['run']) if boot_arg else r2.expect_text(panel['run']))) if choice == 'console' else (*_p(_film(panel)), *_hazards(panel))),
         *_p('Store class. The ram class covers the range: the guest\'s stores to it are RAM stores outside the placement, and the monitor\'s accesses are loads and DC '
             'CIVAC. The interface has no class for a framebuffer, so PIN.DAT\'s authorised_stores stays 7 and approving this record approves those stores by name: the '
             'panel range of section 2.'),
@@ -515,4 +524,4 @@ def section_5d(panel, wait_s):
     (tools/sp11_stick_bundle_panel_rung2.py), or of rung 3, the console with cpus=1 (tools/sp11_stick_bundle_panel_rung3.py). `wait_s` is the silence rule's wait for this
     record's box (the guide's silence_s)."""
     assert panel['choice'] == 'console', 'the panel handed has these in section 3c'
-    return (r3 if panel.get('boot_arg') else r2).section_5d(panel, wait_s)
+    return (_rung(panel) if panel.get('boot_arg') else r2).section_5d(panel, wait_s)
