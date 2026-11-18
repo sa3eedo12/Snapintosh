@@ -10,7 +10,9 @@ lines of section 1a exist only for kind `real`. In the same way the lines of sec
 tools/sp11_stick_bundle_record_m1.py (the guest SMC, section 3b, the gic class and its facts), the budget of section 4, the
 silence rule of section 5 (M1_SILENCE_RULE, in place of SILENCE_RULE) and the stop rules of M1_STOP_RULES, and the sections that tell the operator what he decides,
 what can go wrong, what a pass is, what the pages say and what he does (0, 0b and 5 to 5c, in tools/sp11_stick_bundle_record_m1_guide.py) exist only for a
-record of the monitor entry run (--m1-run), and the records of the other kinds are what they were (tools/test-sp11-stick-bundle-record.py pins their digests).
+record of the monitor entry run (--m1-run), and the records of the other kinds are what they were (tools/test-sp11-stick-bundle-record.py pins their digests). The lines about
+the panel, section 3c and those of sections 1a, 2, 3, 4 and 5 that differ, are in tools/sp11_stick_bundle_panel.py and exist only for the M1 record of a guest
+that is handed the panel (D9's second choice, and the panel as the kernel's console, the third); the record of the first choice, panel withheld, is what it was.
 
 Evidence: EXPERIMENTAL, hardware NOT RUN. Nothing here approves anything."""
 import hashlib
@@ -23,13 +25,15 @@ import sp11_stick_bundle_chunks as ch  # noqa: E402
 import sp11_stick_bundle_record_gic as gq  # noqa: E402
 import sp11_stick_bundle_record_m1 as m1t  # noqa: E402
 import sp11_stick_bundle_record_m1_guide as m1g  # noqa: E402
+import sp11_stick_bundle_panel as pn  # noqa: E402
 
 ch.KNOWN_REFUSALS.add('NOTE_BAD')       # the builder lists it among its own refusals too
 MIB = sb.MIB
 STORES = {'ram': sb.STORE_RAM, 'el2_sysreg': sb.STORE_EL2_SYSREG, 'gic': sb.STORE_GIC}       # the classes --stores names, in the order the record lists them
 DEFAULT_SEED = 'sp11-stick-bundle'      # the label `real` uses when --seed is not given: a default of the tool, not a decision of the operator
 NOTE_LINES, NOTE_COLUMNS = 48, 120
-PANEL_WORDS = {'withheld': 'the guest is given no framebuffer', 'handed': 'the guest is given the unit\'s framebuffer'}
+PANEL_WORDS = {'withheld': 'the guest is given no framebuffer', 'handed': 'the guest is given the unit\'s framebuffer',
+               'console': 'the guest is given the unit\'s framebuffer, and its command line makes the panel the kernel\'s console (serial=2)'}
 # What a panel that is withheld leaves the guest with, in every record of a real build (D9): boot 20's stop PC and the public XNU source say it (INFERRED, high).
 PANEL_CONSEQUENCE = {'withheld': 'a withheld panel leaves the guest\'s video description all zero, and stock XNU then spins in an early console loop (INFERRED, high: '
                                  'boot 20\'s stop PC and the public XNU source), so a longer box on that image only repeats it'}
@@ -278,12 +282,13 @@ def m1_lines(m1):
     return lines
 
 
-def m1_budget(box_s, place, guest_bytes):
-    """The figures of section 4 as printed: the size of the stop's clean in MiB and its bound in s, the wrapper's own time as measured, the known parts of the run
+def m1_budget(box_s, place, guest_bytes, panel=None):
+    """The figures of section 4 as printed: the size of the stop's clean in MiB (the panel range is cleaned too for a guest that is handed it: `panel` is
+    tools/sp11_stick_bundle_panel.py read_panel's dict) and its bound in s, the wrapper's own time as measured, the known parts of the run
     (the low sum with what boot 20 took for the prepare and the clean and the smaller of the measured wrapper time and that time scaled to this GUEST.DAT,
     the high one with the bound of the clean and the larger of the two), the prepare not counted in the high sum, and the scaled wrapper time."""
     t = TIME_FACTS
-    clean_mib = (place['guest_size'] + place['reserve_size']) // MIB
+    clean_mib = (place['guest_size'] + place['reserve_size'] + (panel['fb_span'] if panel else 0)) // MIB
     clean_s = round(t['verify_s'] * clean_mib / t['verify_mib'], 1)
     wrapper_s = round(t['wrapper_s'], 1)
     scaled_s = round(t['wrapper_s'] * guest_bytes / t['dry_guest_bytes'], 1)
@@ -302,16 +307,18 @@ def m1_d8_lines(box_s):
                          ': the charger is in before the boot and stays in until the end (section 5c).', first=3, rest=3))
 
 
-def m1_time_lines(box_s, place, guest_bytes):
+def m1_time_lines(box_s, place, guest_bytes, panel=None):
     """Section 4 of the record of an M1 run: the box, what it does not bound, the time budget with its numbers, what UPTIME reads, and D8. The sums are of the figures
-    as printed. Everything that depends on the box comes from `box_s`: the budget, the runaway case, the relaxation of D5's 20 s and what D8 decided."""
+    as printed. Everything that depends on the box comes from `box_s`: the budget, the runaway case, the relaxation of D5's 20 s and what D8 decided. `panel` is set
+    for a choice that hands the guest the panel: its range is cleaned at the stop too, and the monitor's two reads of it are a row of their own that the sums cannot
+    count."""
     t = TIME_FACTS
-    clean_mib, clean_s, wrapper_s, low, high, scaled_s = m1_budget(box_s, place, guest_bytes)
+    clean_mib, clean_s, wrapper_s, low, high, scaled_s = m1_budget(box_s, place, guest_bytes, panel)
     low_wrapper, high_wrapper = sorted((wrapper_s, scaled_s))
     size = (f'The {wrapper_s} s was measured in the dry run with a {t["dry_guest_bytes"] / 1e6:.1f} MB GUEST.DAT; this one is {guest_bytes / 1e6:.1f} MB, so ' +
             (f'that figure is conservative: it goes into the high sum, and the low sum uses the {scaled_s} s that it scales to' if scaled_s <= wrapper_s else
              f'the low sum keeps that figure and the high sum uses the {scaled_s} s that it scales to') +
-            ' (INFERRED: the copy and the verify take time in proportion to the size).')
+            ' (INFERRED: the copy and the verify take time in proportion to the size). ' + m1t.BOOT20_HASHING)
     kept = f'the time box of {box_s} s is kept' if box_s <= m1g.D5_BOX_S else f'the time box of {box_s} s is this record\'s own: section 0'
     return [
         f'4. Time box: {box_s} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds, word 24).',
@@ -323,13 +330,16 @@ def m1_time_lines(box_s, place, guest_bytes):
                   'one boot each): then only the operator\'s FORCE OFF (section 5c) ends the run.', first=3, rest=3),
         '   Time, from the wrapper\'s first line to the end of the report:',
         f'      wrapper checks, copy and verify          {wrapper_s} s    OBSERVED once (the dry run: {t["wrapper_s"]} s)',
+        *m1t.BOOT20_HASHED_ROW,
         f'      GIC arm: the announcement and the wait   {t["arm_wait_s"]} s      SW_GIC_WAIT_S in probes/sp11-stick-gic.h',
         f'      {"monitor prepare and stop clean":<41}{t["prepare_clean_s"]} s   OBSERVED once (boot 20: TICKS less the box)',
+        *(pn.time_rows(panel) if panel else ()),
         f'      guest                                    {box_s} s      the time box',
         f'      {f"stop: clean of {clean_mib} MiB, the bound":<41}at most {clean_s} s (INFERRED: the dry run verified {t["verify_mib"]} MiB in',
         f'      {"":<41}{t["verify_s"]} s, re-hash included)',
         f'      {"the known parts, low sum":<41}about {low} s ({low_wrapper} + {t["arm_wait_s"]} + {box_s} + {t["prepare_clean_s"]})',
         f'      {"the known parts, high sum":<41}at most {high} s ({high_wrapper} + {t["arm_wait_s"]} + {box_s} + {clean_s}), plus the prepare',
+        *(pn.TIME_SUM_NOTE if panel else ()),
         *m1t.wrap(size, first=3, rest=3),
         *m1t.wrap('The plan\'s budget is a run well under 20 s of UPTIME, a precaution of low weight (docs/SP11-MONITOR-PORT.md section 10, D5); this run does not meet it, '
                   f'whatever the box: the known parts alone are about {low} to {high} s, and the runner\'s own load comes before them (UPTIME, below). APPROVING THIS TEXT '
@@ -337,8 +347,9 @@ def m1_time_lines(box_s, place, guest_bytes):
                   'wait of the GIC arm, part of the known parts, stays as built). What UPTIME reads: it is q1n1\'s clock from before the runner loads and hashes the '
                   f'{guest_bytes / 1e6:.1f} MB of GUEST.DAT, it stays at 0 S while the runner\'s chain runs, and its first heartbeat draws the whole chain, both payloads '
                   'and the re-hash included (docs/SP11-STICK-LOG.md section 14), so the first heartbeat after STAGE=DONE reads well above 17 s (boot 14: 37 and 38 S, '
-                  'in a run that took about 21 s from its first NEXT line to its verdict; OBSERVED, one unit, one boot). The earliest restart datum is about UPTIME 17 s '
-                  '(INFERRED: one boot, in a run that started secondary CPUs; the plan, section 10): every run of this kind is past it by construction. On restarts: '
+                  'in a run that took about 21 s from its first NEXT line to its verdict; OBSERVED, one unit, one boot' + m1t.UPTIME_BOOT20 + '). The earliest restart datum is '
+                  'about UPTIME 17 s '
+                  '(INFERRED: one boot, in a run that started secondary CPUs; the plan, section 10): every run of this kind is past it by construction, and boot 20 was. On restarts: '
                   'a PSCI-only control was alive at UPTIME 224 s and 268 s (OBSERVED, two boots); the restarts seen went with CPU_ON and CPU_OFF (INFERRED) and this '
                   'run starts no secondary (x4 = 0).', first=3, rest=3),
         '   Thermal (D8): no thermal guard exists on this path. The monitor\'s own (compat/a16-thermal.c) only loads, from the',
@@ -353,7 +364,9 @@ def m1_time_lines(box_s, place, guest_bytes):
         '   voltage or DVFS write is compiled in or reachable by the sources read (INFERRED from the profile\'s gates; the census',
         '   sees system registers only, not MMIO). Approving this record accepts the exception D8 describes',
         *m1_d8_lines(box_s),
-        *m1t.wrap('If the stop timer never fires (the plan\'s second most likely failure, section 5a) ' + m1g.runaway_words(box_s), first=3, rest=3),
+        *m1t.wrap('If the stop timer never fires (the plan\'s second most likely failure, section 5a) ' + m1g.runaway_words(box_s, {'panel': panel['choice']} if panel else None),
+                  first=3, rest=3),
+        *(pn.THERMAL_LINES if panel else ()),
         '   PARAMS words: gpu.flags, early_stop.flags and txm_native are zero in the chunk (this builder checked all three);',
         '   the wrapper reads the first two again before the call, not txm_native. That is a snapshot: the monitor reads',
         '   gpu.flags and early_stop.flags again while the guest runs, and the guest can write the RAM that holds them',
@@ -381,9 +394,10 @@ def note_lines(data):
 def real_lines(real, m1=False):
     """Section 1a of the record of a `real` build: what GUEST.DAT and PIN.DAT were made from, as used and not as decided. `real` holds
     kernelcache_sha256, guest_profile, panel, sptm_hvc_calls, seed, descriptor_sha256, board_id, board_status and ecam_windows (the number of
-    config windows the descriptor lists). A descriptor that is EXPERIMENTAL and lists none is the guest view of docs/SP11-STICK-REAL.md
-    section 3: it does not describe the Surface, and the board adapter's equality rule on the MCFG (D11 proper) is not satisfied by it. `m1` is true for the
-    record of a monitor entry run, whose default seed label is the operator's decision N1 of 2026-11-17 and no longer an open note."""
+    config windows the descriptor lists) and, for the M1 record of a guest that is handed the panel, panel_facts (tools/sp11_stick_bundle_panel.py). A descriptor that
+    is EXPERIMENTAL and lists none is the guest view of docs/SP11-STICK-REAL.md section 3: it does not describe the Surface, and the board adapter's equality rule on
+    the MCFG (D11 proper) is not satisfied by it. `m1` is true for the record of a monitor entry run, whose default seed label is the operator's decision N1 of
+    2026-11-17 and no longer an open note."""
     seed = real['seed']
     if seed != DEFAULT_SEED:
         seed_lines = [f'   boot seed    label {seed} (given with --seed)']
@@ -397,6 +411,7 @@ def real_lines(real, m1=False):
              f'   D9 as built  panel {real["panel"]}: {PANEL_WORDS[real["panel"]]}',
              f'                SPTM HVC call patch {real["sptm_hvc_calls"]}: {HVC_WORDS[real["sptm_hvc_calls"]]}',
              *(m1t.wrap(PANEL_CONSEQUENCE[real['panel']], first=16, rest=16) if real['panel'] in PANEL_CONSEQUENCE else ()),
+             *(pn.real_lines(real['panel_facts']) if real.get('panel_facts') else ()),
              *seed_lines,
              f'   descriptor   sha256 {real["descriptor_sha256"]} (PIN.DAT descriptor_sha256)',
              f'                board {real["board_id"]}  status {real["board_status"]}']
@@ -415,15 +430,17 @@ def record_text(r):
     tools/sp11_stick_bundle_record_gic.py in place of GIC_STOP_TOUCHES, and its section 4, the heading of section 2 and the silence rule and the last bullet of
     section 5 in place of the generic lines."""
     p, g, m1 = r['place'], r['guest'], r.get('m1')
+    panel = (r.get('real') or {}).get('panel_facts')        # set only for the M1 record of a guest that is handed the panel (tools/sp11_stick_bundle_panel.py)
     assert not (m1 and r.get('gic_stop')), 'a record is of one kind'
+    assert not panel or m1, 'the panel handed to the guest is a choice of the monitor entry run'
     assert not r.get('gic_quarantine') or r.get('gic_stop'), 'the pass 5 text is a variant of the GIC and stop record'
     lines = [
         f'SNAPINTOSH SP11 STICK BUNDLE - AUTHORISATION RECORD (format 1, label {r["label"]})', '',
         'Status: operator decision NOT RECORDED. Hardware: NOT RUN. This text is a template until the operator approves it.',
         'Approval is the operator\'s alone: the SHA-256 of exactly this text, recorded as authorisation_sha256 of PIN.DAT; a changed byte is another',
         'record. It names no person and stays local: it is never committed or published.', '',
-        *((*m1g.reading_lines(), '', *m1g.decision_lines(r.get('real'), r['time_box_s']), '', *m1g.stand_lines(), '',
-           *m1g.hazard_lines(r.get('real'), r['time_box_s'], *m1_budget(r['time_box_s'], p, g['size'])[3:5]), '') if m1 else ()),
+        *((*m1g.reading_lines(r.get('real')), *(('', *pn.reading_lines(panel)) if panel else ()), '', *m1g.decision_lines(r.get('real'), r['time_box_s']), '', *m1g.stand_lines(r.get('real')), '',
+           *m1g.hazard_lines(r.get('real'), r['time_box_s'], *m1_budget(r['time_box_s'], p, g['size'], panel)[3:5]), '') if m1 else ()),
         '1. What may run (named by SHA-256; the runner hashes the payloads before each call)',
         f'   payload 0  SNAPMON.BIN  {r["monitor"][0]} bytes  sha256 {r["monitor"][1]}',
         f'   payload 1  SNAPREP.BIN  {r["reporter"][0]} bytes  sha256 {r["reporter"][1]}',
@@ -436,18 +453,21 @@ def record_text(r):
     if m1:
         lines += [*m1_lines(m1), '']
     lines += [
-        gq.PLACEMENT_HEADER if r.get('gic_quarantine') else '2. Placement (the one range the run may store to)',
+        gq.PLACEMENT_HEADER if r.get('gic_quarantine') else pn.PLACEMENT_HEADER if panel else '2. Placement (the one range the run may store to)',
         f'   guest_base {p["guest_base"]:#x}  guest_size {p["guest_size"] // MIB} MiB  reserve {p["reserve_size"] // MIB} MiB  '
         f'work_base {p["work_base"]:#x}  work_size {p["work_size"] // MIB} MiB',
-        f'   place_base {p["place_base"]:#x}  place_end {p["place_base"] + p["place_size"]:#x}  (limit 2^36)', '',
+        f'   place_base {p["place_base"]:#x}  place_end {p["place_base"] + p["place_size"]:#x}  (limit 2^36)', *((pn.placement_line(panel),) if panel else ()), '',
         f'3. Store classes authorised (PIN.DAT authorised_stores = {r["stores"]})']
-    touches = {**M1_TOUCHES, 'gic': m1t.gic_lines()} if m1 else (gq.TOUCHES if r.get('gic_quarantine') else GIC_STOP_TOUCHES) if r.get('gic_stop') else TOUCHES
+    m1_touches = {**M1_TOUCHES, 'gic': m1t.gic_lines()} if m1 else None
+    touches = (pn.touches(m1_touches, panel) if panel else m1_touches) if m1 else (
+        gq.TOUCHES if r.get('gic_quarantine') else GIC_STOP_TOUCHES) if r.get('gic_stop') else TOUCHES
     if r.get('gic_stop'):
         lines.append('   Record of the GIC and stop dry run (docs/SP11-STICK-GIC.md): payload 0 is SNAPMON-GIC.BIN; no monitor is called.')
         lines += gq.HEAD_LINES if r.get('gic_quarantine') else ()
     if m1:
         lines.append('   Record of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10): payload 0 is SNAPMON-M1.BIN.')
         lines.append('   Approving this text decides D4 for exactly these three classes, ram, el2_sysreg and gic, and no other (section 0).')
+        lines += pn.kind_lines(panel) if panel else ()
     for name in STORES:
         if r['stores'] & STORES[name]:
             first, *rest = touches[name]
@@ -455,8 +475,8 @@ def record_text(r):
     lines += gq.FACT_LINES if r.get('gic_quarantine') else ()
     lines += m1t.GIC_FACT_LINES if m1 else ()
     lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.',
-              *(m1t.SMC_LINES if m1 else ()), *(('', *m1t.DEVICE_LINES) if m1 else ()), '',
-              *(m1_time_lines(r['time_box_s'], p, g['size']) if m1 else gq.time_lines(r['time_box_s']) if r.get('gic_quarantine') else
+              *(m1t.SMC_LINES if m1 else ()), *(('', *m1t.DEVICE_LINES) if m1 else ()), *(('', *pn.section_3c(panel, r['label'])) if panel else ()), '',
+              *(m1_time_lines(r['time_box_s'], p, g['size'], panel) if m1 else gq.time_lines(r['time_box_s']) if r.get('gic_quarantine') else
                 [f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.']), '',
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
               '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',
@@ -466,9 +486,10 @@ def record_text(r):
               *(m1g.HARDWARE_RULES if m1 else gq.HARDWARE_LINES if r.get('gic_quarantine') else (
                   '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',
                   '     operator\'s power cycle, which writes nothing.')),
-              *(M1_STOP_RULES if m1 else ())]
+              *(M1_STOP_RULES if m1 else ()), *(pn.stop_rules(panel, m1g.silence_s(r['time_box_s'])) if panel else ())]
     if m1:
-        lines += ['', *m1g.outcome_lines(r.get('real'), r['time_box_s']), '', *m1g.page_lines(m1, r['time_box_s']), '', *m1g.action_lines(r)]
+        lines += ['', *m1g.outcome_lines(r.get('real'), r['time_box_s']), '', *m1g.page_lines(m1, r['time_box_s'], r.get('real')), '', *m1g.action_lines(r)]
+        lines += ['', *pn.section_5d(panel, m1g.silence_s(r['time_box_s']))] if panel and panel['choice'] == 'console' else []
     if r['note']:
         lines += ['', '6. Notes of this build (part of the digest)', *r['note']]
     text = '\n'.join(lines) + '\n'

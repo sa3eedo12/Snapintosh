@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Tests of what the builder does with --m1-run besides the record text (monitor port work item 4b, Phase D; docs/SP11-STICK-MONITOR.md section 14):
 D2, the label marker that binds PIN.DAT to this kind of record (the builder adds it to --m1-run's build_label and to no other kind's, and refuses a facts
-label that carries it or does not fit with it) and the two EFI files that section 1b names (--m1-efi); D4, `real --m1-run` refused unless the panel is
-withheld and the SPTM HVC call patch is 0 (D9), and one run of `real --m1-run` end to end on the host with the J700 kernelcache and the census check on that
-build. The C stage's side of D2 (the wrapper refuses a PIN.DAT without the marker) is tools/test-sp11-stick-monitor.py.
+label that carries it or does not fit with it) and the two EFI files that section 1b names (--m1-efi); D4, `real --m1-run` refused unless the SPTM HVC call patch is 0
+(D9: the panel withheld, the first choice, handed, the second, or handed as the kernel's console: section 20, tools/test-sp11-stick-monitor-panel.py), and one run of `real --m1-run` for each panel end
+to end on the host with the J700 kernelcache and the census check on that build. The C stage's side of D2 (the wrapper refuses a PIN.DAT without the marker) is
+tools/test-sp11-stick-monitor.py.
 
     python3 tools/test-sp11-stick-monitor-builder.py
 
@@ -16,6 +17,7 @@ import importlib.util
 import json
 import re
 import shutil
+import struct
 import sys
 import time
 import unittest
@@ -170,7 +172,8 @@ class Efi(BT.Case):
 
 
 class D9(BT.Case):
-    """D4: `real --m1-run` is refused unless the guest is given no panel and a stock kernel, which is what the record says."""
+    """D4: `real --m1-run` is refused unless the guest has a stock kernel: the panel is withheld (the first choice), handed (the second) or handed as the kernel's console;
+    the HVC patch has no record."""
 
     def real(self, name='d9', m1_run=True, **over):
         base = dict(AUTH.stage(name), kernelcache=SCRATCH / 'in' / 'absent.kc', panel='withheld', sptm_hvc_calls=0, descriptor=descriptor('board.json'), guest_mib=384,
@@ -179,23 +182,29 @@ class D9(BT.Case):
             base = {**base, 'stores': 'ram,el2_sysreg', 'monitor': BT.FIX['monitor'], 'reporter': BT.FIX['reporter'], 'm1_run': None, 'm1_efi': None}
         return BT.template('real', **{**base, **over})
 
-    def test_a_handed_panel_or_the_hvc_patch_is_refused_naming_d9(self):
-        for over in (dict(panel='handed'), dict(sptm_hvc_calls=1), dict(panel='handed', sptm_hvc_calls=1)):
+    def test_the_hvc_patch_is_refused_naming_d9_with_every_panel(self):
+        for over in (dict(sptm_hvc_calls=1), dict(panel='handed', sptm_hvc_calls=1), dict(panel='console', sptm_hvc_calls=1)):
             with self.subTest(over):
                 code, text, err = self.real(**over)
                 self.assertEqual((code, BT.refusal(text)), (1, 'REFUSED=OPTIONS_BAD'), err)
-                self.assertIn('D9 is open', err)
-                self.assertIn('--panel withheld and --sptm-hvc-calls 0 only', err)
+                self.assertIn('D9 admits --panel withheld (the first choice), --panel handed (the second) or --panel console (the panel as the kernel\'s console), '
+                              'each with --sptm-hvc-calls 0', err)
+                self.assertIn(f'got --panel {over.get("panel", "withheld")} and --sptm-hvc-calls 1', err)
 
-    def test_the_control_passes_the_options_and_stops_at_the_kernelcache(self):
-        code, text, err = self.real()
-        self.assertEqual(code, 1)
-        self.assertIn(BT.refusal(text), ('REFUSED=KERNELCACHE_MISSING', 'REFUSED=ENV_SNAP_SET'), (text, err))
+    def test_the_control_passes_the_options_with_every_panel_and_stops_at_the_kernelcache(self):
+        for panel in ('withheld', 'handed', 'console'):
+            with self.subTest(panel):
+                code, text, err = self.real(panel=panel, facts=facts_with('control'))        # a label that fits with M1RUN-CONSOLE- too
+                self.assertEqual(code, 1)
+                self.assertIn(BT.refusal(text), ('REFUSED=KERNELCACHE_MISSING', 'REFUSED=ENV_SNAP_SET'), (text, err))
 
-    def test_a_record_of_another_kind_takes_any_choice_of_d9(self):
+    def test_a_record_of_another_kind_takes_any_choice_of_d9_but_the_panel_as_the_console(self):
         code, text, err = self.real(m1_run=False, panel='handed', sptm_hvc_calls=1)
-        self.assertNotIn('D9 is open', err, 'the refusal belongs to --m1-run: the other kinds were never asked for it')
+        self.assertNotIn('D9 admits', err, 'the refusal belongs to --m1-run: the other kinds were never asked for it')
         self.assertIn(BT.refusal(text), ('REFUSED=KERNELCACHE_MISSING', 'REFUSED=ENV_SNAP_SET'), (text, err))
+        code, text, err = self.real(m1_run=False, panel='console')
+        self.assertEqual((code, BT.refusal(text)), (1, 'REFUSED=OPTIONS_BAD'), err)
+        self.assertIn('--panel console is a choice of the monitor entry run', err)
 
     def test_the_synthetic_kind_has_no_panel_to_refuse(self):
         self.assertEqual(AUTH.template(AUTH.stage('synthetic-d9'))[0], 0)
@@ -208,35 +217,90 @@ def boot_set_present():
         return False
 
 
-class EndToEnd(AUTH.Need):
-    """D4: `real --m1-run` run once on the host, with the kernelcache, the M1 pair of the LOCAL TEST RECORD and the census check on that build."""
+def guest_panel(guest, pin):
+    """(PARAMS fb_pa and fb_span, boot_args.Video, the command line) read from the bytes of a GUEST.DAT through the interface's own chunk table. The offsets are written out
+    here on purpose: this is the check of tools/sp11_stick_bundle_panel.py, which reads the same bytes with its own constants."""
+    _, table = sb.unpack_guest(guest)
+    base = sb.unpack(pin, sb.PIN_LAYOUT)['place_base']        # the handoff is the first page of the placement, boot_args the second
 
-    @unittest.skipUnless(boot_set_present(), 'no J700 26A428 boot set under downloads/extracted/j700ap (git-ignored Apple material): `real --m1-run` NOT RUN')
-    def test_real_m1_run_builds_and_the_census_checks_the_build(self):
-        over = dict(STATE['real'], kernelcache=BT.bb.xnuboot().DEFAULT_KERNELCACHE, panel='withheld', sptm_hvc_calls=0, stores='ram,el2_sysreg,gic', m1_efi=EFI,
-                    descriptor=descriptor('board-e2e.json'), guest_mib=384)
+    def data_at(pa, size):
+        for c in table:
+            if not c['flags'] & sb.CHUNK_ZERO and c['dest'] <= pa and pa + size <= c['dest'] + c['size']:
+                at = c['file_offset'] + pa - c['dest']
+                return guest[at:at + size]
+        return None
+    params = next(c for c in table if c['kind'] == sb.KIND_PARAMS)
+    args = data_at(base + 0x1000, 0x480)
+    return struct.unpack_from('<2Q', guest, params['file_offset'] + 8 * 32), struct.unpack_from('<6Q', args, 0x28), args[0x6C:0x6C + 1024].split(b'\0')[0].decode()
+
+
+class EndToEnd(AUTH.Need):
+    """D4: `real --m1-run` run once on the host for each panel, with the kernelcache, the M1 pair of the LOCAL TEST RECORD and the census check on that build."""
+
+    def build_real(self, choice, name, label=None):
+        """(record, out, guest, pin, seconds) of a `real --m1-run` build of `choice` from the J700 kernelcache, built with the record it made."""
+        over = dict(STATE['real'], kernelcache=BT.bb.xnuboot().DEFAULT_KERNELCACHE, panel=choice, sptm_hvc_calls=0, stores='ram,el2_sysreg,gic', m1_efi=EFI,
+                    descriptor=descriptor(f'board-{name}.json'), guest_mib=384, **({'facts': facts_with(label)} if label else {}))
         started = time.monotonic()
         code, record, err = BT.template('real', **over)
         self.assertEqual(code, 0, err)
-        out = SCRATCH / 'out' / 'real-m1'
-        argv = ['real', *BT.opts('real', **over), '--out', out, '--authorisation', BT.write(SCRATCH / 'records' / 'real-m1.txt', record.encode()),
+        out = SCRATCH / 'out' / name
+        argv = ['real', *BT.opts('real', **over), '--out', out, '--authorisation', BT.write(SCRATCH / 'records' / f'{name}.txt', record.encode()),
                 *(() if STATE.get('tree') else ('--no-manifest',))]
         code, text, err = BT.cli(argv)
         self.assertEqual(code, 0, (text, err))
         seconds = time.monotonic() - started
-        pin, guest = pin_of(out), (out / 'bundle' / 'SP11' / 'GUEST.DAT').read_bytes()
-        fields = sb.unpack(pin, sb.PIN_LAYOUT)
-        self.assertEqual((sb.check_pin(pin), sb.check_guest(guest, pin), fields['authorised_stores'], label_of(pin)), (0, 0, 7, MARKER + b'example-synthetic'))
-        self.assertEqual(bytes(fields['authorisation_sha256']).hex(), sha(record.encode()))
+        return record, out, (out / 'bundle' / 'SP11' / 'GUEST.DAT').read_bytes(), pin_of(out), seconds
+
+    def check_record(self, record, out, pin):
+        """What both choices share: the digest PIN.DAT carries, payload 0, the lines about the stock kernel and the test record, and the census check. The record's flat text."""
+        self.assertEqual(bytes(sb.unpack(pin, sb.PIN_LAYOUT)['authorisation_sha256']).hex(), sha(record.encode()))
         self.assertEqual((out / 'bundle' / 'SP11' / 'SNAPMON.BIN').read_bytes(), Path(STATE['real']['monitor']).read_bytes(), 'payload 0 is SNAPMON-M1.BIN')
         flat = ' '.join(record.split())
-        for needle in ('D9 as built panel withheld: the guest is given no framebuffer', 'SPTM HVC call patch 0: a stock kernel', 'LOCAL TEST RECORD',
-                       'SLBOUNCE-DEVHE-MARK.EFI sha256 ' + AUTH.EFI['SLBOUNCE-DEVHE-MARK.EFI']):
+        for needle in ('SPTM HVC call patch 0: a stock kernel', 'LOCAL TEST RECORD', 'SLBOUNCE-DEVHE-MARK.EFI sha256 ' + AUTH.EFI['SLBOUNCE-DEVHE-MARK.EFI']):
             self.assertIn(needle, flat)
         monitor_elf, wrapper_elf = STATE['profile'] / 'xnuboot.elf', SCRATCH / 'm1' / 'snapmon-m1.elf'
         problems = C.check(record, C.census(monitor_elf), C.census(wrapper_elf), sha(monitor_elf.read_bytes()), C.flat_bytes(monitor_elf), C.flat_bytes(wrapper_elf))
         self.assertEqual(problems, [], 'the census check on the record of this build')
+        return flat
+
+    @unittest.skipUnless(boot_set_present(), 'no J700 26A428 boot set under downloads/extracted/j700ap (git-ignored Apple material): `real --m1-run` NOT RUN')
+    def test_real_m1_run_builds_and_the_census_checks_the_build(self):
+        record, out, guest, pin, seconds = self.build_real('withheld', 'real-m1')
+        fields = sb.unpack(pin, sb.PIN_LAYOUT)
+        self.assertEqual((sb.check_pin(pin), sb.check_guest(guest, pin), fields['authorised_stores'], label_of(pin)), (0, 0, 7, MARKER + b'example-synthetic'))
+        self.assertIn('D9 as built panel withheld: the guest is given no framebuffer', self.check_record(record, out, pin))
+        self.assertEqual(guest_panel(guest, pin), ((0, 0), (0,) * 6, '-v debug=0x8 serial=3 cluster_power=0 wdt=-1'), 'the guest of the first choice is given no panel')
         print(f'\nreal --m1-run end to end: {seconds:.1f} s, GUEST.DAT {len(guest)} bytes, record {len(record.encode())} bytes, PIN label {label_of(pin).decode()}')
+
+    @unittest.skipUnless(boot_set_present(), 'no J700 26A428 boot set under downloads/extracted/j700ap (git-ignored Apple material): `real --m1-run` NOT RUN')
+    def test_real_m1_run_with_the_panel_handed_builds_and_the_census_checks_the_build(self):
+        record, out, guest, pin, seconds = self.build_real('handed', 'real-m1-panel', 'panel-e2e')
+        fields, facts = sb.unpack(pin, sb.PIN_LAYOUT), BT.bb.load_facts(BT.EXAMPLE)
+        self.assertEqual((sb.check_pin(pin), sb.check_guest(guest, pin), fields['authorised_stores'], label_of(pin)), (0, 0, 7, MARKER + b'PANEL-panel-e2e'))
+        flat = self.check_record(record, out, pin)
+        for needle in ('D9 as built panel handed: the guest is given the unit\'s framebuffer', '3c. The panel handed to the guest', '(format 1, label M1RUN-PANEL-panel-e2e)'):
+            self.assertIn(needle, flat)
+        low, span = facts['fb_base'] & ~0x3FFF, (facts['fb_stride'] * 4 * facts['fb_height'] + 0x3FFF) & ~0x3FFF
+        self.assertEqual(guest_panel(guest, pin), ((low, span), (facts['fb_base'], 0, facts['fb_stride'] * 4, facts['fb_width'], facts['fb_height'], 32),
+                                                   '-v debug=0x8 serial=3 cluster_power=0 wdt=-1'), 'the bytes of GUEST.DAT say what the record says')
+        for needle in (f'fb_pa {low:#x}, fb_span {span:#x} ({span} bytes', f'v_baseAddr {facts["fb_base"]:#x}, v_display 0 (text mode), v_rowBytes {facts["fb_stride"] * 4}'):
+            self.assertIn(needle, flat)
+        print(f'\nreal --m1-run, panel handed, end to end: {seconds:.1f} s, GUEST.DAT {len(guest)} bytes, record {len(record.encode())} bytes, PIN label {label_of(pin).decode()}')
+
+    @unittest.skipUnless(boot_set_present(), 'no J700 26A428 boot set under downloads/extracted/j700ap (git-ignored Apple material): `real --m1-run` NOT RUN')
+    def test_real_m1_run_with_the_panel_as_the_console_builds_and_the_census_checks_the_build(self):
+        record, out, guest, pin, seconds = self.build_real('console', 'real-m1-console', 'con-e2e')
+        fields, facts = sb.unpack(pin, sb.PIN_LAYOUT), BT.bb.load_facts(BT.EXAMPLE)
+        self.assertEqual((sb.check_pin(pin), sb.check_guest(guest, pin), fields['authorised_stores'], label_of(pin)), (0, 0, 7, MARKER + b'CONSOLE-con-e2e'))
+        flat = self.check_record(record, out, pin)
+        for needle in ('D9 as built panel console: the guest is given the unit\'s framebuffer, and its command line makes the panel the kernel\'s console (serial=2)',
+                       '3c. The panel as the kernel\'s console', '(format 1, label M1RUN-CONSOLE-con-e2e)', 'command line -v debug=0x8 serial=2 cluster_power=0 wdt=-1'):
+            self.assertIn(needle, flat)
+        low, span = facts['fb_base'] & ~0x3FFF, (facts['fb_stride'] * 4 * facts['fb_height'] + 0x3FFF) & ~0x3FFF
+        self.assertEqual(guest_panel(guest, pin), ((low, span), (facts['fb_base'], 0, facts['fb_stride'] * 4, facts['fb_width'], facts['fb_height'], 32),
+                                                   '-v debug=0x8 serial=2 cluster_power=0 wdt=-1'), 'the bytes of GUEST.DAT say what the record says: the panel, text mode, serial=2')
+        print(f'\nreal --m1-run, panel as the console, end to end: {seconds:.1f} s, GUEST.DAT {len(guest)} bytes, record {len(record.encode())} bytes, PIN label {label_of(pin).decode()}')
 
 
 if __name__ == '__main__':

@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sp11_stick_bundle_record_m1 as m1t  # noqa: E402
+import sp11_stick_bundle_panel as pn  # noqa: E402
 
 wrap, WIDTH = m1t.wrap, m1t.WIDTH
 TICKS_PER_S = 19_200_000        # CNTFRQ_EL0 of the unit (OBSERVED, boots 3 to 14): the unit of MON RET's TICKS=
@@ -44,10 +45,13 @@ def silence_s(box_s):
     return SILENCE_MARGIN_S if box_s <= D5_BOX_S else box_s + SILENCE_MARGIN_S
 
 
-def runaway_words(box_s):
+def runaway_words(box_s, real=None):
     """The runaway case as 0b and section 4 say it, after `one CPU stays loaded`: the least time that the CPU stays loaded when the stop timer never fires and the
-    operator acts by the rules, the silence plus the hold."""
+    operator acts by the rules, the silence plus the hold. A panel choice says the wait in its own words (its `runaway`, a function of the wait and the hold): a guest that
+    keeps painting is not silent."""
     wait = silence_s(box_s)
+    if words(real).get('runaway'):
+        return words(real)['runaway'](wait, HOLD_S)
     return (f'one CPU stays loaded, at worst, until the operator acts: {wait} s of silence (section 5) plus about {HOLD_S} s holding Power, {wait + HOLD_S} s or more, with '
             'no temperature read; approving this text accepts that too.')
 
@@ -79,6 +83,11 @@ PANEL = {'withheld': dict(
                 '(INFERRED from the sources; no stage-2 abort in boot 20\'s 5 s, OBSERVED once)'),
     console='The guest has no panel to write to: its console output goes to a buffer in RAM that SNAPREP prints as MON CON lines.',
     rung='rung 2, the run with the panel handed to the guest')}
+# The keys that hand the guest the panel are in tools/sp11_stick_bundle_panel.py (GUIDE_WORDS): d9, guest_gets, console and rung replace the first run's, and outside,
+# ram_also, ram_note, fault_note, decides, why, stand, hazard, film and step7 are words of their own that the hooks below read with `said`. The first run's words have none of those, so
+# its text is what it was.
+PANEL.update(pn.GUIDE_WORDS)
+RAM_NOTE = '(INFERRED; no stage-2 abort in boot 20\'s 5 s, OBSERVED once)'      # of the map that boot 20 ran, RAM only: a panel choice says its own (ram_note)
 KERNEL = {0: 'the stock macOS kernel in GUEST.DAT (the J700 26A428 kernelcache with only the loader\'s pointer rebase applied, SPTM HVC call patch 0: '
              'docs/SP11-STICK-REAL.md section 5)'}
 SYNTHETIC = 'the guest image in GUEST.DAT (a synthetic build: this text is a test artefact, not a run)'
@@ -117,6 +126,13 @@ def words(real):
     return PANEL[real['panel'] if real else 'withheld']
 
 
+def said(real, key, box_s=None):
+    """The words under `key` that a hook of this module adds or puts in place of the first run's: a string, or a function of the facts of the record, the time box and the wait
+    that the silence rule gives for it, for the words that name a wait or a size; '' when the panel's words have none, so that the first run's text is what it was."""
+    value = words(real).get(key, '')
+    return value(real, box_s, silence_s(box_s)) if callable(value) else value
+
+
 def kernel_words(real):
     """What the guest is, as the text says it: a stock kernel for a real build (D9 decides the patch), a filler for a synthetic one. KeyError for another patch."""
     return KERNEL[real['sptm_hvc_calls']] if real else SYNTHETIC
@@ -138,25 +154,29 @@ def item(label, text, indent=3, hang=8):
     return (' ' * indent + label.ljust(hang - indent) + first[hang:], *rest)
 
 
-def reading_lines():
+def reading_lines(real=None):
     """The paragraph before section 0: which sections the operator reads and acts on (the NV2 paragraph of 1b, the basis of D6, among them), who the coordinator is (the
-    word is defined at its first use, here) and that approving covers one boot."""
-    return wrap('The operator reads and acts on sections 0, 0a, 0b, 4, 5, 5a and 5c, and reads in section 1b the paragraph on the NV2 record (D6); section 5b is the '
-                'reference for the lines of the pages. The rest of sections 1 to 3b is evidence that the coordinator (the assistant that builds the files and the stick and '
-                'reads the film with the operator) checks against the files. Approving this text covers ONE boot of this stick (section 5c, THIS APPROVAL COVERS ONE BOOT).',
-                first=0, rest=0)
+    word is defined at its first use, here) and that approving covers one boot. A panel choice may name one section more that he acts on (its `also_reads`) and where
+    the evidence ends (its `evidence_to`)."""
+    acts = ['0', '0a', '0b', '4', '5', '5a', '5c', *words(real).get('also_reads', ())]
+    return wrap(f'The operator reads and acts on sections {", ".join(acts[:-1])} and {acts[-1]}, and reads in section 1b the paragraph on the NV2 record (D6); section 5b is the '
+                f'reference for the lines of the pages. The rest of sections 1 to {words(real).get("evidence_to", "3b")} is evidence that the coordinator (the assistant that builds '
+                'the files and the stick and reads the film with the operator) checks against the files. Approving this text covers ONE boot of this stick (section 5c, THIS '
+                'APPROVAL COVERS ONE BOOT).', first=0, rest=0)
 
 
-def stand_lines():
+def stand_lines(real=None):
     """Section 0a, in every record of this kind (the panel, the box and the kernel do not change it): what the one run of the monitor entry showed, with its labels,
-    and nothing beyond it. The numbers are those of the operator's film of boot 20 (record 31e5d4c2...a802, 2026-11-18), read at full resolution."""
+    and nothing beyond it. The numbers are those of the operator's film of boot 20 (record 31e5d4c2...a802, 2026-11-18), read at full resolution. A panel choice may add
+    a paragraph of its own after the second one (its `stand` words, given `real`); the first run's has none."""
     return (
         '0a. Where things stand (boot 20, 2026-11-18, one unit, one boot; OBSERVED unless a sentence says INFERRED)',
         *wrap('Boot 20 (record 31e5d4c2...a802) ran the monitor entry: the guest executed for its 5 s box, with 3,127 traps, 1,443 monitor calls and no stage-2 abort, and '
               'the run ended as MON STOP WATCHDOG at the kernel address 0xFFFFFE000C1EEF00.'),
         *wrap('Why the guest was still at that address when the time box ended the run is INFERRED: an early loop in the guest. The same stop address again, after a change '
               'meant to end the loop, would falsify that.'),
-        *wrap('The stick was unchanged but for the Shell\'s marker.'),
+        *(words(real)['stand'](real) if words(real).get('stand') else ()),
+        *wrap('The stick was unchanged but for the Shell\'s marker and the Mac\'s own .fseventsd entry.'),
         *wrap('The hardware status of everything else is NOT RUN. This text claims no more: not that macOS boots, and not that anything is stable.'))
 
 
@@ -168,6 +188,8 @@ def decision_lines(real, box_s):
         *wrap('THE SHA-256 OF EXACTLY THIS TEXT, WHEN THE OPERATOR APPROVES IT, ALSO DECIDES D4: this run may store to RAM, to EL2 system registers and to the GIC, in '
               'the three classes ram, el2_sysreg and gic exactly as section 3 lists them, and in no other class. Nothing else decides D4, and a changed byte of this '
               'text is another record.'),
+        *(wrap(words(real)['decides']) if words(real).get('decides') else ()),
+        *(words(real)['why'](real) if words(real).get('why') else ()),
         *wrap('Approving this text covers ONE boot of this stick. A boot that printed PAYLOAD CALL 0 has spent the approval, and so has a boot whose film does not show '
               'whether it did (section 5c, THIS APPROVAL COVERS ONE BOOT).'),
         *longer_box_lines(box_s),
@@ -194,16 +216,18 @@ def hazard_lines(real, box_s, low, high):
         *wrap(f'- {guest[0].upper()}{guest[1:]} runs at EL1 on the boot CPU, one CPU only, for up to {box_s} s, under a monitor that ran once on this machine (boot 20: '
               'section 0a). What the kernel does there beyond what section 0a says is UNKNOWN. The run ends by the monitor\'s own timer interrupt, by a stage-2 fault or by '
               'an exception that the kernel takes (section 5a).', first=3, rest=5),
-        *wrap(f'- The guest is given {w["guest_gets"]}. An access outside its RAM is meant to fault at stage 2 and stop the run.', first=3, rest=5),
+        *wrap(f'- The guest is given {w["guest_gets"]}. An access outside its RAM{w.get("outside", "")} is meant to fault at stage 2 and stop the run.', first=3, rest=5),
+        *(wrap('- ' + said(real, 'hazard', box_s), first=3, rest=5) if w.get('hazard') else ()),
         *wrap('- No disk write is meant to be possible: the code of the wrapper, the monitor and the reporter stores to RAM, EL2 system registers and GIC registers only '
-              '(section 3), and the guest is given RAM only (INFERRED; no stage-2 abort in boot 20\'s 5 s, OBSERVED once). Stage 2 is all that stops the guest: an SMC '
-              'would not be trapped and would reach '
-              'firmware (section 3; the kernelcache holds none: OBSERVED on a host file). The one certain write to the stick is the Shell\'s marker file '
+              f'(section 3), and the guest is given RAM{w.get("ram_also", "")} only {w.get("ram_note", RAM_NOTE)}. Stage 2 is all that stops '
+              'the guest: an SMC would not be trapped and would reach '
+              'firmware (section 3; the kernelcache holds none: read on the host (a file, not a run)). The one certain write to the stick is the Shell\'s marker file '
               f'{MARKER}, made before the step starts (section 5c).', first=3, rest=5),
-        *wrap('- The Surface may restart by itself, during the run or after it (cause UNKNOWN; the earliest datum is about UPTIME 17 s: section 4). A restart before '
+        *wrap('- The Surface may restart by itself, during the run or after it (cause UNKNOWN; the earliest datum is about UPTIME 17 s, and boot 20 showed none to the end of '
+              'its film at 45 s: section 4). A restart before '
               'the report is NOT a result (section 5a).', first=3, rest=5),
         *wrap(f'- No thermal guard exists on this path: one CPU is loaded for about {low} to {high} s plus the monitor\'s prepare, {box_s} s of it by the guest (D8, '
-              'section 4). AC power is REQUIRED. If the stop timer never fires (the plan\'s second most likely failure) ' + runaway_words(box_s),
+              'section 4). AC power is REQUIRED. If the stop timer never fires (the plan\'s second most likely failure) ' + runaway_words(box_s, real),
               first=3, rest=5),
         *wrap('- The GIC: from the first GIC store until after the monitor returns, this CPU\'s SGI 0 and PPIs 23, 25, 27 and 30, the guest\'s own timers (INTID 27, 30) '
               'among them, are switched off and put back afterwards; if the call never returns they stay off until the restart (INFERRED: the firmware sets the GIC up '
@@ -218,6 +242,9 @@ def hazard_lines(real, box_s, low, high):
 def outcome_lines(real, box_s):
     """Section 5a: M1 as docs/SP11-MONITOR-PORT.md section 2 defines it (rows a to g) and what section 14 expects, then the kinds of page."""
     ends = ', '.join(EXPECTED_ENDS[:-1]) + ' or ' + EXPECTED_ENDS[-1]
+    hang = said(real, 'hang', box_s) or f'a page that stops at MON CALL and does not change for {silence_s(box_s)} s (no controlled stop: row d)'
+    dark = (said(real, 'no_result', box_s) or 'a black panel, or a restart of the Surface, before STAGE=DONE and the SNAPREP page have been on the screen, or a film that '
+            'does not show them')
     return (
         '5a. What M1 is, and when it has passed or failed (docs/SP11-MONITOR-PORT.md sections 2 and 14)',
         *wrap('M1: on the boot CPU, one vCPU, started from the stick with no host link, the monitor runs at EL2, loads the kernel, the kernel\'s first instructions '
@@ -230,13 +257,14 @@ def outcome_lines(real, box_s):
                    'x30 and C= is the address to check (the coordinator compares it with the kernelcache);'),
         *item('d', f'the run ended by the monitor\'s own stop, a MON STOP line ({ends}), never a hang or a reset;'),
         *item('e', f'the stop came inside the time box: {box_s} s of wall time on CNTPCT_EL0, {box_s * TICKS_PER_S:,} ticks of 19.2 MHz. MON RET ... TICKS= counts the whole '
-                   f'call, the prepare and the stop\'s clean included (about {m1t.PREPARE_AND_CLEAN_S} s together in boot 20, OBSERVED once: section 4), so TICKS <= '
+                   f'call, the prepare and the stop\'s clean included (about {m1t.PREPARE_AND_CLEAN_S} s together in boot 20, OBSERVED once: section 4){said(real, "row_e", box_s)}, '
+                   f'so TICKS <= '
                    f'{box_s * TICKS_PER_S:,} proves row e, and a larger value neither proves nor fails it (row e is then UNKNOWN unless the stop is MON STOP WATCHDOG, '
                    'the monitor\'s own deadline);'),
-        *item('f', 'no disk was written: nothing in the run\'s code writes one (section 3), and the stick is byte-identical after the run but for the Shell\'s marker, '
-                   'which the coordinator re-reads;'),
+        *item('f', 'no disk was written: nothing in the run\'s code writes one (section 3), and the stick is byte-identical after the run but for the Shell\'s marker and, once the '
+                   'Mac has mounted the stick, its .fseventsd entry, which the coordinator re-reads;'),
         *item('g', 'the A16 monitor is byte-identical with the new gate off (tools/monitor_baseline.py IDENTICAL): a host check of the coordinator, on no page.'),
-        *wrap('A STAGE-2 FAULT WITH AN IPA IS SUCCESS: MON STOP S2_FAULT, with the guest PC, the IPA in A= and ESR_EL2 in B=, is the kernel stopping at its first device '
+        *wrap('A STAGE-2 FAULT WITH AN IPA IS SUCCESS' + said(real, 'fault_note', box_s) + ': MON STOP S2_FAULT, with the guest PC, the IPA in A= and ESR_EL2 in B=, is the kernel stopping at its first device '
               'that the monitor does not model, which the plan expects of M1 (docs/SP11-MONITOR-PORT.md section 14: expected failure 5, "that is success for M1"; INFERRED: '
               'no run has stopped that way yet, UNKNOWN). Rows c and d hold for it, and the coordinator reads A= and B= to say which address the kernel touched; A=0 means '
               'that no IPA could be named, '
@@ -250,7 +278,7 @@ def outcome_lines(real, box_s):
               'PAuth refusal at the first signed return (U5, U8); a restart with no report (U4).'),
         *wrap('A page is one of four things:'),
         *wrap(f'- M1 PASSED: the SNAPREP page shows MON STATUS=OK ENTERED=0X1 and a MON STOP line of kind {ends}, with PC= a kernel address (C= on GUEST_EXC) and A= not 0 on '
-              'S2_FAULT; rows a, c, d and e hold, and the coordinator checks f and g. WATCHDOG is the time box ending a run that used all of it (OBSERVED once: boot 20).',
+              f'S2_FAULT{said(real, "fault_note", box_s)}; rows a, c, d and e hold, and the coordinator checks f and g. WATCHDOG is the time box ending a run that used all of it (OBSERVED once: boot 20).',
               first=3, rest=5),
         *wrap('- A FINDING, which the coordinator reads before anything else runs and which neither passes nor fails M1 by itself: MON REGS RESTORED=NO, WINDOW OVERRUN, '
               'STACK FULL or GIC RESTORE CLEAN=NO beside a return (a finding about the monitor, never a refusal of the wrapper); a MON STOP of another kind (PANIC_ENTRY, '
@@ -258,13 +286,12 @@ def outcome_lines(real, box_s):
               'A=0 is a finding too: no IPA could be named, so it is not the expected end above, though rows c and d hold.', first=3, rest=5),
         *wrap('- M1 FAILED, a result, and the same bundle is never run again: a wrapper REFUSED line (no guest ran); MON PREPARE FAILED CODE=-n (the monitor refused '
               'to launch the guest); MON EL2 FAULT (the monitor itself took an exception at EL2); MON QUARANTINE (the monitor returned a quarantine code: the report '
-              f'is partial); a page that stops at MON CALL and does not change for {silence_s(box_s)} s (no controlled stop: row d); a fault page of q1n1.', first=3, rest=5),
-        *wrap('- NOT A RESULT: a black panel, or a restart of the Surface, before STAGE=DONE and the SNAPREP page have been on the screen, or a film that does not show '
-              'them. It says nothing about the guest. Whether the approval is spent depends on whether PAYLOAD CALL 0 printed (section 5c, THIS APPROVAL COVERS ONE BOOT).',
+              f'is partial); {hang}; a fault page of q1n1.', first=3, rest=5),
+        *wrap(f'- NOT A RESULT: {dark}. It says nothing about the guest. Whether the approval is spent depends on whether PAYLOAD CALL 0 printed (section 5c, THIS APPROVAL COVERS ONE BOOT).',
               first=3, rest=5))
 
 
-def page_lines(m1, box_s):
+def page_lines(m1, box_s, real=None):
     """Section 5b: the lines of the pages in the order they appear. What comes from the build is computed here from the same facts as sections 1 and 1b: the first
     eight bytes of the monitor's digest, the ID registers of the NV2 record, the time box. The digits of the PAYLOAD lines are in section 5c."""
     n, mon = m1['nv2'], m1['monitor']
@@ -291,7 +318,7 @@ def page_lines(m1, box_s):
               'refuses before the call.', first=3, rest=5),
         *wrap('- NEXT GIC STORES AFTER 8 S G=1 R=1 C=1 T=0 V=0 E=0: the GIC stores come after 8 s, and the 8 s of silence are healthy. The GIC lines before and after '
               'it (GICD, GICR, CPU, NEW) are the registers read and written (section 3, class gic).', first=3, rest=5),
-        *wrap(f'- MON CALL X0= X1= X2= X3= X4= SP=: the monitor is called now, and the page does not change until it returns: the monitor\'s prepare, the guest for '
+        *wrap(f'- MON CALL X0= X1= X2= X3= X4= SP=: the monitor is called now, and {said(real, "still") or "the page does not change until it returns"}: the monitor\'s prepare, the guest for '
               f'up to {box_s} s, and the stop with its cache clean (the prepare and the clean took about {m1t.PREPARE_AND_CLEAN_S} s together in boot 20: section 4).',
               first=3, rest=5),
         *wrap(f'- MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=<n> STACK=<used>/<bytes>: the call returned. STATUS is the prepare\'s status: 0 passed, and a refusal prints it as a '
@@ -322,7 +349,8 @@ def page_lines(m1, box_s):
         *wrap('Any other name is a kind that this text does not list: the coordinator reads it from the monitor\'s sources and it is never guessed at.', first=7, rest=7),
         *wrap('- MON EXIT PC= SPSR= ESR= FAR=: the guest\'s own state at an interrupt stop, where it was.', first=3, rest=5),
         *wrap('- MON EV n <kind> PC= A= B= C=: the first five events of the monitor\'s log, what the kernel asked for first.', first=3, rest=5),
-        *wrap('- MON CON <text>: up to six lines of the first 1 KiB of the guest\'s console buffer, in the panel\'s font (capitals; anything else is a question mark).',
+        *wrap('- MON CON <text>: up to six lines of the first 1 KiB of the guest\'s console buffer, in the panel\'s font (capitals and digits; ":" prints as "!" (OBSERVED once: '
+              'boot 20) and anything else that is not in the font as "?").',
               first=3, rest=5),
         *wrap('- MON NO RECORD: THE STAGE DID NOT RUN, MON RECORD DAMAGED CODE=n, REPORT UNREADABLE and REPORT EMPTY: THE WRAPPER WROTE NOTHING: SNAPREP found no usable '
               'record of the wrapper. None is a result of the guest; the live page and the film say how far the wrapper got.', first=3, rest=5),
@@ -334,6 +362,8 @@ def action_lines(r):
     (which is the plan's name), the two payloads' (size, sha256) and the facts of the monitor entry run."""
     mon, rep = digits16(r['monitor'][1]), digits16(r['reporter'][1])
     efi = ' and '.join(r['m1']['efi'])
+    real, box_s = r.get('real'), r['time_box_s']
+    step4 = words(real).get('step4')        # a panel choice also names the GUEST.DAT line and the label: the programs' digits alone are rung 1's too
     return (
         '5c. The operator\'s actions, in order (docs/SP11-STICK-BUILD.md section 8 and docs/RUNNING.md, autorun)',
         *wrap('Done by the coordinator before the boot, not by the operator: the stick is staged from the stage tree that tools/sp11_stick_bundle_build.py makes with the '
@@ -356,24 +386,29 @@ def action_lines(r):
               '(row f); at a recovery-key screen type and choose nothing.'),
         *item('1.', 'AC power is REQUIRED (D8): the charger may be in Surface Connect or a USB-C port, and stays in from before the boot until the end. One hardware client. '
                     'NO cable to the Mac, no Mac logger, no other device on the USB ports; the stick goes in either port.', hang=7),
-        *item('2.', f'Film at 60 fps from the Shell\'s countdown until the first UPTIME heartbeat AFTER the line STAGE=DONE, or until {silence_s(r["time_box_s"])} s after the last page '
-                    'change, whichever comes first. Say the time of day aloud on the video at the start. Keep the whole panel in frame.', hang=7),
+        *item('2.', f'Film 30 frames a second or more (29.97 is fine: boot 20\'s film had it; 60 if the camera can) from the Shell\'s countdown until the first UPTIME heartbeat AFTER the line STAGE=DONE, or until {silence_s(r["time_box_s"])} s after the last page '
+                    'change, whichever comes first. Say the time of day aloud on the video at the start. Keep the whole panel in frame.'
+                    + said(real, 'film', box_s), hang=7),
         *item('3.', f'Boot the stick as for every SP11 boot before this one. Do not press ESC at the countdown. The Shell then prints AUTORUN {r["label"]} STEP 1 OF 1, CMD1: load '
                     'SP11\\SLBOUNCE-DEVHE-MARK.EFI, CMD2: SP11\\Q1N1-PAYLOAD.EFI --el2 and "Writing SP11\\DONE1.TXT in 5 seconds, then the two commands run. Power off now to '
                     'cancel." Compare the plan name and both commands with this text; if either differs, start FORCE OFF at once and say what differs on the video: the 5 s end '
                     'before a 20 s hold does, so the step may still start (THIS APPROVAL COVERS ONE BOOT, below, says whether the approval is then spent).', hang=7),
         *item('4.', f'On the runner\'s lines compare the digits: PAYLOAD LOADED INDEX=0 ... SHA={mon} (SNAPMON.BIN) and INDEX=1 ... SHA={rep} (SNAPREP.BIN), then '
-                    f'PAYLOAD VERIFY=OK and PAYLOAD CALL 0 {mon}. A mismatch, no PAYLOAD VERIFY=OK, or a PAYLOAD REFUSED line: start FORCE OFF at once and tell the '
+                    f'PAYLOAD VERIFY=OK and PAYLOAD CALL 0 {mon}.{step4(r["guest"], r["label"]) if step4 else ""} A mismatch, no PAYLOAD VERIFY=OK, or a PAYLOAD REFUSED line: start '
+                    'FORCE OFF at once and tell the '
                     'coordinator; the call may already have begun. Do not retry.', hang=7),
-        *item('5.', 'Touch nothing while the pages run (section 5b: about 3 s of checks, the 8 s after NEXT GIC STORES AFTER 8 S, MON CALL, then a page that stands still for the '
-                    'prepare, the box and the stop). The stop rules of section 5 say when a silence ends the run. If at any time the Surface is too hot to hold comfortably, '
+        *item('5.', 'Touch nothing while the pages run (section 5b: about 3 s of checks, the 8 s after NEXT GIC STORES AFTER 8 S, MON CALL, then '
+                    f'{said(real, "wait", box_s) or "a page that stands still for the prepare, the box and the stop"}). The stop rules of section 5 say when a silence ends '
+                    f'the run.{said(real, "step5", box_s)} If at any time the Surface is too hot to hold comfortably, '
                     'FORCE OFF at once and tell the coordinator: that outranks "touch nothing" and every wait of these steps, and once PAYLOAD CALL 0 has printed, the approval '
                     'is spent.', hang=7),
-        *item('6.', 'When STAGE=DONE, the SNAPREP page and the first UPTIME heartbeat after them have been filmed, FORCE OFF: that writes nothing of ours. Do not run the '
+        *item('6.', 'When STAGE=DONE, the SNAPREP page and the first UPTIME heartbeat after them have been filmed, FORCE OFF: that writes nothing of ours.'
+                    f'{said(real, "step6", box_s)} Do not run the '
                     'bundle a second time. Then give the coordinator every video (the countdown to the first UPTIME heartbeat after STAGE=DONE), say the time of day, and hand '
                     'over the stick untouched: open, mount, edit or delete nothing on it before the coordinator has read it (row f).', hang=7),
         *item('7.', 'If the panel goes black or the Surface restarts at any point: write down the last line you saw, the last UPTIME shown if any, and the time on the video, '
-                    'then FORCE OFF, DO NOT RETRY, and tell the coordinator. ONE RESTART BEFORE THE REPORT IS NOT A RESULT (section 5a).', hang=7),
+                    'then FORCE OFF, DO NOT RETRY, and tell the coordinator. ONE RESTART BEFORE THE REPORT IS NOT A RESULT (section 5a).' + said(real, 'step7', box_s),
+                    hang=7),
         *wrap(f'THIS APPROVAL COVERS ONE BOOT. A boot that printed PAYLOAD CALL 0 {mon} has spent it, whatever follows. A boot whose film does not show whether PAYLOAD CALL 0 '
               'printed counts as printed: the approval is spent. A boot that did not print that line ran nothing of M1 (the marker may exist: the coordinator deletes it) and '
               'is repeated only with the same files, after the coordinator has found the cause. Another file, kernel, patch value, time box or store class needs its own '

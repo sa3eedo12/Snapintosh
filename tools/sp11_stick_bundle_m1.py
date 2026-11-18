@@ -37,6 +37,8 @@ Refused = ch.Refused
 IMAGE, REPORTER = 'SNAPMON-M1.BIN', 'SNAPREP-M1.BIN'
 PROFILE = 'sp11-m1'
 LABEL_PREFIX = 'M1RUN-'         # SP11_STICK_MONITOR_LABEL_PREFIX in probes/sp11-stick-monitor.h: what the wrapper of this kind requires at the start of PIN.DAT's label
+PANEL_MARKS = {'withheld': '', 'handed': 'PANEL-', 'console': 'CONSOLE-'}      # after LABEL_PREFIX in the label of each choice of D9 (docs/SP11-STICK-MONITOR.md section 20): the wrapper checks LABEL_PREFIX only, so these are the builder's rule
+D9_PANELS = tuple(PANEL_MARKS)  # the --panel choices this record is written for, each with a stock kernel (--sptm-hvc-calls 0)
 PIN_LABEL_MAX = 23              # sp11sb_string_ok: build_label is 24 bytes and a string of 1 to 23 characters
 EFI_NAMES = ('SLBOUNCE-DEVHE-MARK.EFI', 'Q1N1-PAYLOAD.EFI')       # the two files that run at EL2 before the wrapper: the builder's SLBOUNCE and RUNNER
 REPORT_CAP = 1 << 20
@@ -80,8 +82,10 @@ def _no_duplicates(pairs):
 
 def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None):
     """--m1-run runs the wrapper's GIC arm (gic), the monitor (el2_sysreg) and RAM stores, with the time box the wrapper's pre-call check accepts. With `real`
-    (panel and hvc_calls given) only D9's first choice: the record says the guest gets no framebuffer and a stock kernel, and stage 2 maps the
-    framebuffer range from PARAMS when it is handed (probes/xnuboot/stage2.c), so another choice would make the text false."""
+    (panel and hvc_calls given) D9 admits a stock kernel (--sptm-hvc-calls 0) with the panel withheld (the first choice), handed (the second) or handed as the
+    kernel's console (`console`: serial=2 in the command line, as probes/run.py makes it for the A16's native panel console)
+    (tools/sp11_stick_bundle_panel.py; docs/SP11-STICK-MONITOR.md section 20): the record says which, from the bytes of the guest, and says nothing true of
+    a patched kernel, so --sptm-hvc-calls 1 stays refused for all three."""
     need = sb.STORE_RAM | sb.STORE_EL2_SYSREG | sb.STORE_GIC
     if stores & need != need:
         raise ch.Refused('OPTIONS_BAD', '--m1-run stores in all three classes: --stores must include ram, el2_sysreg and gic')
@@ -89,20 +93,28 @@ def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None):
         raise ch.Refused('OPTIONS_BAD', '--m1-run and --gic-stop are two kinds of record: give one')
     if not 1 <= time_box_s <= BOX_MAX_S:
         raise ch.Refused('OPTIONS_BAD', f'--m1-run: the wrapper refuses a time box outside 1 to {BOX_MAX_S} s before it calls the monitor (D5)')
-    if panel is not None and (panel, hvc_calls) != ('withheld', 0):
-        raise ch.Refused('OPTIONS_BAD', f'--m1-run with real: D9 is open, and this record is written for --panel withheld and --sptm-hvc-calls 0 only '
-                                        f'(the guest gets no framebuffer and a stock kernel); got --panel {panel} and --sptm-hvc-calls {hvc_calls}')
+    if panel is not None and (panel not in D9_PANELS or hvc_calls != 0):
+        raise ch.Refused('OPTIONS_BAD', f'--m1-run with real: D9 admits --panel withheld (the first choice), --panel handed (the second) or --panel console (the panel '
+                                        f'as the kernel\'s console), each with --sptm-hvc-calls 0 (a stock kernel), and this record is written for no other choice; '
+                                        f'got --panel {panel} and --sptm-hvc-calls {hvc_calls}')
 
 
-def pinned_label(label, is_m1):
-    """The build_label PIN.DAT carries. For this kind the marker comes first (the wrapper of this kind refuses a PIN.DAT without it, D2); for every other
-    kind the label is the facts' and may not start with the marker, or a PIN.DAT of another kind would pass for this one. PIN_STRING: it does not fit."""
+def pinned_label(label, is_m1, choice='withheld'):
+    """The build_label PIN.DAT carries. For this kind the marker comes first (the wrapper of this kind refuses a PIN.DAT without it, D2) and, for a guest that is
+    handed the panel, the marker of that choice (PANEL_MARKS) after it, so that the three choices of D9 have three labels; for every other kind the label is the
+    facts' and may not start with the marker, or a PIN.DAT of another kind would pass for this one. The facts label of this kind may not start with a marker of
+    a choice either: M1RUN-PANEL- is then the label of the choice that hands the panel and M1RUN-CONSOLE- that of the panel as the console, and of no other.
+    PIN_STRING: it does not fit."""
     if label.startswith(LABEL_PREFIX):
         raise ch.Refused('PIN_STRING', f'build_label starts with {LABEL_PREFIX}, which only --m1-run adds')
-    if is_m1 and len(LABEL_PREFIX + label) > PIN_LABEL_MAX:
-        raise ch.Refused('PIN_STRING', f'--m1-run puts {LABEL_PREFIX} in front of build_label and the pinned label holds {PIN_LABEL_MAX} characters: the facts label holds '
-                                       f'{PIN_LABEL_MAX - len(LABEL_PREFIX)}')
-    return LABEL_PREFIX + label if is_m1 else label
+    for owner, mark in PANEL_MARKS.items():
+        if is_m1 and mark and label.startswith(mark):
+            raise ch.Refused('PIN_STRING', f'build_label starts with {mark}, which only --m1-run with --panel {owner} adds after {LABEL_PREFIX}')
+    front = LABEL_PREFIX + PANEL_MARKS[choice]
+    if is_m1 and len(front + label) > PIN_LABEL_MAX:
+        raise ch.Refused('PIN_STRING', f'--m1-run puts {front} in front of build_label and the pinned label holds {PIN_LABEL_MAX} characters: the facts label holds '
+                                       f'{PIN_LABEL_MAX - len(front)}')
+    return front + label if is_m1 else label
 
 
 def read_efi(given, files, is_m1):

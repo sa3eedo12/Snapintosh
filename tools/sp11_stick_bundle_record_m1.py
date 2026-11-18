@@ -35,6 +35,16 @@ import sp11_stick_bundle_m1 as bm  # noqa: E402
 
 WIDTH = 118
 PREPARE_AND_CLEAN_S = 0.04      # OBSERVED once, in boot 20 (the first run of the monitor entry): the call's TICKS less the time box, the prepare and the stop's clean together
+# What boot 20 measured of the same step as the dry run's 2.923 s, the wrapper's checks, copy and verify of its own GUEST.DAT: the TICKS HASHED of its page is a stamp counted from the
+# wrapper's entry (probes/sp11-stick-wrapper.c, c.head.r.ticks_hashed - c.ticks_enter), ticks of 19.2 MHz, and not the hash alone (that is HASHED less COPIED). Section 4 says it beside
+# the dry run's figure, and what its first heartbeat and its film showed of the clock. The scaling of the dry run's figure to this GUEST.DAT (INFERRED) agrees with it: 2.923 s x 118.87 / 144.7 = 2.40 s.
+BOOT20_HASHED_TICKS, BOOT20_GUEST_BYTES = 46_208_412, 118_870_336
+BOOT20_HASHED_S = round(BOOT20_HASHED_TICKS / 19.2e6, 2)
+BOOT20_HASHING = (f'Boot 20 measured that whole step (checks, copy and verify) for its own {BOOT20_GUEST_BYTES / 1e6:.1f} MB GUEST.DAT at {BOOT20_HASHED_S} s (TICKS HASHED='
+                  f'{BOOT20_HASHED_TICKS:,} at 19.2 MHz, counted from the wrapper\'s entry; OBSERVED once), which agrees with that scaling.')
+BOOT20_HASHED_ROW = (f'      {"that same step in boot 20 (TICKS HASHED)":<41}{BOOT20_HASHED_S} s   OBSERVED once ({BOOT20_HASHED_TICKS:,} ticks of 19.2 MHz',
+                     f'      {"":<41}from the wrapper\'s entry)')
+UPTIME_BOOT20 = '; boot 20: UPTIME 28 S at its first heartbeat, and no restart to the end of its film at 45 s; OBSERVED once'
 
 
 def wrap(text, first=3, rest=3, width=WIDTH):
@@ -55,7 +65,7 @@ SMC_LINES = wrap(
     'and every later write to it changes other bits only (IMO, FMO, NV, NV2, TWE, VI, VF, API, TVM and TRVM: read from the sources, INFERRED), and the '
     'monitor has no handler for the exception class of an SMC from the guest (EC 0x17). An SMC at EL1 would reach firmware without the monitor '
     '(INFERRED). The basis for not expecting one is a read-only scan of the local J700 26A428 kernelcache: its two executable segments, __TEXT_EXEC '
-    '(14,774,272 words) and __TEXT_BOOT_EXEC (8,192), hold 0 SMC and 0 HVC words (OBSERVED on a host file, one kernelcache; the same scan finds, in the two '
+    '(14,774,272 words) and __TEXT_BOOT_EXEC (8,192), hold 0 SMC and 0 HVC words (read on the host (a file, not a run), one kernelcache; the same scan finds, in the two '
     'segments together, 1 SVC, 1 ERET and 148 WFE words, 146 of them in __TEXT_EXEC, so it does find instructions). Whether the guest runs SMC code from anywhere '
     'else is UNKNOWN.')
 

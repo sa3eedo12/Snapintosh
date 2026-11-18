@@ -25,13 +25,13 @@ TEXT = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(TEXT)
 text_of, flat, sha = TEXT.text_of, TEXT.flat, TEXT.sha
 # SHA-256 of the text of the fabricated real build for a box of 30 s and one of 120 s, the builder's cap at 120 s: a changed byte of either is another record.
-BOX_GOLDEN = {30: '62d0d871eb9dade338376d2b0d30b31b576ac36f94e74b5d6c7fd03d7becf8fc', 120: '2717ea1b91f4e46b0b46bd086109592ad0852ce67befa6550d2200da1c769824'}
+BOX_GOLDEN = {30: 'cb792f08cee47edc68c9ba2442fc06467d688aac3c02b7c038193b0594b67128', 120: 'de7293035d2c1f706b035d1b39cb3bca6a62788d8660d7070f0fc9db0678a5dc'}
 # The places where the box matters: a sentence of a record that is not the same in a record of another box must hold one of these.
 BOX_ANCHORS = ('LONGER THAN THE 5 s THAT D5 AND D8 DECIDED', 'The rest of D5 and D8 holds', 'D8 the thermal exception', 'D5 the time box is 5 s at most', 'one CPU only, for up to',
                'No thermal guard exists on this path', 'does without them for up to', 'Time box: ', 'the known parts, low sum', 'The plan\'s budget is a run well under 20 s',
                'RELAXES THE 20 s PRECAUTION OF D5 (the time box of', 'D8 was decided on 2026-11-17', 'If the stop timer never fires', 'No page change for',
                'operator-safe wait and not a measurement', 'after the STAGE=DONE line: a lit page that has stopped there', 'the stop came inside the time box',
-               'TICKS= counts the whole call', 'does not change for', 'MON IMAGE OFF=', 'MON CALL X0=', 'Film at 60 fps', 'time of one CPU, about')
+               'TICKS= counts the whole call', 'does not change for', 'MON IMAGE OFF=', 'MON CALL X0=', 'Film 30 frames a second or more', 'time of one CPU, about')
 
 
 def sentences(text):

@@ -607,10 +607,11 @@ class Other(unittest.TestCase):
 
     def test_the_smc_paragraph_carries_the_scan_and_labels_what_it_is(self):
         flat = ' '.join(' '.join(m1t.SMC_LINES).split())
-        for needle in ('an SMC that the guest executes is not trapped', 'TSC clear', 'EC 0x17', '(INFERRED)', '(OBSERVED on a host file, one kernelcache;', 'hold 0 SMC and 0 HVC words',
+        for needle in ('an SMC that the guest executes is not trapped', 'TSC clear', 'EC 0x17', '(INFERRED)', '(read on the host (a file, not a run), one kernelcache;', 'hold 0 SMC and 0 HVC words',
                        'Whether the guest runs SMC code from anywhere else is UNKNOWN', '__TEXT_EXEC (14,774,272 words) and __TEXT_BOOT_EXEC (8,192)',
                        'in the two segments together, 1 SVC, 1 ERET and 148 WFE words, 146 of them in __TEXT_EXEC'):
             self.assertIn(needle, flat)
+        self.assertNotIn('OBSERVED on a host file', flat, 'a file read on the host is not OBSERVED (a run on the unit is)')
         self.assertNotIn('and 146 WFE words, so it does', flat, 'the 146 are the count of one segment')
         self.assertNotIn('VERIFIED', flat)
 

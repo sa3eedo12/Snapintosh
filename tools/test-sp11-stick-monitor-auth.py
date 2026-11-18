@@ -51,7 +51,7 @@ sha = lambda data: hashlib.sha256(data).hexdigest()     # noqa: E731
 LLVM = ('clang', 'ld.lld', 'llvm-objcopy', 'llvm-readelf', 'llvm-nm', 'llvm-objdump')
 OWN = ('tools/sp11_stick_bundle_m1.py', 'tools/sp11_monitor_census.py', 'tools/test-sp11-stick-monitor-auth.py', 'tools/test-sp11-stick-monitor-interlock.py',
        'docs/SP11-STICK-MONITOR.md')
-DOC_CAP = 94000         # raised from 91,000 on purpose (record draft 5: section 19; 88,000 before draft 3); nothing was cut to make room
+DOC_CAP = 120000        # raised from 94,000 on purpose, to 114,000 for section 20 (K7), by 2,000 more for its second-camera and public-source words (A2: the margin for the notes that come with the record), by 2,000 more for K8 (A3) and by 2,000 more for K8 (h) (A4); 91,000 before draft 5, 88,000 before draft 3; nothing was cut to make room
 # The records the operator was shown or approved, regenerated here from the files they were made from (docs/SP11-MONITOR-PORT.md section 15 D4/D7).
 RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e035977bf700e',
            'gic and stop dry run': 'c74f7af0217c507e7738673b9d437d6c76589ef3c243c23eef4837b0ca435b3b',
@@ -59,7 +59,7 @@ RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e03597
 FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=7, time_box_s=5, label='M1-FIXED', monitor=(445935, '1' * 64), reporter=(58463, '2' * 64),
              note=None, gic_stop=False, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
 # The SHA-256 of record_text for FIXED and FABRICATED[...]: the text of an M1 record is what the operator approves, so a changed byte is another record.
-GOLDEN = {'a test record': '262ea15bc8026c28fa5ca6850c186c896297dba255d0ddfc773f84d191504dd6', 'another record': 'cf7dfb8b49aaa201faa7d4c0a48c6729b02c1436399ba9f328ad742544849b29'}      # re-pinned on purpose for draft 5 (draft 4: 08e6c54d... and 5b0e0eee...)
+GOLDEN = {'a test record': 'a14b54a9950a9cd3d2e9afda9e386f959d5cdb8d726577cb6c7c63589d740425', 'another record': 'f738639330d193dced513c07a30c898c9b79e8717fd7c14770ccef9453a5b5be'}      # re-pinned on purpose for draft 5 (draft 4: 08e6c54d... and 5b0e0eee...), for A3 (draft 5: 262ea15b... and cf7dfb8b...) and for A4, whose shared words follow the delta review of the A3 text (A3: 08c45c89... and f6ad19cd...)
 
 
 def quietly(function, *args):
@@ -715,8 +715,8 @@ class Hygiene(unittest.TestCase):
         build = (ROOT / 'docs/SP11-STICK-BUILD.md').read_text()
         self.assertIn('`--m1-run BUILD_REPORT`', build)
         self.assertIn('docs/SP11-STICK-MONITOR.md', build)
-        self.assertLessEqual(len(build.encode()), 35500)
-        self.assertIn('35500', (TOOLS / 'test-sp11-stick-bundle-build.py').read_text(), 'the cap of docs/SP11-STICK-BUILD.md in its own test')
+        self.assertLessEqual(len(build.encode()), 36000)
+        self.assertIn('36000', (TOOLS / 'test-sp11-stick-bundle-build.py').read_text(), 'the cap of docs/SP11-STICK-BUILD.md in its own test')
 
     def test_the_flag_is_documented_where_the_options_are(self):
         done = quietly(bb.main, ['authorisation-template', 'synthetic', '--help'])

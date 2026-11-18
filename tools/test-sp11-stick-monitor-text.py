@@ -74,7 +74,7 @@ PINS = {
     'M2 no disk write is meant to be possible': 'No disk write is meant to be possible: the code of the wrapper, the monitor and the reporter stores to RAM, EL2 system '
                                                 'registers and GIC registers only (section 3),',
     'M2 stage 2 is all that stops the guest': 'Stage 2 is all that stops the guest: an SMC would not be trapped and would reach firmware (section 3; the kernelcache holds '
-                                              'none: OBSERVED on a host file). The one certain write to the stick is the Shell\'s marker file SP11\\DONE1.TXT, made before '
+                                              'none: read on the host (a file, not a run)). The one certain write to the stick is the Shell\'s marker file SP11\\DONE1.TXT, made before '
                                               'the step starts (section 5c).',
     'M3 the runaway case in 0b': 'If the stop timer never fires (the plan\'s second most likely failure) one CPU stays loaded, at worst, until the operator acts: 60 s of '
                                  'silence (section 5) plus about 20 s holding Power, 80 s or more, with no temperature read; approving this text accepts that too.',
@@ -175,7 +175,7 @@ PINS = {
                                       'stage-2 abort, and the run ended as MON STOP WATCHDOG at the kernel address 0xFFFFFE000C1EEF00.',
     'w2 where things stand: the cause is inferred': 'Why the guest was still at that address when the time box ended the run is INFERRED: an early loop in the guest. The same stop '
                                                     'address again, after a change meant to end the loop, would falsify that.',
-    'w3 where things stand: the stick': 'The stick was unchanged but for the Shell\'s marker.',
+    'w3 where things stand: the stick': 'The stick was unchanged but for the Shell\'s marker and the Mac\'s own .fseventsd entry.',
     'w4 where things stand: no more': 'The hardware status of everything else is NOT RUN. This text claims no more: not that macOS boots, and not that anything is stable.',
     'd9 a withheld panel': 'a withheld panel leaves the guest\'s video description all zero, and stock XNU then spins in an early console loop (INFERRED, high: boot 20\'s stop '
                            'PC and the public XNU source), so a longer box on that image only repeats it',

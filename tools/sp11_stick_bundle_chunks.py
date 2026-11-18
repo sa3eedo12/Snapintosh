@@ -255,13 +255,17 @@ def real_built(a, xb, place, facts):
     place_layout(xb, place)
     xb.FRAMEBUFFER = None if a.panel == 'withheld' else (facts['fb_base'], facts['fb_width'], facts['fb_height'], facts['fb_stride'] * 4, 32)
     env = {'SNAP_NATIVE_CALLS': '1', 'SNAP_SPTM_HVC_CALLS': str(a.sptm_hvc_calls), 'SNAP_SEED': a.seed}   # else the loader draws a fresh boot seed per build
+    loader_cmdline = xb.BOOT_CMDLINE
     os.environ.update(env)
     try:
+        if a.panel == 'console':        # the panel as the kernel's console, as probes/run.py makes it for the A16's native panel console: serial bit 0 clear, text mode kept
+            xb.BOOT_CMDLINE = loader_cmdline.replace('serial=3', 'serial=2')
         with contextlib.redirect_stdout(io.StringIO()):     # the loader narrates its layout on stdout: not for the record the operator approves
             built = xb.build(str(a.kernelcache))
     except (OSError, ValueError, SystemExit) as error:
         raise Refused('BUILT_SHAPE', f'probes/xnuboot.py build() refused: {error}') from None
     finally:
+        xb.BOOT_CMDLINE = loader_cmdline        # the loader module outlives this build: the next one starts from the loader's own line
         for key in env:
             os.environ.pop(key, None)
     try:        # run.py's check before an upload: no APF slice of the guest's tree may alias owned memory (the loader's message names a device node: not quoted)
