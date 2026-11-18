@@ -6,6 +6,7 @@ panel (D9) are in one table, PANEL, which the panel variant of the run extends: 
 something false for it.
 
  - reading_lines is the paragraph before section 0: which sections the operator reads, and who the coordinator is (defined at its first use).
+ - stand_lines is section 0a: where things stand after the one run of the monitor entry (boot 20), with its labels and nothing beyond them.
  - decision_lines is section 0: that approving the SHA-256 of the text IS decision D4, and the decisions already taken, with their dates.
  - hazard_lines is section 0b, in plain words.
  - outcome_lines is section 5a: M1 as docs/SP11-MONITOR-PORT.md sections 2 and 14 define it, the expected ends, and the pages that are a pass, a finding, a failure
@@ -30,15 +31,54 @@ wrap, WIDTH = m1t.wrap, m1t.WIDTH
 TICKS_PER_S = 19_200_000        # CNTFRQ_EL0 of the unit (OBSERVED, boots 3 to 14): the unit of MON RET's TICKS=
 MARKER = 'SP11\\DONE1.TXT'      # the file the Shell writes before the step starts (docs/RUNNING.md, autorun)
 SILENCE_BEFORE_CALL_S = 15      # the silence rule of the GIC dry run (docs/SP11-STICK-GIC.md section 11), kept for the stages that come before the call
-SILENCE_AFTER_PAGE_S = 60       # the operator's wait at the end of the film (section 5c): the same 60 s as the silence rule after MON CALL
+SILENCE_BEFORE_PAYLOAD_MIN = 2  # the operator's wait while the runner loads and hashes the files (its length is UNKNOWN: nothing of M1 has run yet)
+SILENCE_AFTER_PAGE_S = 60       # the operator's wait after the STAGE=DONE line (the report page and the heartbeat come within seconds); the box does not enter
+D5_BOX_S = 5                    # the time box that D5 (2026-11-16) and D8 (2026-11-17) decided: not the builder's cap (sp11_stick_bundle_m1.BOX_MAX_S)
+SILENCE_MARGIN_S = 60           # what the operator waits beyond the end of the box before FORCE OFF after the MON CALL line (not a measurement)
+HOLD_S = 20                     # the hold of Power that FORCE OFF asks for
 
-# What depends on the panel and the kernel (D9). 'withheld' with a stock kernel is the first run; the key of another panel is added with its own words, and until
+
+def silence_s(box_s):
+    """The operator's wait, in s, after the MON CALL line before FORCE OFF, and the film's end after the last page change: the 60 s of the text approved for the decided
+    box (a box of 5 s or less), the box plus 60 s for a longer one, because the page does not change while the guest runs."""
+    return SILENCE_MARGIN_S if box_s <= D5_BOX_S else box_s + SILENCE_MARGIN_S
+
+
+def runaway_words(box_s):
+    """The runaway case as 0b and section 4 say it, after `one CPU stays loaded`: the least time that the CPU stays loaded when the stop timer never fires and the
+    operator acts by the rules, the silence plus the hold."""
+    wait = silence_s(box_s)
+    return (f'one CPU stays loaded, at worst, until the operator acts: {wait} s of silence (section 5) plus about {HOLD_S} s holding Power, {wait + HOLD_S} s or more, with '
+            'no temperature read; approving this text accepts that too.')
+
+
+def d8_box(box_s):
+    """The box that D8 accepted (one CPU, 5 s, AC power), and this record's beside it when it is another."""
+    if box_s == D5_BOX_S:
+        return f'a time box of {box_s} s'
+    return f'a time box of {D5_BOX_S} s' + (f' at most (this record: {box_s} s)' if box_s < D5_BOX_S else f' (this record: {box_s} s, longer: see above)')
+
+
+def d5_words(box_s):
+    """D5 as decided (5 s at most) and this record's box beside it."""
+    return f'D5 the time box is {D5_BOX_S} s at most (this record: {box_s} s{", longer: see above" if box_s > D5_BOX_S else ""})'
+
+
+def longer_box_lines(box_s):
+    """A box longer than the decided one is decided by approving this text, and the paragraph says so in capitals; for a box up to it there is nothing to say."""
+    if box_s <= D5_BOX_S:
+        return ()
+    return wrap(f'THIS RECORD\'S TIME BOX IS {box_s} s, LONGER THAN THE {D5_BOX_S} s THAT D5 AND D8 DECIDED: approving this text decides this box and the exposure that '
+                f'section 4 gives, which D8 accepted for a box of {D5_BOX_S} s only. The rest of D5 and D8 holds: one CPU, AC power REQUIRED.')
+
+# What depends on the panel and the kernel (D9). 'withheld' with a stock kernel is the run of boot 20; the key of another panel is added with its own words, and until
 # then asking for it fails.
 PANEL = {'withheld': dict(
     d9='D9 the panel is withheld from the guest and the kernel is stock (SPTM HVC call patch 0).',
     guest_gets=('no disk, no USB and no panel: its build has no root device, no storage or USB model and no framebuffer, and stage 2 maps it RAM only '
-                '(INFERRED from the sources; never run)'),
-    console='The guest has no panel to write to: its console output goes to a buffer in RAM that SNAPREP prints as MON CON lines.')}
+                '(INFERRED from the sources; no stage-2 abort in boot 20\'s 5 s, OBSERVED once)'),
+    console='The guest has no panel to write to: its console output goes to a buffer in RAM that SNAPREP prints as MON CON lines.',
+    rung='rung 2, the run with the panel handed to the guest')}
 KERNEL = {0: 'the stock macOS kernel in GUEST.DAT (the J700 26A428 kernelcache with only the loader\'s pointer rebase applied, SPTM HVC call patch 0: '
              'docs/SP11-STICK-REAL.md section 5)'}
 SYNTHETIC = 'the guest image in GUEST.DAT (a synthetic build: this text is a test artefact, not a run)'
@@ -50,8 +90,8 @@ PAGE_LINES = ('PAYLOAD LOADED', 'PAYLOAD VERIFY=OK', 'PAYLOAD CALL', 'PAYLOAD DO
               'MONITOR RETURNED STAGE=DONE', 'WRAPPER DID NOT FINISH STAGE=', 'VERDICTS PIN=', 'REGS', 'RAM UNTOUCHED BEYOND REPORT.DAT', 'PLACEMENT WRITTEN',
               'CHUNKS', 'PLACE', 'GUEST.DAT', 'REPORT UNREADABLE', 'REPORT EMPTY', 'MON NO RECORD', 'MON RECORD DAMAGED', 'MON STATUS=OK ENTERED=',
               'MON PREPARE FAILED CODE=-', 'MON EL2 FAULT ESR=', 'MON FAULT ELR=', 'MON COUNTS EVENTS=', 'MON STOP ', 'MON EXIT PC=', 'MON EV ', 'MON CON ')
-# The kinds of stop that SNAPREP names after `MON STOP`, with what each means (read from probes/xnuboot/report_layout.c and async.c; INFERRED: never run on the
-# unit). The first three are the ends that the plan expects; the others are controlled stops too, but not on its list.
+# The kinds of stop that SNAPREP names after `MON STOP`, with what each means (read from probes/xnuboot/report_layout.c and async.c: INFERRED, and the page says per kind
+# whether a run has shown it, STOP_SEEN). The first three are the ends that the plan expects; the others are controlled stops too, but not on its list.
 STOP_KINDS = {
     'WATCHDOG': ('the time box ended the run: the stop timer fired at the deadline and the monitor took the guest back. PC= is where the guest was; A=, B= and C= are '
                  'its ESR_EL1, FAR_EL1 and ELR_EL1 as they stood then, which belong to its last exception and not to this stop (an interrupt carries no syndrome)'),
@@ -59,9 +99,13 @@ STOP_KINDS = {
                  'has A= not 0), B= ESR_EL2, C= the guest VA'),
     'GUEST_EXC': ('the kernel took an exception of its own: PC= is the guest\'s x30, not its PC; A=, B= and C= are its ESR, FAR and ELR, and C= is the address that '
                   'row c checks'),
-    'PANIC_ENTRY': 'the kernel announced a fatal exception, a panic: A= the caller (x30), B= ELR_EL1, C= ESR_EL1',
+    'PANIC_ENTRY': ('the kernel announced a fatal exception, a panic: A= the caller (x30), B= ELR_EL1, C= ESR_EL1; the panic text, if it is in the first 1 KiB of the '
+                    'console buffer, is in the MON CON lines (film them)'),
     'ASYNC': 'an interrupt that was not the stop timer\'s ended the run: A= says which vector, B= and C= are ESR_EL1 and ELR_EL1',
     'SERROR': 'the guest took an SError, an access that the interconnect refused: A= is ESR_EL2, B= ESR_EL1, C= ELR_EL1'}
+# Which of those kinds a run has shown: boot 20 (the first run of the monitor entry, 2026-11-18) ended as WATCHDOG, one unit, one boot; no run has ended as another kind.
+STOP_SEEN = {'WATCHDOG': 'OBSERVED once (boot 20, one unit, one boot).'}
+STOP_NEVER = 'Never seen (UNKNOWN).'
 EXPECTED_ENDS = ('WATCHDOG', 'S2_FAULT', 'GUEST_EXC')
 # The prepare statuses of the gates, as SNAPREP names them in `MON PREPARE FAILED CODE=-n NAME` (rp_status_name of probes/sp11-stick-reporter.c).
 GATE_STATUSES = ((-90, 'NV2_NO_RECORD'), (-91, 'NV2_OTHER_CORE'), (-92, 'NV2_FEAT'), (-93, 'NV2_NOT_PASSING'), (-94, 'PAUTH_MIDR'), (-95, 'PAUTH_IDS'))
@@ -69,7 +113,7 @@ SP11_STATUSES = ((-146, 'VCPU_CLUSTERS'), (-147, 'TIMER_GUARD_CNTHCTL'), (-148, 
 
 
 def words(real):
-    """The panel words of a record: `real` is the facts of a real build (None for a synthetic one, which has no panel and is written as the first run)."""
+    """The panel words of a record: `real` is the facts of a real build (None for a synthetic one, which has no panel and is written with the withheld words)."""
     return PANEL[real['panel'] if real else 'withheld']
 
 
@@ -95,10 +139,25 @@ def item(label, text, indent=3, hang=8):
 
 
 def reading_lines():
-    """The paragraph before section 0: which sections the operator reads and acts on, and who the coordinator is (the word is defined at its first use, here)."""
-    return wrap('The operator reads and acts on sections 0, 0b, 4, 5, 5a and 5c; section 5b is the reference for the lines of the pages. Sections 1 to 3b are evidence '
-                'that the coordinator (the assistant that builds the files and the stick and reads the film with the operator) checks against the files.',
+    """The paragraph before section 0: which sections the operator reads and acts on (the NV2 paragraph of 1b, the basis of D6, among them), who the coordinator is (the
+    word is defined at its first use, here) and that approving covers one boot."""
+    return wrap('The operator reads and acts on sections 0, 0a, 0b, 4, 5, 5a and 5c, and reads in section 1b the paragraph on the NV2 record (D6); section 5b is the '
+                'reference for the lines of the pages. The rest of sections 1 to 3b is evidence that the coordinator (the assistant that builds the files and the stick and '
+                'reads the film with the operator) checks against the files. Approving this text covers ONE boot of this stick (section 5c, THIS APPROVAL COVERS ONE BOOT).',
                 first=0, rest=0)
+
+
+def stand_lines():
+    """Section 0a, in every record of this kind (the panel, the box and the kernel do not change it): what the one run of the monitor entry showed, with its labels,
+    and nothing beyond it. The numbers are those of the operator's film of boot 20 (record 31e5d4c2...a802, 2026-11-18), read at full resolution."""
+    return (
+        '0a. Where things stand (boot 20, 2026-11-18, one unit, one boot; OBSERVED unless a sentence says INFERRED)',
+        *wrap('Boot 20 (record 31e5d4c2...a802) ran the monitor entry: the guest executed for its 5 s box, with 3,127 traps, 1,443 monitor calls and no stage-2 abort, and '
+              'the run ended as MON STOP WATCHDOG at the kernel address 0xFFFFFE000C1EEF00.'),
+        *wrap('Why the guest was still at that address when the time box ended the run is INFERRED: an early loop in the guest. The same stop address again, after a change '
+              'meant to end the loop, would falsify that.'),
+        *wrap('The stick was unchanged but for the Shell\'s marker.'),
+        *wrap('The hardware status of everything else is NOT RUN. This text claims no more: not that macOS boots, and not that anything is stable.'))
 
 
 def decision_lines(real, box_s):
@@ -109,14 +168,17 @@ def decision_lines(real, box_s):
         *wrap('THE SHA-256 OF EXACTLY THIS TEXT, WHEN THE OPERATOR APPROVES IT, ALSO DECIDES D4: this run may store to RAM, to EL2 system registers and to the GIC, in '
               'the three classes ram, el2_sysreg and gic exactly as section 3 lists them, and in no other class. Nothing else decides D4, and a changed byte of this '
               'text is another record.'),
+        *wrap('Approving this text covers ONE boot of this stick. A boot that printed PAYLOAD CALL 0 has spent the approval, and so has a boot whose film does not show '
+              'whether it did (section 5c, THIS APPROVAL COVERS ONE BOOT).'),
+        *longer_box_lines(box_s),
         *wrap('Decided by the operator on 2026-11-17 (the answer "Accept all four (Recommended)", quoted from the app):'),
         *item('D6', 'the NV2 record: embed the first-image record, the one that X2 run 4 measured. Section 1b says what it is and what is not known of it.'),
-        *item('D8', f'the thermal exception: accepted for ONE CPU, a time box of {box_s} s and AC power REQUIRED. Section 4 gives the exposure.'),
+        *item('D8', f'the thermal exception: accepted for ONE CPU, {d8_box(box_s)} and AC power REQUIRED. Section 4 gives the exposure.'),
         *item('D10', 'SNAP_FAIR_TOKEN=1 stays in the monitor\'s profile (SP11 only): without the queued service lock six vCPUs refuse at -146. Its qualification on '
                      'the A16 is not part of this tree.'),
         *item('N1', 'the boot seed: the default label stays (section 1a); boot entropy at run time stays UNIMPLEMENTED.'),
-        *wrap('Decided on 2026-11-16: D2 the stop is the monitor\'s own interrupt of the EL2 timer; D5 the time box is 5 s at most (this record: '
-              f'{box_s} s), and approving this text relaxes the 20 s UPTIME precaution that D5 left open (section 4); D7 the payloads and data files that run are '
+        *wrap(f'Decided on 2026-11-16: D2 the stop is the monitor\'s own interrupt of the EL2 timer; {d5_words(box_s)}, and approving this text relaxes the 20 s UPTIME '
+              'precaution that D5 left open (section 4); D7 the payloads and data files that run are '
               'named by their SHA-256 (section 1), and the stick\'s other files are checked by the coordinator (section 5c); '
               f'{words(real)["d9"]} N2 the board file is a guest view (section 1a).'),
         *wrap('The questions behind these decisions are in docs/SP11-MONITOR-PORT.md section 15. Until the operator approves it, this text is a template: that is the '
@@ -129,23 +191,24 @@ def hazard_lines(real, box_s, low, high):
     guest = kernel_words(real)
     return (
         '0b. The hazards, in plain words',
-        *wrap(f'- {guest[0].upper()}{guest[1:]} runs at EL1 on the boot CPU, one CPU only, for up to {box_s} s, under a monitor that has never run '
-              'on this machine. What the kernel does there is UNKNOWN. The run ends by the monitor\'s own timer interrupt, by a stage-2 fault or by an exception that '
-              'the kernel takes (section 5a).', first=3, rest=5),
+        *wrap(f'- {guest[0].upper()}{guest[1:]} runs at EL1 on the boot CPU, one CPU only, for up to {box_s} s, under a monitor that ran once on this machine (boot 20: '
+              'section 0a). What the kernel does there beyond what section 0a says is UNKNOWN. The run ends by the monitor\'s own timer interrupt, by a stage-2 fault or by '
+              'an exception that the kernel takes (section 5a).', first=3, rest=5),
         *wrap(f'- The guest is given {w["guest_gets"]}. An access outside its RAM is meant to fault at stage 2 and stop the run.', first=3, rest=5),
         *wrap('- No disk write is meant to be possible: the code of the wrapper, the monitor and the reporter stores to RAM, EL2 system registers and GIC registers only '
-              '(section 3), and the guest is given RAM only (INFERRED; never run). Stage 2 is all that stops the guest: an SMC would not be trapped and would reach '
+              '(section 3), and the guest is given RAM only (INFERRED; no stage-2 abort in boot 20\'s 5 s, OBSERVED once). Stage 2 is all that stops the guest: an SMC '
+              'would not be trapped and would reach '
               'firmware (section 3; the kernelcache holds none: OBSERVED on a host file). The one certain write to the stick is the Shell\'s marker file '
               f'{MARKER}, made before the step starts (section 5c).', first=3, rest=5),
         *wrap('- The Surface may restart by itself, during the run or after it (cause UNKNOWN; the earliest datum is about UPTIME 17 s: section 4). A restart before '
               'the report is NOT a result (section 5a).', first=3, rest=5),
-        *wrap(f'- No thermal guard exists on this path: one CPU is loaded for {low} to {high} s plus the monitor\'s prepare, {box_s} s of it by the guest (D8, '
-              'section 4). AC power is REQUIRED. If the stop timer never fires (the plan\'s second most likely failure) one CPU stays loaded, at worst, until the '
-              'operator acts: 60 s of silence (section 5) plus about 20 s holding Power, 80 s or more, with no temperature read; approving this text accepts that too.',
+        *wrap(f'- No thermal guard exists on this path: one CPU is loaded for about {low} to {high} s plus the monitor\'s prepare, {box_s} s of it by the guest (D8, '
+              'section 4). AC power is REQUIRED. If the stop timer never fires (the plan\'s second most likely failure) ' + runaway_words(box_s),
               first=3, rest=5),
         *wrap('- The GIC: from the first GIC store until after the monitor returns, this CPU\'s SGI 0 and PPIs 23, 25, 27 and 30, the guest\'s own timers (INTID 27, 30) '
               'among them, are switched off and put back afterwards; if the call never returns they stay off until the restart (INFERRED: the firmware sets the GIC up '
-              f'again). What the stock kernel does without them for up to {box_s} s is UNKNOWN (section 3, class gic).', first=3, rest=5),
+              'again). If both group 1 put-backs fail after the return they stay off as well, and the page says GIC RESTORE CLEAN=NO (host model only; never run). '
+              f'What the stock kernel does without them for up to {box_s} s is UNKNOWN (section 3, class gic).', first=3, rest=5),
         *wrap('- The two EFI files that run at EL2 before the wrapper (section 1b) are not checked at boot against this record, and the operator cannot check them on the '
               'unit: the control is the coordinator\'s, before the boot (section 5c).', first=3, rest=5),
         *wrap('- The monitor reads a few words of PARAMS again while the guest runs, in RAM that the guest can write (section 3b, the LIVE gates; INFERRED): a guest '
@@ -167,7 +230,7 @@ def outcome_lines(real, box_s):
                    'x30 and C= is the address to check (the coordinator compares it with the kernelcache);'),
         *item('d', f'the run ended by the monitor\'s own stop, a MON STOP line ({ends}), never a hang or a reset;'),
         *item('e', f'the stop came inside the time box: {box_s} s of wall time on CNTPCT_EL0, {box_s * TICKS_PER_S:,} ticks of 19.2 MHz. MON RET ... TICKS= counts the whole '
-                   'call, the prepare (UNKNOWN) and the stop\'s clean (about 0.6 s, INFERRED) included, so TICKS <= '
+                   f'call, the prepare and the stop\'s clean included (about {m1t.PREPARE_AND_CLEAN_S} s together in boot 20, OBSERVED once: section 4), so TICKS <= '
                    f'{box_s * TICKS_PER_S:,} proves row e, and a larger value neither proves nor fails it (row e is then UNKNOWN unless the stop is MON STOP WATCHDOG, '
                    'the monitor\'s own deadline);'),
         *item('f', 'no disk was written: nothing in the run\'s code writes one (section 3), and the stick is byte-identical after the run but for the Shell\'s marker, '
@@ -175,23 +238,27 @@ def outcome_lines(real, box_s):
         *item('g', 'the A16 monitor is byte-identical with the new gate off (tools/monitor_baseline.py IDENTICAL): a host check of the coordinator, on no page.'),
         *wrap('A STAGE-2 FAULT WITH AN IPA IS SUCCESS: MON STOP S2_FAULT, with the guest PC, the IPA in A= and ESR_EL2 in B=, is the kernel stopping at its first device '
               'that the monitor does not model, which the plan expects of M1 (docs/SP11-MONITOR-PORT.md section 14: expected failure 5, "that is success for M1"; INFERRED: '
-              'never run). Rows c and d hold for it, and the coordinator reads A= and B= to say which address the kernel touched; A=0 means that no IPA could be named, '
+              'no run has stopped that way yet, UNKNOWN). Rows c and d hold for it, and the coordinator reads A= and B= to say which address the kernel touched; A=0 means '
+              'that no IPA could be named, '
               'and that is a finding, not this end. A touch outside RAM that stage 2 stops IS this end, not a failure and not a retry.'),
-        *wrap('The time box should end as MON STOP WATCHDOG, and MON EXIT PC= beside it (INFERRED: never run). The plan\'s own list of failures to expect, most likely '
-              'first: the NV2 gate refusing, MON PREPARE FAILED CODE=-90 to -95 (the record is embedded now, and a pass is INFERRED); the stop timer never firing, or '
+        *wrap('A run that uses its whole time box ends as MON STOP WATCHDOG, and MON EXIT PC= beside it (OBSERVED once: boot 20, one unit, one boot). The plan\'s own list '
+              'of failures to expect, most likely first: the NV2 gate refusing, MON PREPARE FAILED CODE=-90 to -95 (the gate passed with the embedded record in boot 20: '
+              'OBSERVED once; the regime that record was built in is still not recorded, INFERRED E2H = 1: section 1b); the stop timer never firing, or '
               'the wrong interrupt arriving, so that the guest runs unbounded and only the operator\'s FORCE OFF ends it (U3: PPI 26 reached EL2 in the GIC dry run, '
-              'OBSERVED, one boot; the monitor\'s own stop path is NOT RUN); a stage-2 execute-never fault on the monitor\'s first native call (U10); a debug or '
+              'OBSERVED, one boot; the monitor\'s own stop path ran at the time box in boot 20, OBSERVED once, so this failure is possible and has not been seen); a '
+              'stage-2 execute-never fault on the monitor\'s first native call (U10); a debug or '
               'PAuth refusal at the first signed return (U5, U8); a restart with no report (U4).'),
         *wrap('A page is one of four things:'),
         *wrap(f'- M1 PASSED: the SNAPREP page shows MON STATUS=OK ENTERED=0X1 and a MON STOP line of kind {ends}, with PC= a kernel address (C= on GUEST_EXC) and A= not 0 on '
-              'S2_FAULT; rows a, c, d and e hold, and the coordinator checks f and g. WATCHDOG is the time box ending a run that used all of it (INFERRED).',
+              'S2_FAULT; rows a, c, d and e hold, and the coordinator checks f and g. WATCHDOG is the time box ending a run that used all of it (OBSERVED once: boot 20).',
               first=3, rest=5),
         *wrap('- A FINDING, which the coordinator reads before anything else runs and which neither passes nor fails M1 by itself: MON REGS RESTORED=NO, WINDOW OVERRUN, '
               'STACK FULL or GIC RESTORE CLEAN=NO beside a return (a finding about the monitor, never a refusal of the wrapper); a MON STOP of another kind (PANIC_ENTRY, '
-              'ASYNC, SERROR or one that SNAPREP prints as UNNAMED): the monitor stopped the run, so row d holds, but the plan did not list it.', first=3, rest=5),
+              'ASYNC, SERROR or one that SNAPREP prints as UNNAMED): the monitor stopped the run, so row d holds, but the plan did not list it. A MON STOP S2_FAULT with '
+              'A=0 is a finding too: no IPA could be named, so it is not the expected end above, though rows c and d hold.', first=3, rest=5),
         *wrap('- M1 FAILED, a result, and the same bundle is never run again: a wrapper REFUSED line (no guest ran); MON PREPARE FAILED CODE=-n (the monitor refused '
               'to launch the guest); MON EL2 FAULT (the monitor itself took an exception at EL2); MON QUARANTINE (the monitor returned a quarantine code: the report '
-              'is partial); a page that stops at MON CALL and does not change for 60 s (no controlled stop: row d); a fault page of q1n1.', first=3, rest=5),
+              f'is partial); a page that stops at MON CALL and does not change for {silence_s(box_s)} s (no controlled stop: row d); a fault page of q1n1.', first=3, rest=5),
         *wrap('- NOT A RESULT: a black panel, or a restart of the Surface, before STAGE=DONE and the SNAPREP page have been on the screen, or a film that does not show '
               'them. It says nothing about the guest. Whether the approval is spent depends on whether PAYLOAD CALL 0 printed (section 5c, THIS APPROVAL COVERS ONE BOOT).',
               first=3, rest=5))
@@ -224,8 +291,9 @@ def page_lines(m1, box_s):
               'refuses before the call.', first=3, rest=5),
         *wrap('- NEXT GIC STORES AFTER 8 S G=1 R=1 C=1 T=0 V=0 E=0: the GIC stores come after 8 s, and the 8 s of silence are healthy. The GIC lines before and after '
               'it (GICD, GICR, CPU, NEW) are the registers read and written (section 3, class gic).', first=3, rest=5),
-        *wrap(f'- MON CALL X0= X1= X2= X3= X4= SP=: the monitor is called now, and the page does not change until it returns: the monitor\'s prepare (UNKNOWN), the guest for '
-              f'up to {box_s} s, and the stop with its cache clean.', first=3, rest=5),
+        *wrap(f'- MON CALL X0= X1= X2= X3= X4= SP=: the monitor is called now, and the page does not change until it returns: the monitor\'s prepare, the guest for '
+              f'up to {box_s} s, and the stop with its cache clean (the prepare and the clean took about {m1t.PREPARE_AND_CLEAN_S} s together in boot 20: section 4).',
+              first=3, rest=5),
         *wrap(f'- MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=<n> STACK=<used>/<bytes>: the call returned. STATUS is the prepare\'s status: 0 passed, and a refusal prints it as a '
               f'64-bit number ({refused} is -91); ENTERED=1 says the guest ran. MON REGS RESTORED=YES: the registers that the monitor must put back are back (NO lists '
               'them, and WINDOW OVERRUN or STACK FULL may follow: findings, not refusals). GIC RESTORE CLEAN=YES: the GIC registers that the arm half changed are put back '
@@ -237,7 +305,8 @@ def page_lines(m1, box_s):
               'SNAPREP follows.', first=3, rest=5),
         *wrap('Payload 1, SNAPREP.BIN, reads REPORT.DAT and prints at most 40 lines: MONITOR RETURNED STAGE=DONE (WRAPPER DID NOT FINISH STAGE=<name> when the wrapper '
               'stopped early: a failure), then its own head lines, VERDICTS PIN= GUEST= POLICY= LINES=, two REGS lines (the wrapper\'s reads of EL, MIDR, MPIDR, CNTFRQ, '
-              'HCR, SCTLR and TCR), RAM UNTOUCHED BEYOND REPORT.DAT or PLACEMENT WRITTEN, CHUNKS (the copy and hash counts), TICKS, PLACE and GUEST.DAT (the placement '
+              'HCR, SCTLR and TCR), RAM UNTOUCHED BEYOND REPORT.DAT or PLACEMENT WRITTEN only when the wrapper refused (the first: before the copy, and the page ends '
+              'there; the second: at or after it), CHUNKS (the copy and hash counts), TICKS, PLACE and GUEST.DAT (the placement '
               'and the file that the wrapper saw), then the MON lines above again, MON VERDICT first, then what the monitor wrote into its window:'),
         *wrap('- MON STATUS=OK ENTERED=0X1: the monitor launched the guest and the guest ran. This is row c.', first=3, rest=5),
         *wrap(f'- MON PREPARE FAILED CODE=-91 NV2_OTHER_CORE: the monitor refused to launch the guest, and says why. {gate} are the NV2 and PAuth gate; {other} are the '
@@ -246,10 +315,10 @@ def page_lines(m1, box_s):
         *wrap('- MON EL2 FAULT ESR=0X.. EC=0X.. and MON FAULT ELR= OFF= FAR=: the monitor itself took an exception at EL2; OFF is ELR minus the monitor\'s base, to look up '
               'in its ELF with llvm-nm -n. M1 has failed.', first=3, rest=5),
         *wrap('- MON COUNTS EVENTS=n TRAPS=n ABORTS=n STEPS=n CALLS=n DROPPED=n: what the guest did before it stopped.', first=3, rest=5),
-        *wrap('- MON STOP <kind> PC= A= B= C=: how the run ended. The kinds that this text knows are read from the monitor\'s sources (INFERRED: never run):',
-              first=3, rest=5),
-        *(line for kind, text in STOP_KINDS.items() for line in wrap(f'{kind}: {text}. ' + ('An expected end of M1.' if kind in EXPECTED_ENDS else 'A finding (section 5a).'),
-                                                                       first=7, rest=10)),
+        *wrap('- MON STOP <kind> PC= A= B= C=: how the run ended. The forms of the kinds below are read from the monitor\'s sources (INFERRED), and each says whether a run '
+              'has shown it:', first=3, rest=5),
+        *(line for kind, text in STOP_KINDS.items() for line in wrap(f'{kind}: {text}. ' + ('An expected end of M1. ' if kind in EXPECTED_ENDS else 'A finding (section 5a). ')
+                                                                       + STOP_SEEN.get(kind, STOP_NEVER), first=7, rest=10)),
         *wrap('Any other name is a kind that this text does not list: the coordinator reads it from the monitor\'s sources and it is never guessed at.', first=7, rest=7),
         *wrap('- MON EXIT PC= SPSR= ESR= FAR=: the guest\'s own state at an interrupt stop, where it was.', first=3, rest=5),
         *wrap('- MON EV n <kind> PC= A= B= C=: the first five events of the monitor\'s log, what the kernel asked for first.', first=3, rest=5),
@@ -278,13 +347,16 @@ def action_lines(r):
               f'{MARKER} before the boot: the Shell writes it before the step, and a stick that holds it skips this single step (the Shell prints ALL STEPS DONE and '
               'nothing runs: docs/RUNNING.md).'),
         *wrap('Then the operator; nothing is typed. FORCE OFF, used below, means: hold Power alone for about 20 s by the clock until the Surface logo or Windows appears, '
-              'then release (that restarts the Surface; it is no power-off); if Windows starts, shut it down from Windows; if nothing appears after 30 s, hold Volume-Up '
-              'and Power together for about 15 s (Microsoft lists that for earlier models only; its effect on the Pro 11 is UNKNOWN), then release both. Source: Microsoft, '
-              '"Force a shutdown and restart your Surface", Surface Pro 5th Gen and later (the Pro 11 is not named there). If the Shell then prints ALL STEPS DONE, the marker '
-              'is working: do nothing, take the stick out.'),
+              'then release (that restarts the Surface; it is no power-off: INFERRED for the Pro 11); if nothing appears after 30 s, hold Volume-Up and Power together for '
+              'about 15 s (Microsoft lists that for earlier models only; its effect on the Pro 11 is UNKNOWN), then release both. Source: Microsoft, "Force a shutdown and '
+              'restart your Surface", Surface Pro 5th Gen and later (the Pro 11 is not named there). A restart, FORCE OFF\'s or the Surface\'s own, goes to the boot order '
+              'that the firmware has; which device the Pro 11 tries first with the stick in is UNKNOWN. If the stick starts again, the marker (written before the step) makes '
+              'the Shell print ALL STEPS DONE and run nothing. Do not let Windows run with Secure Boot off (docs/RUNNING.md, Way A: a Windows boot by accident only asks for '
+              'the BitLocker recovery key; if Windows does start, shut it down from Windows); take the stick out as soon as the logo appears, so that nothing mounts it '
+              '(row f); at a recovery-key screen type and choose nothing.'),
         *item('1.', 'AC power is REQUIRED (D8): the charger may be in Surface Connect or a USB-C port, and stays in from before the boot until the end. One hardware client. '
                     'NO cable to the Mac, no Mac logger, no other device on the USB ports; the stick goes in either port.', hang=7),
-        *item('2.', f'Film at 60 fps from the Shell\'s countdown until the first UPTIME heartbeat AFTER the line STAGE=DONE, or until {SILENCE_AFTER_PAGE_S} s after the last page '
+        *item('2.', f'Film at 60 fps from the Shell\'s countdown until the first UPTIME heartbeat AFTER the line STAGE=DONE, or until {silence_s(r["time_box_s"])} s after the last page '
                     'change, whichever comes first. Say the time of day aloud on the video at the start. Keep the whole panel in frame.', hang=7),
         *item('3.', f'Boot the stick as for every SP11 boot before this one. Do not press ESC at the countdown. The Shell then prints AUTORUN {r["label"]} STEP 1 OF 1, CMD1: load '
                     'SP11\\SLBOUNCE-DEVHE-MARK.EFI, CMD2: SP11\\Q1N1-PAYLOAD.EFI --el2 and "Writing SP11\\DONE1.TXT in 5 seconds, then the two commands run. Power off now to '
@@ -302,17 +374,22 @@ def action_lines(r):
                     'over the stick untouched: open, mount, edit or delete nothing on it before the coordinator has read it (row f).', hang=7),
         *item('7.', 'If the panel goes black or the Surface restarts at any point: write down the last line you saw, the last UPTIME shown if any, and the time on the video, '
                     'then FORCE OFF, DO NOT RETRY, and tell the coordinator. ONE RESTART BEFORE THE REPORT IS NOT A RESULT (section 5a).', hang=7),
-        *wrap(f'THIS APPROVAL COVERS ONE BOOT. A boot that printed PAYLOAD CALL 0 {mon} has spent it, whatever follows. A boot that did not print that line ran nothing of M1 '
-              '(the marker may exist: the coordinator deletes it) and is repeated only with the same files, after the coordinator has found the cause. Rung 2, another file, '
-              'kernel, patch value, time box or store class needs its own record.'))
+        *wrap(f'THIS APPROVAL COVERS ONE BOOT. A boot that printed PAYLOAD CALL 0 {mon} has spent it, whatever follows. A boot whose film does not show whether PAYLOAD CALL 0 '
+              'printed counts as printed: the approval is spent. A boot that did not print that line ran nothing of M1 (the marker may exist: the coordinator deletes it) and '
+              'is repeated only with the same files, after the coordinator has found the cause. Another file, kernel, patch value, time box or store class needs its own '
+              f'record, and so does {words(r.get("real"))["rung"]}.'))
 
 
 # The bullets of section 5 that only this kind has or words differently, in the form of the other bullets (three spaces, a dash, the text; five spaces under it).
-PRE_CALL_SILENCE = wrap(
-    f'- No page change for {SILENCE_BEFORE_CALL_S} seconds at any point after the runner\'s PAYLOAD CALL 0 line and before the MON CALL line: note the last line and FORCE '
-    f'OFF (section 5c). The {SILENCE_BEFORE_CALL_S} s is the silence rule of the GIC dry run (docs/SP11-STICK-GIC.md section 11), kept here, and not a measurement. The healthy silences '
-    'in that stretch are the wrapper\'s checks, copy and verify, about 3 s (section 4), and the 8 s that the NEXT GIC STORES AFTER 8 S line announces; '
-    'the runner\'s own loading before PAYLOAD CALL is UNKNOWN in length (UPTIME 37 to 38 S at the first heartbeat of boot 14 covers all of it).', first=3, rest=5)
+PRE_CALL_SILENCE = (
+    *wrap(f'- No page change for {SILENCE_BEFORE_PAYLOAD_MIN} minutes at any point after the Shell\'s AUTORUN line and before the runner\'s PAYLOAD CALL 0 line: nothing of M1 '
+          'has run; note the last line and FORCE OFF (section 5c). The 2 minutes is an operator-safe wait and not a measurement: the runner\'s own loading and hashing of the '
+          'files is UNKNOWN in length. The approval is not spent (section 5c, THIS APPROVAL COVERS ONE BOOT).', first=3, rest=5),
+    *wrap(
+        f'- No page change for {SILENCE_BEFORE_CALL_S} seconds at any point after the runner\'s PAYLOAD CALL 0 line and before the MON CALL line: note the last line and FORCE '
+        f'OFF (section 5c). The {SILENCE_BEFORE_CALL_S} s is the silence rule of the GIC dry run (docs/SP11-STICK-GIC.md section 11), kept here, and not a measurement. The healthy '
+        'silences in that stretch are the wrapper\'s checks, copy and verify, about 3 s (section 4), and the 8 s that the NEXT GIC STORES AFTER 8 S line announces; '
+        'the runner\'s own loading before PAYLOAD CALL is UNKNOWN in length (UPTIME 37 to 38 S at the first heartbeat of boot 14 covers all of it).', first=3, rest=5))
 RESTART_AND_STAGE2_RULES = (
     *wrap('- One restart before the report is not a result (section 5a). A boot that printed PAYLOAD CALL 0 has spent the approval, and the same bundle is not run again; '
           'a boot that did not is the coordinator\'s to repeat or not (section 5c, THIS APPROVAL COVERS ONE BOOT).', first=3, rest=5),

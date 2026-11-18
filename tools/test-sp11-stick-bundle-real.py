@@ -120,6 +120,16 @@ def section_1a(text):
     return lines[start:lines.index('', start)]
 
 
+def line_of(lines, start):
+    """The first of `lines` that begins with `start`: the D9 block of a withheld panel is three lines longer since draft 5 (its consequence), so nothing counts lines."""
+    return next(line for line in lines if line.startswith(start))
+
+
+def after(lines, start):
+    """`lines` from the first one that begins with `start`."""
+    return lines[next(i for i, line in enumerate(lines) if line.startswith(start)):]
+
+
 # ---- The real pipeline around a stand-in loader ----------------------------------------------------------------------------------
 class Pipeline(BT.Case):
     def test_the_loader_is_driven_as_probes_run_py_drives_it_for_each_d9_choice(self):
@@ -183,14 +193,16 @@ class Pipeline(BT.Case):
                         '1a. What this build is (the host-side real path of docs/SP11-STICK-REAL.md: GUEST.DAT is made from a kernelcache)',
                         f'   kernelcache  guest profile stand-in  sha256 {sha(STAND_IN_IMAGE)}',
                         f'   D9 as built  panel {panel}: {words[panel]}', f'                SPTM HVC call patch {hvc}: {words[hvc]}'])
+                    self.assertEqual('a withheld panel leaves the guest\'s video description all zero, and stock XNU then spins in an early console loop (INFERRED, high' in ' '.join(text.split()),
+                                     panel == 'withheld', 'the consequence of a withheld panel is in the record of a withheld panel and in no other')
         self.assertEqual(len(set(records)), 4)
 
     def test_the_seed_line_calls_only_the_default_label_a_default(self):
         default = '   boot seed    label sp11-stick-bundle (a default, not an operator decision; boot entropy UNIMPLEMENTED)'
         with stand_in_loader([]):
-            self.assertEqual(section_1a(template()[1])[4], default)
-            self.assertEqual(section_1a(template(seed='sp11-stick-bundle')[1])[4], default)
-            self.assertEqual(section_1a(template(seed='another')[1])[4], '   boot seed    label another (given with --seed)')
+            self.assertEqual(line_of(section_1a(template()[1]), '   boot seed'), default)
+            self.assertEqual(line_of(section_1a(template(seed='sp11-stick-bundle')[1]), '   boot seed'), default)
+            self.assertEqual(line_of(section_1a(template(seed='another')[1]), '   boot seed'), '   boot seed    label another (given with --seed)')
 
     def test_a_real_record_names_the_descriptor_and_calls_a_view_without_config_windows_a_guest_view(self):
         def no_windows(board):
@@ -205,8 +217,8 @@ class Pipeline(BT.Case):
             with self.subTest(name), stand_in_loader([]):
                 code, text, err = template(descriptor=path)
                 self.assertEqual(code, 0, err)
-                self.assertEqual(section_1a(text)[5:], [f'   descriptor   sha256 {sha(Path(path).read_bytes())} (PIN.DAT descriptor_sha256)',
-                                                        f'                board synthetic  status {status}', *tail])
+                self.assertEqual(after(section_1a(text), '   descriptor'), [f'   descriptor   sha256 {sha(Path(path).read_bytes())} (PIN.DAT descriptor_sha256)',
+                                                                         f'                board synthetic  status {status}', *tail])
 
     def test_the_approved_record_covers_the_descriptor_so_another_descriptor_is_another_record(self):
         other = descriptor('another.json', lambda board: board['board'].update(name='The same board under another name'))

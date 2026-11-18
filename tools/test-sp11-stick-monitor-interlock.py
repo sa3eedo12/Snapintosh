@@ -491,7 +491,7 @@ class Note(unittest.TestCase):
                        'STACK FULL, and the wrapper zeroes the filler and cleans it',
                        'the monitor wrote the area\'s lowest word or anything below the area',
                        'The wrapper\'s check of these is a snapshot, not a guard', '`txm_native` not at all (the builder checks all three)',
-                       'the monitor re-reads `gpu.flags` and `early_stop.flags` live', 'at least 16.5 s, at most 18.8 s, plus the prepare',
+                       'the monitor re-reads `gpu.flags` and `early_stop.flags` live', 'about 15.4 s, at most 18.8 s (2.9 + 8 + prepare + 5 + 2.9), plus the prepare',
                        'The earliest restart datum is about UPTIME 17 s', 'The 8 s is the operator\'s to change',
                        'with the two of the interlock below', '`WRAPPER_CALLS_MONITOR`', '`M1_NO_MONITOR_CALL`', 'it has no override', 'CNTVOFF_EL2 is read'):
             self.assertIn(needle, self.flat)
@@ -509,9 +509,10 @@ class Note(unittest.TestCase):
                        'refused for the same name in every kind, `--m1-run` included', '`refuse_monitor_reporter`'):
             self.assertIn(needle, self.flat)
 
-    def test_the_stop_figure_of_the_record_says_both_the_plans_and_the_bound(self):
+    def test_the_stop_figure_of_the_record_says_the_observed_prepare_and_clean_and_the_bound(self):
         text = AUTH.STATE['text']
-        self.assertRegex(text, r'about 0\.6 s \(the plan\'s estimate, INFERRED, not measured\),\s+at most \d+\.\d s \(INFERRED bound')
+        self.assertRegex(text, r'monitor prepare and stop clean\s+0\.04 s\s+OBSERVED once')
+        self.assertRegex(text, r'stop: clean of \d+ MiB, the bound\s+at most \d+\.\d s \(INFERRED: the dry run verified')
 
     def test_the_record_states_the_limits_of_the_position_proof_and_the_self_attesting_record(self):
         flat = ' '.join(AUTH.STATE['text'].split())

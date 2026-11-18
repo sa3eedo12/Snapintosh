@@ -51,7 +51,7 @@ sha = lambda data: hashlib.sha256(data).hexdigest()     # noqa: E731
 LLVM = ('clang', 'ld.lld', 'llvm-objcopy', 'llvm-readelf', 'llvm-nm', 'llvm-objdump')
 OWN = ('tools/sp11_stick_bundle_m1.py', 'tools/sp11_monitor_census.py', 'tools/test-sp11-stick-monitor-auth.py', 'tools/test-sp11-stick-monitor-interlock.py',
        'docs/SP11-STICK-MONITOR.md')
-DOC_CAP = 91000         # raised from 88,000 on purpose (draft 3 of the record: section 19; 84,300 before draft 2, 78,100 before E part 4, 75,500 before E part 3, 70,000 before E part 2, 60,000 before E, 46,000 before D, 36,000 before C); nothing was cut to make room
+DOC_CAP = 94000         # raised from 91,000 on purpose (record draft 5: section 19; 88,000 before draft 3); nothing was cut to make room
 # The records the operator was shown or approved, regenerated here from the files they were made from (docs/SP11-MONITOR-PORT.md section 15 D4/D7).
 RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e035977bf700e',
            'gic and stop dry run': 'c74f7af0217c507e7738673b9d437d6c76589ef3c243c23eef4837b0ca435b3b',
@@ -59,7 +59,7 @@ RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e03597
 FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=7, time_box_s=5, label='M1-FIXED', monitor=(445935, '1' * 64), reporter=(58463, '2' * 64),
              note=None, gic_stop=False, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
 # The SHA-256 of record_text for FIXED and FABRICATED[...]: the text of an M1 record is what the operator approves, so a changed byte is another record.
-GOLDEN = {'a test record': '89b53194a7da43e710dd673c246aebe4604b1b646930855ade17d85d3c217b00', 'another record': 'b6436d05f47abbaa2270fee7afb2c4dcfe7d5e41ddfc6e2ed2e29c1a74854106'}      # re-pinned on purpose for draft 3 (draft 2: eb757eeb... and ee6d491c...; draft 1: 1be48063... and e288dc84...)
+GOLDEN = {'a test record': '262ea15bc8026c28fa5ca6850c186c896297dba255d0ddfc773f84d191504dd6', 'another record': 'cf7dfb8b49aaa201faa7d4c0a48c6729b02c1436399ba9f328ad742544849b29'}      # re-pinned on purpose for draft 5 (draft 4: 08e6c54d... and 5b0e0eee...)
 
 
 def quietly(function, *args):
@@ -447,34 +447,15 @@ class Text(BT.Case):
         for part in (text.split('1b. ')[1].split('2. Placement')[0], text.split('4. Time box')[1].split('5. Refusal')[0]):
             self.assertLessEqual(max(map(len, part.splitlines())), 120)
 
-    def test_the_time_budget_has_its_numbers_and_they_add_up(self):
-        text = STATE['text']
-        parts = {k: float(v) for k, v in re.findall(r'^ {6}(wrapper checks, copy and verify|GIC arm: the announcement and the wait|guest)\s+(\d+(?:\.\d+)?) s', text, re.M)}
-        self.assertEqual(len(parts), 3, parts)
-        stop = re.search(r'stop: clean of (\d+) MiB\s+about (\d+\.\d) s \(the plan\'s estimate, INFERRED, not measured\),\s+at most (\d+\.\d) s', text)
-        low, high = (float(x) for x in re.search(r'the known parts\s+at least (\d+\.\d) s \(2\.9 \+ 8 \+ 5 \+ 0\.6\), at most (\d+\.\d) s, plus the prepare', text).groups())
-        self.assertEqual(round(sum(parts.values()) + float(stop.group(2)), 1), low, 'the sum of the figures as printed: the plan\'s 0.6 s for the stop')
-        self.assertEqual(round(sum(parts.values()) + float(stop.group(3)), 1), high, 'and with the bound of 2.9 s')
-        place = re.search(r'guest_size (\d+) MiB  reserve (\d+) MiB', text)
-        self.assertEqual(int(stop.group(1)), int(place.group(1)) + int(place.group(2)), 'the stop cleans the guest range and the reserve')
-        self.assertEqual(float(stop.group(3)), round(0.96 * int(stop.group(1)) / 141.4, 1))
-        self.assertRegex(text, r'monitor prepare\s+UNKNOWN')
-        flat = ' '.join(text.split())
-        self.assertIn(f'{low} to {high} s plus the prepare in all', flat)
-        self.assertIn(f'the known parts alone are at least {low} s', flat)
-        self.assertIn('224 s and 268 s', flat)
-        self.assertIn('The earliest restart datum is about UPTIME 17 s (INFERRED: one boot, in a run that started secondary CPUs; the plan, section 10)', flat)
-        self.assertIn('APPROVING THIS TEXT RELAXES THE 20 s PRECAUTION OF D5 (the time box of 5 s is kept;', flat)
-
     def test_the_time_budget_follows_the_time_box_and_the_placement(self):
         three = template(stage('box3'), time_box_s=3)[1]
         self.assertIn('4. Time box: 3 s', three)
         self.assertRegex(three, r'guest\s+3 s\s+the time box')
-        low = {box: float(re.search(r'the known parts\s+at least (\d+\.\d) s', t).group(1)) for box, t in ((3, three), (5, STATE['text']))}
+        low = {box: float(re.search(r'the known parts, low sum\s+about (\d+\.\d) s', t).group(1)) for box, t in ((3, three), (5, STATE['text']))}
         self.assertEqual(round(low[5] - low[3], 1), 2.0)
         text = rec.record_text({**FIXED, 'm1': m1_facts()})
-        self.assertRegex(text, r'stop: clean of 432 MiB\s+about 0\.6 s \(the plan\'s estimate, INFERRED, not measured\),\s+at most 2\.9 s')
-        self.assertRegex(text, r'the known parts\s+at least 16\.5 s \(2\.9 \+ 8 \+ 5 \+ 0\.6\), at most 18\.8 s')
+        self.assertRegex(text, r'stop: clean of 432 MiB, the bound\s+at most 2\.9 s \(INFERRED')
+        self.assertRegex(text, r'the known parts, low sum\s+about 15\.4 s \(2\.4 \+ 8 \+ 5 \+ 0\.04\)\s+the known parts, high sum\s+at most 18\.8 s \(2\.9 \+ 8 \+ 5 \+ 2\.9\)')
 
     def test_the_thermal_exception_is_asked_for_and_no_guard_is_claimed(self):
         flat = ' '.join(STATE['text'].split())
@@ -488,15 +469,16 @@ class Text(BT.Case):
 
     def test_what_the_text_cannot_show_is_labelled(self):
         flat = ' '.join(STATE['text'].split())
-        for needle in ('Which group is reached when is INFERRED from the sources', 'no write below was run by the monitor on the unit', 'Hardware: NOT RUN', 'operator decision NOT RECORDED',
-                       'The builder does not run it', 'UNKNOWN: never run on this unit', 'U3: PPI 26 reached EL2 in the GIC dry run, OBSERVED, one unit, one boot', 'OBSERVED once',
+        for needle in ('Which group is reached when is INFERRED from the sources', 'The monitor ran once on the unit (boot 20, OBSERVED once): that it wrote some of the registers below is INFERRED', 'Hardware: NOT RUN', 'operator decision NOT RECORDED',
+                       'The builder does not run it', 'the prepare alone is UNKNOWN', 'OBSERVED once',
+                       'U3: PPI 26 reached EL2 in the GIC dry run, and the monitor\'s own stop path ended the guest at its box in boot 20: both OBSERVED, one unit, one boot each',
                        'whether the guest reaches any of it inside the time box is UNKNOWN (untried on Oryon)'):
             self.assertIn(needle, flat)
         self.assertNotIn('VERIFIED', STATE['text'], 'no label of a hardware result, and no VERIFIED of anything the host proves only for a binary')
 
     def test_the_stop_rules_of_the_other_kinds_are_kept_but_for_the_three_that_this_kind_words_for_itself(self):
-        """The first rule of every record is kept. The silence, the touch outside RAM and the hardware rules are this kind's own words: the silence of the monitor
-        makes twice the time box wrong, a stage-2 fault with an IPA is the expected end and not a touch to stop at, and AC power is required for this run (D8)."""
+        """The first rule of every record is kept; the silence, the touch outside RAM and the hardware rules are this kind's own words (the monitor's silence, a
+        stage-2 fault with an IPA as the expected end, AC power by D8)."""
         rules = lambda text: text.split('5. Refusal and stop rules')[1].split('\n\n')[0].split('\n')[1:]      # noqa: E731
         mine, plain = rules(STATE['text']), rules(BT.template()[1])
         self.assertEqual(mine, [plain[0], *m1g.PRE_CALL_SILENCE, *rec.M1_SILENCE_RULE, *m1g.RESTART_AND_STAGE2_RULES, *m1g.HARDWARE_RULES, *rec.M1_STOP_RULES])
@@ -510,7 +492,7 @@ class Text(BT.Case):
 
     def test_an_m1_record_that_kept_the_rule_of_the_other_kinds_is_another_record(self):
         """The faulty case: with the old rule in place the text is not the pinned one, and it says what the monitor's silence makes wrong."""
-        with mock.patch.object(rec, 'M1_SILENCE_RULE', (rec.SILENCE_RULE,)):
+        with mock.patch.object(rec, 'm1_silence_rule', lambda box_s: (rec.SILENCE_RULE,)):
             old = rec.record_text({**FIXED, 'm1': m1_facts(test=True)})
         self.assertNotEqual(sha(old.encode()), GOLDEN['a test record'])
         self.assertIn('twice the time box after ENTER: note the last line', old)

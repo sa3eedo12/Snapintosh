@@ -30,6 +30,9 @@ STORES = {'ram': sb.STORE_RAM, 'el2_sysreg': sb.STORE_EL2_SYSREG, 'gic': sb.STOR
 DEFAULT_SEED = 'sp11-stick-bundle'      # the label `real` uses when --seed is not given: a default of the tool, not a decision of the operator
 NOTE_LINES, NOTE_COLUMNS = 48, 120
 PANEL_WORDS = {'withheld': 'the guest is given no framebuffer', 'handed': 'the guest is given the unit\'s framebuffer'}
+# What a panel that is withheld leaves the guest with, in every record of a real build (D9): boot 20's stop PC and the public XNU source say it (INFERRED, high).
+PANEL_CONSEQUENCE = {'withheld': 'a withheld panel leaves the guest\'s video description all zero, and stock XNU then spins in an early console loop (INFERRED, high: '
+                                 'boot 20\'s stop PC and the public XNU source), so a longer box on that image only repeats it'}
 HVC_WORDS = {0: 'a stock kernel', 1: 'the loader replaces the kernel\'s SPTM call words'}
 
 # The sentences about the dry-run wrapper restate docs/SP11-STICK-WRAPPER.md section 4 and name it as their source; a build whose
@@ -72,7 +75,7 @@ GIC_STOP_TOUCHES = {
             'ICENABLER0 and ICPENDR0. Never the ITS, another interrupt, SMMU, PCIe, USB or the framebuffer.')}
 
 
-TIME_FACTS = dict(wrapper_s=2.923, arm_wait_s=8, verify_s=0.96, verify_mib=141.4, stop_s=0.6)       # the dry run (docs/SP11-STICK-WRAPPER.md section 12), SW_GIC_WAIT_S, and the plan's estimate of the stop
+TIME_FACTS = dict(wrapper_s=2.923, arm_wait_s=8, verify_s=0.96, verify_mib=141.4, prepare_clean_s=m1t.PREPARE_AND_CLEAN_S, dry_guest_bytes=144.7e6)       # the dry run (docs/SP11-STICK-WRAPPER.md section 12; the size of its GUEST.DAT: docs/SP11-STICK-REAL.md section 10), SW_GIC_WAIT_S, and what the first run of the monitor entry took for the prepare and the clean
 # The M1 run (--m1-run; docs/SP11-STICK-MONITOR.md section 10): payload 0 is SNAPMON-M1.BIN, the wrapper with the monitor appended. What the monitor
 # can write is what the disassembly of its binary holds, not what a reader of the sources lists: tools/sp11_monitor_census.py reads the names of
 # the el2_sysreg class below out of the rendered record and compares them with both binaries in both directions (tools/test-sp11-stick-monitor-auth.py
@@ -91,7 +94,8 @@ M1_TOUCHES = {
             'REPORT.DAT 0x1000), its work area (work_size bytes at work_base: tables, logs, a console buffer), the page tables',
             'and frame tables it builds over the guest, and the cache maintenance that publishes them. The guest: its own RAM',
             'and the reserve above it, guest_base to work_base; its other accesses are meant to fault at stage 2 and stop the',
-            'run (docs/SP11-MONITOR-PORT.md section 12; INFERRED from the sources, never run). No disk and no RAM',
+            'run (docs/SP11-MONITOR-PORT.md section 12; INFERRED from the sources; no stage-2 abort in boot 20\'s 5 s,',
+            'OBSERVED once). No disk and no RAM',
             'outside the placement and REPORT.DAT. The monitor binary also holds code that stores to devices and calls',
             'firmware, behind gates that a guest can lift: section 3b says which, and that with the PARAMS this builder',
             'makes none of it runs (INFERRED).'),
@@ -102,8 +106,9 @@ M1_TOUCHES = {
                    'placed entries at the end of this class with the functions that hold it and how many times, or is held elsewhere;',
                    'and the ELFs it reads must be the wrapper and the monitor that section 1b names by digest. The builder does',
                    'not run it (it needs those ELFs). Which group is reached when is INFERRED from the sources (the monitor has',
-                   'indirect branches that no static pass follows); no write below was run by the monitor on the unit (boot 11\'s',
-                   'payload wrote CNTHCTL_EL2 and HCR_EL2: OBSERVED). The monitor reads CNTVOFF_EL2 and never writes it.',
+                   'indirect branches that no static pass follows). The monitor ran once on the unit (boot 20, OBSERVED once): that it',
+                   'wrote some of the registers below is INFERRED (the page shows MON REGS RESTORED=YES, no write) and which, UNKNOWN',
+                   '(boot 11\'s payload wrote CNTHCTL_EL2 and HCR_EL2: OBSERVED). The monitor reads CNTVOFF_EL2 and never writes it.',
                    'wrapper: ICC_PMR_EL1, ICC_BPR1_EL1 and ICC_IGRPEN1_EL1, each read first, set, read back and put back after the',
                    '   call (class C, with the gic class); IC IALLUIS once after the copy; DC CVAC and DC CIVAC by VA; AT S1E2R and',
                    '   AT S1E2W (they set PAR_EL1). It writes no other register. Before and after the call it reads DAIF, SPSel,',
@@ -174,14 +179,27 @@ M1_TOUCHES = {
 M1_STOP_RULES = (
     *m1t.wrap('- MON PREPARE FAILED CODE=-91 NV2_OTHER_CORE, or any other code from -90 to -95, on the SNAPREP page, and MON RET=0X0 STATUS=0X<the code as a 64-bit '
               'number> on the live page, is the monitor\'s NV2 and PAuth gate refusing: M1 has failed, a result, and the same bundle is not retried. The plan expected '
-              'this one first while no record was embedded (D6); the record is embedded now, and a pass of the gate is INFERRED (section 5a).', first=3, rest=5),
+              'this one first while no record was embedded (D6); the record is embedded, and the gate passed with it once (OBSERVED, boot 20: MON STATUS=OK ENTERED=0X1, '
+              'section 5a).', first=3, rest=5),
     *m1t.wrap('- MON QUARANTINE on the page (RET=0X51554E01 or 0X51554E02): the monitor\'s window is partial. FORCE OFF (section 5c); never continue on that RAM.', first=3, rest=5))
-# The silence rule of every kind, and the rule of this one in its place: the monitor prints nothing while it runs and its prepare is UNKNOWN, so twice the
-# time box after ENTER (10 s at most) could end a legitimate run. The 60 s is the operator's safe wait, not a measurement (docs/SP11-STICK-MONITOR.md section 10).
+# The silence rule of every kind, and the rule of this one in its place: the monitor prints nothing while it runs and its prepare and clean are known from one run
+# only, so twice the time box after ENTER could end a legitimate run. The wait (m1g.silence_s) is the operator's safe wait, not a measurement
+# (docs/SP11-STICK-MONITOR.md section 10): 60 s for a box of 5 s or less, as approved, the box plus 60 s beyond it.
 SILENCE_RULE = '   - No page change for twice the time box after ENTER: note the last line and power cycle.'
-M1_SILENCE_RULE = m1t.wrap('- No page change for 60 seconds after the MON CALL line: note the last line and FORCE OFF (section 5c). The 60 s is an operator-safe wait and not a '
-                           'measurement: the monitor prints nothing while it runs and its prepare is UNKNOWN (never run on this unit), so the rule of the other kinds, '
-                           'twice the time box after ENTER, could end a legitimate run.', first=3, rest=5)
+
+
+def m1_silence_rule(box_s):
+    """The bullet of section 5 for the wait after the MON CALL line and, in its second part, after the STAGE=DONE line (where the box does not enter)."""
+    wait, after = m1g.silence_s(box_s), m1g.SILENCE_AFTER_PAGE_S
+    why = f'The {wait} s is an operator-safe wait' if box_s <= m1g.D5_BOX_S else f'The {wait} s is the time box of {box_s} s plus {m1g.SILENCE_MARGIN_S} s, an operator-safe wait'
+    done = f'The same {after} s holds' if box_s <= m1g.D5_BOX_S else f'The wait is {after} s'
+    return m1t.wrap(f'- No page change for {wait} seconds after the MON CALL line: note the last line and FORCE OFF (section 5c). {why} and not a measurement: the monitor '
+                    f'prints nothing while it runs, and its prepare and clean are known from one run only (about {m1t.PREPARE_AND_CLEAN_S} s together: section 4), so the rule of the other kinds, '
+                    f'twice the time box after ENTER, could end a legitimate run. {done} after the STAGE=DONE line: a lit page that has stopped there, with or without the '
+                    'SNAPREP page, is FORCE OFF too (section 5c); without the SNAPREP page it is no result (section 5a).', first=3, rest=5)
+
+
+M1_SILENCE_RULE = m1_silence_rule(m1g.D5_BOX_S)       # the rule for the decided box: the text that the auth suite pins
 
 
 def labelled(label, text):
@@ -199,7 +217,8 @@ def m1_regime_lines():
         'a plain slbounce whose return leaves E2H and TGE set (read in the source: docs/SURFACE-PRO-11.md E6, a host reading; OBSERVED once for the scoped-sweep build, '
         '2026-11-12: docs/SP11-EL2-ENTRY.md M2), so INFERRED E2H = 1 for this record (docs/SP11-MONITOR-PROFILE.md section 4). The monitor runs with E2H = 0. NV2 at E2H = 0 '
         'is OBSERVED in X2 runs 6 and 7 (REGIME row, one boot each: docs/SP11-X2-TESTS.md:271 and :384) on records that were not ingested. Whether a record from an INFERRED '
-        'E2H = 1 image describes the E2H = 0 regime is UNKNOWN, and the gate cannot tell: approving this record approves this NV2 record and no other.', first=16, rest=16))
+        'E2H = 1 image describes the E2H = 0 regime is UNKNOWN, and the gate cannot tell: approving this record approves this NV2 record and no other. The gate passed with '
+        'this record once (OBSERVED, boot 20: MON STATUS=OK), which shows that the register values matched and not which regime the record describes.', first=16, rest=16))
 
 
 def m1_lines(m1):
@@ -259,44 +278,62 @@ def m1_lines(m1):
     return lines
 
 
-def m1_budget(box_s, place):
-    """The figures of section 4 as printed: the size of the stop's clean in MiB and its bound in s, the wrapper's own time, and the known parts of the run
-    (the low sum with the plan's estimate of the clean, the high one with its bound), the prepare not counted."""
+def m1_budget(box_s, place, guest_bytes):
+    """The figures of section 4 as printed: the size of the stop's clean in MiB and its bound in s, the wrapper's own time as measured, the known parts of the run
+    (the low sum with what boot 20 took for the prepare and the clean and the smaller of the measured wrapper time and that time scaled to this GUEST.DAT,
+    the high one with the bound of the clean and the larger of the two), the prepare not counted in the high sum, and the scaled wrapper time."""
     t = TIME_FACTS
     clean_mib = (place['guest_size'] + place['reserve_size']) // MIB
     clean_s = round(t['verify_s'] * clean_mib / t['verify_mib'], 1)
     wrapper_s = round(t['wrapper_s'], 1)
-    low = round(wrapper_s + t['arm_wait_s'] + box_s + t['stop_s'], 1)
-    high = round(wrapper_s + t['arm_wait_s'] + box_s + clean_s, 1)
-    return clean_mib, clean_s, wrapper_s, low, high
+    scaled_s = round(t['wrapper_s'] * guest_bytes / t['dry_guest_bytes'], 1)
+    low = round(min(wrapper_s, scaled_s) + t['arm_wait_s'] + box_s + t['prepare_clean_s'], 1)
+    high = round(max(wrapper_s, scaled_s) + t['arm_wait_s'] + box_s + clean_s, 1)
+    return clean_mib, clean_s, wrapper_s, low, high, scaled_s
+
+
+def m1_d8_lines(box_s):
+    """The end of the thermal paragraph of section 4: what D8 decided, and for a box other than the decided one what approving this text adds."""
+    if box_s == m1g.D5_BOX_S:
+        return [f'   (docs/SP11-MONITOR-PORT.md section 15). D8 was decided on 2026-11-17 for ONE CPU, a time box of {m1g.D5_BOX_S} s',
+                '   and AC power REQUIRED: the charger is in before the boot and stays in until the end (section 5c).']
+    return list(m1t.wrap(f'(docs/SP11-MONITOR-PORT.md section 15). D8 was decided on 2026-11-17 for ONE CPU, {m1g.d8_box(box_s)} and AC power REQUIRED' +
+                         ('' if box_s < m1g.D5_BOX_S else f'; approving this text accepts the exception for the box of {box_s} s (section 0)') +
+                         ': the charger is in before the boot and stays in until the end (section 5c).', first=3, rest=3))
 
 
 def m1_time_lines(box_s, place, guest_bytes):
-    """Section 4 of the record of an M1 run: the box, what it does not bound, the time budget with its numbers, what UPTIME reads, and D8. The sum is of the figures
-    as printed."""
+    """Section 4 of the record of an M1 run: the box, what it does not bound, the time budget with its numbers, what UPTIME reads, and D8. The sums are of the figures
+    as printed. Everything that depends on the box comes from `box_s`: the budget, the runaway case, the relaxation of D5's 20 s and what D8 decided."""
     t = TIME_FACTS
-    clean_mib, clean_s, wrapper_s, low, high = m1_budget(box_s, place)
+    clean_mib, clean_s, wrapper_s, low, high, scaled_s = m1_budget(box_s, place, guest_bytes)
+    low_wrapper, high_wrapper = sorted((wrapper_s, scaled_s))
+    size = (f'The {wrapper_s} s was measured in the dry run with a {t["dry_guest_bytes"] / 1e6:.1f} MB GUEST.DAT; this one is {guest_bytes / 1e6:.1f} MB, so ' +
+            (f'that figure is conservative: it goes into the high sum, and the low sum uses the {scaled_s} s that it scales to' if scaled_s <= wrapper_s else
+             f'the low sum keeps that figure and the high sum uses the {scaled_s} s that it scales to') +
+            ' (INFERRED: the copy and the verify take time in proportion to the size).')
+    kept = f'the time box of {box_s} s is kept' if box_s <= m1g.D5_BOX_S else f'the time box of {box_s} s is this record\'s own: section 0'
     return [
         f'4. Time box: {box_s} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds, word 24).',
         '   The builder refuses any other PARAMS watchdog (TIME_BOX_MISMATCH). The stop is the monitor\'s own timer',
         '   interrupt (CNTHP, PPI 26), not a wait.',
-        '   What the box bounds: the guest, from its first instruction. It does not bound the monitor\'s prepare, which runs',
-        '   before the timer is armed (duration UNKNOWN: never run on this unit), nor the stop\'s cache clean, nor a guest',
-        '   that the timer never interrupts (U3: PPI 26 reached EL2 in the GIC dry run, OBSERVED, one unit, one boot, and the',
-        '   monitor\'s own stop path is NOT RUN): then only the operator\'s FORCE OFF (section 5c) ends the run.',
+        *m1t.wrap('What the box bounds: the guest, from its first instruction. It does not bound the monitor\'s prepare, which runs before the timer is armed, nor the stop\'s '
+                  f'cache clean (together about {t["prepare_clean_s"]} s in boot 20, OBSERVED once; the prepare alone is UNKNOWN), nor a guest that the timer never '
+                  'interrupts (U3: PPI 26 reached EL2 in the GIC dry run, and the monitor\'s own stop path ended the guest at its box in boot 20: both OBSERVED, one unit, '
+                  'one boot each): then only the operator\'s FORCE OFF (section 5c) ends the run.', first=3, rest=3),
         '   Time, from the wrapper\'s first line to the end of the report:',
         f'      wrapper checks, copy and verify          {wrapper_s} s    OBSERVED once (the dry run: {t["wrapper_s"]} s)',
         f'      GIC arm: the announcement and the wait   {t["arm_wait_s"]} s      SW_GIC_WAIT_S in probes/sp11-stick-gic.h',
-        '      monitor prepare                          UNKNOWN  never run on this unit',
+        f'      {"monitor prepare and stop clean":<41}{t["prepare_clean_s"]} s   OBSERVED once (boot 20: TICKS less the box)',
         f'      guest                                    {box_s} s      the time box',
-        f'      stop: clean of {clean_mib} MiB                  about {t["stop_s"]} s (the plan\'s estimate, INFERRED, not measured),',
-        f'                                                        at most {clean_s} s (INFERRED bound: the dry run verified',
-        f'                                                        {t["verify_mib"]} MiB in {t["verify_s"]} s, re-hash included)',
-        f'      the known parts                          at least {low} s ({wrapper_s} + {t["arm_wait_s"]} + {box_s} + {t["stop_s"]}), at most {high} s, plus the prepare',
-        *m1t.wrap(f'The {wrapper_s} s was measured in the dry run with a 144.7 MB GUEST.DAT; this one is {guest_bytes / 1e6:.1f} MB, so the figure is conservative '
-                  '(INFERRED: the copy and the verify take time in proportion to the size).', first=3, rest=3),
-        *m1t.wrap('The plan\'s budget is a run well under 20 s of UPTIME, a precaution of low weight (docs/SP11-MONITOR-PORT.md section 10, D5); the known parts alone '
-                  f'are at least {low} s, so this run does not meet it: APPROVING THIS TEXT RELAXES THE 20 s PRECAUTION OF D5 (the time box of {box_s} s is kept; the 8 s '
+        f'      {f"stop: clean of {clean_mib} MiB, the bound":<41}at most {clean_s} s (INFERRED: the dry run verified {t["verify_mib"]} MiB in',
+        f'      {"":<41}{t["verify_s"]} s, re-hash included)',
+        f'      {"the known parts, low sum":<41}about {low} s ({low_wrapper} + {t["arm_wait_s"]} + {box_s} + {t["prepare_clean_s"]})',
+        f'      {"the known parts, high sum":<41}at most {high} s ({high_wrapper} + {t["arm_wait_s"]} + {box_s} + {clean_s}), plus the prepare',
+        *m1t.wrap(size, first=3, rest=3),
+        *m1t.wrap('The plan\'s budget is a run well under 20 s of UPTIME, a precaution of low weight (docs/SP11-MONITOR-PORT.md section 10, D5); this run does not meet it, '
+                  f'whatever the box: the known parts alone are about {low} to {high} s, and the runner\'s own load comes before them (UPTIME, below). APPROVING THIS TEXT '
+                  f'RELAXES THE 20 s PRECAUTION OF D5 ({kept}; the 8 s '
                   'wait of the GIC arm, part of the known parts, stays as built). What UPTIME reads: it is q1n1\'s clock from before the runner loads and hashes the '
                   f'{guest_bytes / 1e6:.1f} MB of GUEST.DAT, it stays at 0 S while the runner\'s chain runs, and its first heartbeat draws the whole chain, both payloads '
                   'and the re-hash included (docs/SP11-STICK-LOG.md section 14), so the first heartbeat after STAGE=DONE reads well above 17 s (boot 14: 37 and 38 S, '
@@ -312,13 +349,11 @@ def m1_time_lines(box_s, place, guest_bytes):
         '   nothing makes c->thermal later (a PRIVATE gate, section 3b). compat/hamoa-thermal.c is not in the monitor: its',
         '   binary has no hamoa_ symbol (tools/test-sp11-stick-monitor-devices.py). Nothing reads a temperature during the',
         '   run. The exposure is the CPU',
-        f'   time of one CPU, {low} to {high} s plus the prepare in all, of which the guest runs at most {box_s} s. No clock, voltage or',
-        '   DVFS write is compiled in or reachable by the sources read (INFERRED from the profile\'s gates; the census sees',
-        '   system registers only, not MMIO). Approving this record accepts the exception D8 describes',
-        f'   (docs/SP11-MONITOR-PORT.md section 15). D8 was decided on 2026-11-17 for ONE CPU, a time box of {box_s} s',
-        '   and AC power REQUIRED: the charger is in before the boot and stays in until the end (section 5c).',
-        *m1t.wrap('If the stop timer never fires (the plan\'s second most likely failure, section 5a) one CPU stays loaded, at worst, until the operator acts: 60 s of '
-                  'silence (section 5) plus about 20 s holding Power, 80 s or more, with no temperature read; approving this text accepts that too.', first=3, rest=3),
+        f'   time of one CPU, about {low} to {high} s plus the prepare in all, of which the guest runs at most {box_s} s. No clock,',
+        '   voltage or DVFS write is compiled in or reachable by the sources read (INFERRED from the profile\'s gates; the census',
+        '   sees system registers only, not MMIO). Approving this record accepts the exception D8 describes',
+        *m1_d8_lines(box_s),
+        *m1t.wrap('If the stop timer never fires (the plan\'s second most likely failure, section 5a) ' + m1g.runaway_words(box_s), first=3, rest=3),
         '   PARAMS words: gpu.flags, early_stop.flags and txm_native are zero in the chunk (this builder checked all three);',
         '   the wrapper reads the first two again before the call, not txm_native. That is a snapshot: the monitor reads',
         '   gpu.flags and early_stop.flags again while the guest runs, and the guest can write the RAM that holds them',
@@ -361,6 +396,7 @@ def real_lines(real, m1=False):
              f'   kernelcache  guest profile {real["guest_profile"]}  sha256 {real["kernelcache_sha256"]}',
              f'   D9 as built  panel {real["panel"]}: {PANEL_WORDS[real["panel"]]}',
              f'                SPTM HVC call patch {real["sptm_hvc_calls"]}: {HVC_WORDS[real["sptm_hvc_calls"]]}',
+             *(m1t.wrap(PANEL_CONSEQUENCE[real['panel']], first=16, rest=16) if real['panel'] in PANEL_CONSEQUENCE else ()),
              *seed_lines,
              f'   descriptor   sha256 {real["descriptor_sha256"]} (PIN.DAT descriptor_sha256)',
              f'                board {real["board_id"]}  status {real["board_status"]}']
@@ -386,8 +422,8 @@ def record_text(r):
         'Status: operator decision NOT RECORDED. Hardware: NOT RUN. This text is a template until the operator approves it.',
         'Approval is the operator\'s alone: the SHA-256 of exactly this text, recorded as authorisation_sha256 of PIN.DAT; a changed byte is another',
         'record. It names no person and stays local: it is never committed or published.', '',
-        *((*m1g.reading_lines(), '', *m1g.decision_lines(r.get('real'), r['time_box_s']), '',
-           *m1g.hazard_lines(r.get('real'), r['time_box_s'], *m1_budget(r['time_box_s'], p)[3:]), '') if m1 else ()),
+        *((*m1g.reading_lines(), '', *m1g.decision_lines(r.get('real'), r['time_box_s']), '', *m1g.stand_lines(), '',
+           *m1g.hazard_lines(r.get('real'), r['time_box_s'], *m1_budget(r['time_box_s'], p, g['size'])[3:5]), '') if m1 else ()),
         '1. What may run (named by SHA-256; the runner hashes the payloads before each call)',
         f'   payload 0  SNAPMON.BIN  {r["monitor"][0]} bytes  sha256 {r["monitor"][1]}',
         f'   payload 1  SNAPREP.BIN  {r["reporter"][0]} bytes  sha256 {r["reporter"][1]}',
@@ -405,7 +441,7 @@ def record_text(r):
         f'work_base {p["work_base"]:#x}  work_size {p["work_size"] // MIB} MiB',
         f'   place_base {p["place_base"]:#x}  place_end {p["place_base"] + p["place_size"]:#x}  (limit 2^36)', '',
         f'3. Store classes authorised (PIN.DAT authorised_stores = {r["stores"]})']
-    touches = M1_TOUCHES if m1 else (gq.TOUCHES if r.get('gic_quarantine') else GIC_STOP_TOUCHES) if r.get('gic_stop') else TOUCHES
+    touches = {**M1_TOUCHES, 'gic': m1t.gic_lines()} if m1 else (gq.TOUCHES if r.get('gic_quarantine') else GIC_STOP_TOUCHES) if r.get('gic_stop') else TOUCHES
     if r.get('gic_stop'):
         lines.append('   Record of the GIC and stop dry run (docs/SP11-STICK-GIC.md): payload 0 is SNAPMON-GIC.BIN; no monitor is called.')
         lines += gq.HEAD_LINES if r.get('gic_quarantine') else ()
@@ -425,7 +461,7 @@ def record_text(r):
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
               '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',
               *(m1g.PRE_CALL_SILENCE if m1 else ()),
-              *(M1_SILENCE_RULE if m1 else gq.silence_lines() if r.get('gic_quarantine') else (SILENCE_RULE,)),
+              *(m1_silence_rule(r['time_box_s']) if m1 else gq.silence_lines() if r.get('gic_quarantine') else (SILENCE_RULE,)),
               *(m1g.RESTART_AND_STAGE2_RULES if m1 else ('   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',)),
               *(m1g.HARDWARE_RULES if m1 else gq.HARDWARE_LINES if r.get('gic_quarantine') else (
                   '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',

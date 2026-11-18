@@ -24,9 +24,17 @@ other kinds are what they were.
 The prose is filled by wrap() below, a greedy fill on single spaces at a fixed width and not a library's, so that the bytes of the text the operator
 approves (its SHA-256 is PIN.DAT's authorisation_sha256) depend on nothing but this file.
 
-Evidence: EXPERIMENTAL, hardware NOT RUN. The gates are read from the sources and from the binary; nothing here was run by the monitor on the unit."""
+Evidence: EXPERIMENTAL. The gates are read from the sources and from the binary. The monitor ran once, in boot 20 (OBSERVED, one unit, one boot), with the PARAMS that
+the builder makes, so with every device gate closed: no run has exercised a device family. The gic class and its facts carry their own labels."""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import sp11_stick_bundle_m1 as bm  # noqa: E402
 
 WIDTH = 118
+PREPARE_AND_CLEAN_S = 0.04      # OBSERVED once, in boot 20 (the first run of the monitor entry): the call's TICKS less the time box, the prepare and the stop's clean together
 
 
 def wrap(text, first=3, rest=3, width=WIDTH):
@@ -200,11 +208,13 @@ def gic_lines(pass6=PASS6_LINES):
         *prose('How long the quarantine lasts. It is on from Q\'s write until the put-back\'s last write, which comes after the monitor has returned: the whole '
                'call, so the monitor\'s prepare, its guest and its stop are inside it, and so is what the wrapper does after the return. In the both-gates case '
                'above there is no such write, and the quarantine is still on when the run ends. What bounds it is the '
-               'monitor\'s own stop, the interrupt of its timer (CNTHP, PPI 26) at the time box on CNTPCT_EL0, at most 5 s (the wrapper\'s PARAMS check), once the '
-               'monitor has armed the timer. Before that comes the monitor\'s prepare, whose duration is UNKNOWN (never run on this unit); after it the stop\'s '
-               'cache clean (about 0.6 s, INFERRED, section 4), the wrapper\'s scans and cleans of REPORT.DAT and the put-back\'s polls (each at most 50 ms). '
+               f'monitor\'s own stop, the interrupt of its timer (CNTHP, PPI 26) at the time box on CNTPCT_EL0, at most {bm.BOX_MAX_S} s (the wrapper\'s PARAMS check), once the '
+               'monitor has armed the timer. Before that comes the monitor\'s prepare; after it the stop\'s cache clean, the wrapper\'s scans and cleans of REPORT.DAT '
+               f'and the put-back\'s polls (each at most 50 ms). The prepare and the clean took about {PREPARE_AND_CLEAN_S} s together in boot 20 (OBSERVED once), the clean '
+               'is bounded in section 4 (INFERRED), and the prepare alone is UNKNOWN. '
                'That PPI 26 reaches EL2 is OBSERVED in the dry run\'s stage (boot 14, one unit, one boot: four deliveries from EL2 and one from EL1, U3 answered; '
-               'docs/SP11-STICK-GIC.md section 12), and the monitor\'s own stop path is NOT RUN. Nothing in the wrapper bounds the call: a guest that the timer never '
+               'docs/SP11-STICK-GIC.md section 12), and the monitor\'s own stop path ended the guest at its time box in boot 20 (OBSERVED once). Nothing in the wrapper '
+               'bounds the call: a guest that the timer never '
                'interrupts, or a monitor '
                'that does not return, ends only by the operator\'s FORCE OFF (section 5c), and this stage\'s put-back does not run then (that the firmware sets the GIC up '
                'again at the restart is INFERRED: three boots, 12 to 14, found the same enabled set). On a refusal of the arm half the quarantine lasts only as long as the '
@@ -242,8 +252,9 @@ GIC_FACT_LINES = (
     *wrap('Changed from the stage that ran in boot 13: the survey (reads), the quarantine (one ICENABLER0 write and the one ISENABLER0 write that undoes it, '
           'which is not made in the both-gates case above), the check of ICC_HPPIR1_EL1 before the call, record version 3 and two outcomes. Passes 5 and 6, in the '
           'dry run\'s own build, RAN in boot 14 and ended GIC VERDICT=IRQ_OK (docs/SP11-STICK-GIC.md section 12, docs/SP11-MONITOR-PORT.md section 13, WI 8): the '
-          'quarantine, the check and the put-back are OBSERVED there (below). This build is the same source built for the monitor entry, and has not run on the '
-          'unit (hardware NOT RUN). The both-gates case was not exercised in boot 14: it stays host model only.', first=6, rest=6, width=GIC_WIDTH + 6),
+          'quarantine, the check and the put-back are OBSERVED there (below). This build is the same source built for the monitor entry: it ran once in boot 20 '
+          '(OBSERVED, one unit, one boot: GIC NEW ISEN=0X4000000, GIC RESTORE CLEAN=YES). The both-gates case was not exercised in boot 14 or boot 20: it stays host '
+          'model only.', first=6, rest=6, width=GIC_WIDTH + 6),
     *wrap('Outcomes (OUTCOME= on the page, in hex): 0X1 to 0XF a refusal before any store; 0X10 to 0X1F a store that did not hold or a foreign interrupt next, '
           'always after a store and so always followed by the put-back (0X16 Q_NOT_HELD, 0X17 FOREIGN_PENDING); 0X30 NOT_RESTORED.', first=6, rest=6, width=GIC_WIDTH + 6),
     *wrap('OBSERVED, one unit, one boot each, in the dry run\'s own build, not in this one (boot 12 from a photograph of the page, boot 13 from one video read '
@@ -257,7 +268,8 @@ GIC_FACT_LINES = (
     '         an enabled, pending PPI is delivered to EL2 as an IRQ once group 1 and the CPU interface are on: INTID 27,',
     '           not 26, was the first interrupt of window 1 in boot 13, and everything was put back clean;',
     '         PPI 26 itself reached EL2 four times in window 1 of boot 14 (HPPIR1 26 at the vector, latency 0 to 2',
-    '           counter ticks) and once from EL1 (HCR_EL2 0x80000010): U3 answered; the monitor\'s own stop path NOT RUN;',
+    '           counter ticks) and once from EL1 (HCR_EL2 0x80000010): U3 answered; the monitor\'s own stop path ran later,',
+    '           in boot 20 (OBSERVED once);',
     '         the quarantine held: ICENABLER0 written 0x4A800001 left ISENABLER0 0x04000000 (PPI 26 only) and',
     '           ICC_HPPIR1_EL1 read 1023, so no Q_NOT_HELD and no FOREIGN_PENDING (boot 14);',
     '         the put-back was whole, the quarantined enables last: ISENABLER0 0x4E800001, GICD_CTLR 0x10,',
