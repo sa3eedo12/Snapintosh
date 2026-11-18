@@ -145,9 +145,9 @@ def chunks_of(choice='handed', mutate=None, **over):
     got = {}
     real = pn.read_panel
 
-    def keep(chunks, lay, facts, choice, real_, board=None):
+    def keep(chunks, lay, facts, choice, real_, board=None, boot_arg=None):
         got.update(chunks=chunks, lay=lay, facts=facts, board=board)
-        return real(chunks, lay, facts, choice, real_, board)
+        return real(chunks, lay, facts, choice, real_, board, boot_arg)
     with mock.patch.object(pn, 'read_panel', keep):
         code, text, err = record('chunks', choice, mutate, **over)
     assert code == 0, err
@@ -668,8 +668,8 @@ class Hygiene(unittest.TestCase):
         note = (ROOT / 'docs/SP11-STICK-MONITOR.md').read_bytes()
         self.assertLessEqual(len(note), AUTH.DOC_CAP)
         self.assertGreater(AUTH.DOC_CAP, 98000, 'raised on purpose for the panel as the console, on top of the text of the record (section 19); nothing was cut')
-        self.assertLessEqual(len((ROOT / 'docs/SP11-STICK-BUILD.md').read_bytes()), 36000, 'raised from 35,500 on purpose for the console option')
-        self.assertLess(len((ROOT / 'docs/SP11-STICK-REAL.md').read_bytes()), 31000, 'raised from 30,000 on purpose for the console rows')
+        self.assertLessEqual(len((ROOT / 'docs/SP11-STICK-BUILD.md').read_bytes()), 37000, 'raised from 35,500 on purpose for the console option, to 36,000 for it and to 37,000 for --boot-arg (K10)')
+        self.assertLess(len((ROOT / 'docs/SP11-STICK-REAL.md').read_bytes()), 32000, 'raised from 30,000 on purpose for the console rows, to 31,000 for them and to 32,000 for boot 21\'s words and the rows of rung 3')
 
     def test_the_note_of_the_real_path_has_the_row_of_the_console_guest_and_the_digest_of_the_other_two_are_what_they_were(self):
         rows = ' '.join((ROOT / 'docs/SP11-STICK-REAL.md').read_text().split())

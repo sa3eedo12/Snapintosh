@@ -448,7 +448,7 @@ class Document(Case):
     def test_the_note_says_what_the_file_is_and_what_it_leaves_open(self):
         doc = ROOT / 'docs/SP11-STICK-REAL.md'
         text = doc.read_text()
-        self.assertLess(len(text.encode()), 31000)      # raised from 30,000 on purpose for the rows of the console guest (30,028 B); nothing was cut
+        self.assertLess(len(text.encode()), 32000)      # raised from 30,000 on purpose for the rows of the console guest (30,028 B), to 31,000 for them and to 32,000 for boot 21's words and the rows of rung 3 (31,044 B); nothing was cut
         self.assertIn('Hardware: NOT RUN', text[:600])
         self.assertRegex(text, r'(?m)^## 3\. ')         # the section every provenance string of the tool cites
         self.assertIn(M.DOC, 'docs/SP11-STICK-REAL.md section 3')

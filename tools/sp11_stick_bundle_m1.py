@@ -39,6 +39,12 @@ PROFILE = 'sp11-m1'
 LABEL_PREFIX = 'M1RUN-'         # SP11_STICK_MONITOR_LABEL_PREFIX in probes/sp11-stick-monitor.h: what the wrapper of this kind requires at the start of PIN.DAT's label
 PANEL_MARKS = {'withheld': '', 'handed': 'PANEL-', 'console': 'CONSOLE-'}      # after LABEL_PREFIX in the label of each choice of D9 (docs/SP11-STICK-MONITOR.md section 20): the wrapper checks LABEL_PREFIX only, so these are the builder's rule
 D9_PANELS = tuple(PANEL_MARKS)  # the --panel choices this record is written for, each with a stock kernel (--sptm-hvc-calls 0)
+# The words that the monitor entry run may add to the guest's command line after its choice's own, each the one change of a record of its own (docs/SP11-STICK-MONITOR.md
+# section 20, K10), with the marker that the label carries after LABEL_PREFIX in place of the panel's: PIN.DAT's label holds 23 characters, so CONSOLE-CPUS1- would leave three for
+# the facts' label. Only the panel as the console takes one (BOOT_ARG_PANEL); any other word is BOOT_ARG_REFUSED, never passed on to the guest.
+BOOT_ARGS = {'cpus=1': 'CPUS1-'}
+BOOT_ARG_PANEL = 'console'
+ch.KNOWN_REFUSALS.add('BOOT_ARG_REFUSED')
 PIN_LABEL_MAX = 23              # sp11sb_string_ok: build_label is 24 bytes and a string of 1 to 23 characters
 EFI_NAMES = ('SLBOUNCE-DEVHE-MARK.EFI', 'Q1N1-PAYLOAD.EFI')       # the two files that run at EL2 before the wrapper: the builder's SLBOUNCE and RUNNER
 REPORT_CAP = 1 << 20
@@ -80,12 +86,12 @@ def _no_duplicates(pairs):
     return out
 
 
-def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None):
+def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None, boot_arg=None):
     """--m1-run runs the wrapper's GIC arm (gic), the monitor (el2_sysreg) and RAM stores, with the time box the wrapper's pre-call check accepts. With `real`
     (panel and hvc_calls given) D9 admits a stock kernel (--sptm-hvc-calls 0) with the panel withheld (the first choice), handed (the second) or handed as the
     kernel's console (`console`: serial=2 in the command line, as probes/run.py makes it for the A16's native panel console)
     (tools/sp11_stick_bundle_panel.py; docs/SP11-STICK-MONITOR.md section 20): the record says which, from the bytes of the guest, and says nothing true of
-    a patched kernel, so --sptm-hvc-calls 1 stays refused for all three."""
+    a patched kernel, so --sptm-hvc-calls 1 stays refused for all three. `boot_arg` is one word of BOOT_ARGS for the panel as the console (check_boot_arg)."""
     need = sb.STORE_RAM | sb.STORE_EL2_SYSREG | sb.STORE_GIC
     if stores & need != need:
         raise ch.Refused('OPTIONS_BAD', '--m1-run stores in all three classes: --stores must include ram, el2_sysreg and gic')
@@ -97,20 +103,41 @@ def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None):
         raise ch.Refused('OPTIONS_BAD', f'--m1-run with real: D9 admits --panel withheld (the first choice), --panel handed (the second) or --panel console (the panel '
                                         f'as the kernel\'s console), each with --sptm-hvc-calls 0 (a stock kernel), and this record is written for no other choice; '
                                         f'got --panel {panel} and --sptm-hvc-calls {hvc_calls}')
+    check_boot_arg(boot_arg, panel)
 
 
-def pinned_label(label, is_m1, choice='withheld'):
+def check_boot_arg(boot_arg, panel, is_m1=True):
+    """--boot-arg is one word of BOOT_ARGS, for the panel as the console, in the monitor entry run: BOOT_ARG_REFUSED for anything else (another word, another choice, another kind
+    of record), before any guest is built. None is no word."""
+    if boot_arg is None:
+        return
+    if not is_m1:
+        raise ch.Refused('BOOT_ARG_REFUSED', '--boot-arg is a choice of the monitor entry run (docs/SP11-STICK-MONITOR.md section 20, K10): it needs --m1-run')
+    if boot_arg not in BOOT_ARGS:
+        raise ch.Refused('BOOT_ARG_REFUSED', f'--boot-arg admits {" and ".join(BOOT_ARGS)} and no other word; got {boot_arg!r}')
+    if panel != BOOT_ARG_PANEL:
+        raise ch.Refused('BOOT_ARG_REFUSED', f'--boot-arg {boot_arg} is a word of --panel {BOOT_ARG_PANEL} only; got --panel {panel}')
+
+
+def pinned_label(label, is_m1, choice='withheld', boot_arg=None):
     """The build_label PIN.DAT carries. For this kind the marker comes first (the wrapper of this kind refuses a PIN.DAT without it, D2) and, for a guest that is
-    handed the panel, the marker of that choice (PANEL_MARKS) after it, so that the three choices of D9 have three labels; for every other kind the label is the
+    handed the panel, the marker of that choice (PANEL_MARKS) after it, so that the three choices of D9 have three labels, or, for a guest with a boot-arg word of its own
+    (BOOT_ARGS), that word's marker in its place, so that the record of that guest has a label of its own; for every other kind the label is the
     facts' and may not start with the marker, or a PIN.DAT of another kind would pass for this one. The facts label of this kind may not start with a marker of
-    a choice either: M1RUN-PANEL- is then the label of the choice that hands the panel and M1RUN-CONSOLE- that of the panel as the console, and of no other.
+    a choice or of a word either: M1RUN-PANEL- is then the label of the choice that hands the panel, M1RUN-CONSOLE- that of the panel as the console and M1RUN-CPUS1- that
+    of the panel as the console with cpus=1, and of no other.
     PIN_STRING: it does not fit."""
     if label.startswith(LABEL_PREFIX):
         raise ch.Refused('PIN_STRING', f'build_label starts with {LABEL_PREFIX}, which only --m1-run adds')
     for owner, mark in PANEL_MARKS.items():
         if is_m1 and mark and label.startswith(mark):
             raise ch.Refused('PIN_STRING', f'build_label starts with {mark}, which only --m1-run with --panel {owner} adds after {LABEL_PREFIX}')
-    front = LABEL_PREFIX + PANEL_MARKS[choice]
+    for word, mark in BOOT_ARGS.items():
+        if is_m1 and label.startswith(mark):
+            raise ch.Refused('PIN_STRING', f'build_label starts with {mark}, which only --m1-run with --boot-arg {word} adds after {LABEL_PREFIX}')
+    if boot_arg is not None:
+        check_boot_arg(boot_arg, choice, is_m1)
+    front = LABEL_PREFIX + (BOOT_ARGS[boot_arg] if boot_arg is not None else PANEL_MARKS[choice])
     if is_m1 and len(front + label) > PIN_LABEL_MAX:
         raise ch.Refused('PIN_STRING', f'--m1-run puts {front} in front of build_label and the pinned label holds {PIN_LABEL_MAX} characters: the facts label holds '
                                        f'{PIN_LABEL_MAX - len(front)}')

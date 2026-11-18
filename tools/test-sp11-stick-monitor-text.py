@@ -486,9 +486,10 @@ class Meaning(unittest.TestCase):
             text_of(real={**REAL, 'sptm_hvc_calls': 1})
 
     def test_every_panel_has_its_words_for_the_other_rung_and_a_panel_without_them_is_a_key_error(self):
-        for panel, entry in m1g.PANEL.items():
-            with self.subTest(panel):
-                self.assertIn(flat(entry['rung']), flat(text_of(real={**REAL, 'panel': panel})))
+        for key, entry in m1g.PANEL.items():
+            panel, _, word = key.partition('+')         # a record whose guest has a boot-arg word of its own is the panel's key and `+word` (kind_key of tools/sp11_stick_bundle_panel.py)
+            with self.subTest(key):
+                self.assertIn(flat(entry['rung']), flat(text_of(real={**REAL, 'panel': panel, **({'boot_arg': word} if word else {})})))
         short = {key: value for key, value in m1g.PANEL['withheld'].items() if key != 'rung'}
         with mock.patch.dict(m1g.PANEL, {'withheld': short}), self.assertRaises(KeyError):
             text_of()

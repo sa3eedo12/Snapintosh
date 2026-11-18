@@ -13,7 +13,8 @@ the only kind that authorises a wrapper that calls a monitor, and it refuses one
 the two EFI files that run before the wrapper, pins `M1RUN-` in front of the facts label (which the wrapper of this kind requires) and, with `real`, takes a
 stock kernel (--sptm-hvc-calls 0) with the panel withheld, D9's first choice, handed, its second, or `console` (the panel handed and serial=2 in the command line,
 as probes/run.py makes it for the A16's native panel console, which only this kind takes): the guest is then read back for the panel and the command line it is
-given, the label goes on with `PANEL-` or `CONSOLE-` and the record says what the panel means (tools/sp11_stick_bundle_panel.py; sections 14 and 20 of that note).
+given, the label goes on with `PANEL-` or `CONSOLE-` (`CPUS1-` for the console with `--boot-arg cpus=1`, one word more in its command line, from a short list: tools/sp11_stick_bundle_m1.py
+BOOT_ARGS) and the record says what the panel means (tools/sp11_stick_bundle_panel.py; sections 14 and 20 of that note).
 The bundle is the five files of docs/SP11-STICK-BUNDLE.md, q1n1's PAYLOAD.MAN and, with --base-tree, a stage tree that the stager verifies.
 A refusal prints `REFUSED=<NAME>` and exits 1: the interface's name (tools/sp11_stick_bundle.py) where it has one, else BUILDER_REFUSALS.
 Output is deterministic and is written only below --out, which must be under build/ (or --allow-under). The placement (D1), the stores (D4),
@@ -504,13 +505,16 @@ def prepare(a, kind, before_filler=None):
     gic_quarantine = getattr(a, 'gic_quarantine', False)
     gq.check_options(gic_stop, gic_quarantine)
     m1_path = getattr(a, 'm1_run', None)
+    boot_arg = getattr(a, 'boot_arg', None)        # the one word that the panel as the console may add to the guest's command line (m1.BOOT_ARGS), for the real kind only
     if m1_path is not None:         # an empty path is the kind with a file that cannot be read, never the other kind
-        m1.check_options(stores, gic_stop, a.time_box_s, getattr(a, 'panel', None), getattr(a, 'sptm_hvc_calls', None))
+        m1.check_options(stores, gic_stop, a.time_box_s, getattr(a, 'panel', None), getattr(a, 'sptm_hvc_calls', None), boot_arg)
     elif getattr(a, 'panel', None) == 'console':
         raise Refused('OPTIONS_BAD', '--panel console is a choice of the monitor entry run (D9, docs/SP11-STICK-MONITOR.md section 20): it needs --m1-run')
+    else:
+        m1.check_boot_arg(boot_arg, getattr(a, 'panel', None), False)
     efi = m1.read_efi(getattr(a, 'm1_efi', []), getattr(a, 'file', []), m1_path is not None)
     choice = (getattr(a, 'panel', None) or 'withheld') if m1_path is not None else 'withheld'     # D9's choice, for this kind only: the other kinds are written for the first
-    facts = dict(facts, build_label=m1.pinned_label(facts['build_label'], m1_path is not None, choice))     # the marker of this kind, PIN.DAT's and the record's
+    facts = dict(facts, build_label=m1.pinned_label(facts['build_label'], m1_path is not None, choice, boot_arg))     # the marker of this kind, PIN.DAT's and the record's
     descriptor, state, board = descriptor_digest(a, facts, kind)
     monitor, reporter = read_regular(a.monitor, '--monitor', minimum=4), read_regular(a.reporter, '--reporter', minimum=4)
     m1.refuse_monitor_reporter(reporter)        # every kind, the M1 kind too: the reporter slot is executed in the same boot
@@ -535,7 +539,8 @@ def prepare(a, kind, before_filler=None):
         built = ch.synthetic_built(xb, int(a.image_mib * MIB), int(a.tables_mib * MIB), int(a.sptm_data_mib * MIB), a.seed, a.time_box_s)
     else:
         built = real_built(a, xb, place, facts)
-        real = dict(kernelcache_sha256=sha(built['image'].data), guest_profile=built['guest_profile'], panel=a.panel, sptm_hvc_calls=a.sptm_hvc_calls, seed=a.seed)
+        real = dict(kernelcache_sha256=sha(built['image'].data), guest_profile=built['guest_profile'], panel=a.panel, sptm_hvc_calls=a.sptm_hvc_calls, seed=a.seed,
+                    **({'boot_arg': boot_arg} if boot_arg is not None else {}))        # the report of every other build keeps its fields
     lay = ch.layout_of(xb)
     chunks = ch.chunks_from_built(built, lay)
     guest = ch.guest_from_chunks(place, chunks)
@@ -545,7 +550,7 @@ def prepare(a, kind, before_filler=None):
     panel = None
     if m1_path is not None:
         m1.check_launch(chunks)
-        panel = pn.with_run(pn.read_panel(chunks, lay, facts, choice, kind == 'real', board), a.time_box_s, sha(monitor), sha(reporter))   # what the guest is given of the panel, from its bytes
+        panel = pn.with_run(pn.read_panel(chunks, lay, facts, choice, kind == 'real', board, boot_arg), a.time_box_s, sha(monitor), sha(reporter))   # what the guest is given of the panel, from its bytes
     head, table = sb.unpack_guest(guest)
     record = rec.record_text(dict(place=place, stores=stores, time_box_s=a.time_box_s, label=facts['build_label'], monitor=(len(monitor), sha(monitor)),
                                   reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop, gic_quarantine=gic_quarantine, m1=m1_facts,
@@ -706,6 +711,8 @@ def build_opts(p, kind, template=False):
         p.add_argument('--kernelcache', required=True)
         p.add_argument('--panel', choices=('handed', 'withheld', 'console'), required=True,
                        help='D9: SNAP_NO_FB; with --m1-run also `console`: the panel handed and serial=2 in the command line (probes/run.py --console panel)')
+        p.add_argument('--boot-arg', default=None, metavar='WORD',
+                       help='with --m1-run --panel console: one more word in the guest\'s command line, from a short list (cpus=1); any other word is BOOT_ARG_REFUSED')
         p.add_argument('--sptm-hvc-calls', choices=(0, 1), type=int, required=True, help='D9: the SPTM HVC kernel patch')
         p.add_argument('--seed', default=rec.DEFAULT_SEED, help='label of the guest\'s boot random seed (SNAP_SEED): the same label, the same bytes')
     if not template:

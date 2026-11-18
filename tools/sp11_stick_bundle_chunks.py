@@ -254,12 +254,15 @@ def real_built(a, xb, place, facts):
     xb.HOST_TIMEBASE_HZ = facts['cntfrq_hz']
     place_layout(xb, place)
     xb.FRAMEBUFFER = None if a.panel == 'withheld' else (facts['fb_base'], facts['fb_width'], facts['fb_height'], facts['fb_stride'] * 4, 32)
+    boot_arg = getattr(a, 'boot_arg', None)
+    if boot_arg is not None and a.panel != 'console':
+        raise Refused('BOOT_ARG_REFUSED', f'--boot-arg {boot_arg} is a word of --panel console only; got --panel {a.panel}')
     env = {'SNAP_NATIVE_CALLS': '1', 'SNAP_SPTM_HVC_CALLS': str(a.sptm_hvc_calls), 'SNAP_SEED': a.seed}   # else the loader draws a fresh boot seed per build
     loader_cmdline = xb.BOOT_CMDLINE
     os.environ.update(env)
     try:
         if a.panel == 'console':        # the panel as the kernel's console, as probes/run.py makes it for the A16's native panel console: serial bit 0 clear, text mode kept
-            xb.BOOT_CMDLINE = loader_cmdline.replace('serial=3', 'serial=2')
+            xb.BOOT_CMDLINE = loader_cmdline.replace('serial=3', 'serial=2') + (f' {boot_arg}' if boot_arg is not None else '')      # the builder read-back (read_panel) holds the word to its list
         with contextlib.redirect_stdout(io.StringIO()):     # the loader narrates its layout on stdout: not for the record the operator approves
             built = xb.build(str(a.kernelcache))
     except (OSError, ValueError, SystemExit) as error:

@@ -237,10 +237,10 @@ def guest_panel(guest, pin):
 class EndToEnd(AUTH.Need):
     """D4: `real --m1-run` run once on the host for each panel, with the kernelcache, the M1 pair of the LOCAL TEST RECORD and the census check on that build."""
 
-    def build_real(self, choice, name, label=None):
+    def build_real(self, choice, name, label=None, **extra):
         """(record, out, guest, pin, seconds) of a `real --m1-run` build of `choice` from the J700 kernelcache, built with the record it made."""
         over = dict(STATE['real'], kernelcache=BT.bb.xnuboot().DEFAULT_KERNELCACHE, panel=choice, sptm_hvc_calls=0, stores='ram,el2_sysreg,gic', m1_efi=EFI,
-                    descriptor=descriptor(f'board-{name}.json'), guest_mib=384, **({'facts': facts_with(label)} if label else {}))
+                    descriptor=descriptor(f'board-{name}.json'), guest_mib=384, **({'facts': facts_with(label)} if label else {}), **extra)
         started = time.monotonic()
         code, record, err = BT.template('real', **over)
         self.assertEqual(code, 0, err)
@@ -301,6 +301,21 @@ class EndToEnd(AUTH.Need):
         self.assertEqual(guest_panel(guest, pin), ((low, span), (facts['fb_base'], 0, facts['fb_stride'] * 4, facts['fb_width'], facts['fb_height'], 32),
                                                    '-v debug=0x8 serial=2 cluster_power=0 wdt=-1'), 'the bytes of GUEST.DAT say what the record says: the panel, text mode, serial=2')
         print(f'\nreal --m1-run, panel as the console, end to end: {seconds:.1f} s, GUEST.DAT {len(guest)} bytes, record {len(record.encode())} bytes, PIN label {label_of(pin).decode()}')
+
+    @unittest.skipUnless(boot_set_present(), 'no J700 26A428 boot set under downloads/extracted/j700ap (git-ignored Apple material): `real --m1-run` NOT RUN')
+    def test_real_m1_run_with_the_panel_as_the_console_and_cpus_1_builds_and_the_census_checks_the_build(self):
+        """Rung 3 (docs/SP11-STICK-MONITOR.md section 20, K10): the console guest with one more word, read back from the bytes of GUEST.DAT with offsets of this suite's own."""
+        record, out, guest, pin, seconds = self.build_real('console', 'real-m1-rung3', 'r3-e2e', boot_arg='cpus=1')
+        fields, facts = sb.unpack(pin, sb.PIN_LAYOUT), BT.bb.load_facts(BT.EXAMPLE)
+        self.assertEqual((sb.check_pin(pin), sb.check_guest(guest, pin), fields['authorised_stores'], label_of(pin)), (0, 0, 7, MARKER + b'CPUS1-r3-e2e'))
+        flat = self.check_record(record, out, pin)
+        for needle in ('3c. The panel as the kernel\'s console with cpus=1', '(format 1, label M1RUN-CPUS1-r3-e2e)', 'command line -v debug=0x8 serial=2 cluster_power=0 wdt=-1 cpus=1',
+                       'WHY RUNG 3. Boot 21 (rung 2) PASSED', '5d. Rung 3: what is new, what to film, and what counts as a result'):
+            self.assertIn(needle, flat)
+        low, span = facts['fb_base'] & ~0x3FFF, (facts['fb_stride'] * 4 * facts['fb_height'] + 0x3FFF) & ~0x3FFF
+        self.assertEqual(guest_panel(guest, pin), ((low, span), (facts['fb_base'], 0, facts['fb_stride'] * 4, facts['fb_width'], facts['fb_height'], 32),
+                                                   '-v debug=0x8 serial=2 cluster_power=0 wdt=-1 cpus=1'), 'the bytes of GUEST.DAT say what the record says: the panel, text mode, serial=2 and the word')
+        print(f'\nreal --m1-run, panel as the console with cpus=1, end to end: {seconds:.1f} s, GUEST.DAT {len(guest)} bytes, record {len(record.encode())} bytes, PIN label {label_of(pin).decode()}')
 
 
 if __name__ == '__main__':

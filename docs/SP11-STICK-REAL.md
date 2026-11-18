@@ -29,6 +29,7 @@ Inputs: the boot set of `downloads/extracted/j700ap/` (the kernelcache is 120,93
 | GUEST.DAT, panel withheld | 118,870,336 bytes, 44 chunks (the dry run's synthetic filler was 144,665,408 bytes; the cap is 256 MiB) |
 | GUEST.DAT, panel handed | 118,908,480 bytes, 46 chunks (the panel lies below the bank, so the frame map widens: two more chunks, one data and one zero, and one more table page) |
 | GUEST.DAT, panel console | 118,908,480 bytes, 46 chunks (the guest of the panel handed with `serial=2` where its boot_args page has `serial=3`: one byte of one chunk, as `probes/run.py` makes it for `--console panel`; built by `--panel console`, `--m1-run` only) |
+| GUEST.DAT, panel console with `cpus=1` (rung 3) | 118,908,480 bytes, 46 chunks (the console guest with ` cpus=1` after its command line: seven bytes of the same chunk; built by `--panel console --boot-arg cpus=1`, `--m1-run` only: `docs/SP11-STICK-MONITOR.md` section 20, K10) |
 | Chunk kinds present | KERNEL, TABLES, HANDOFF, DEVICE_TREE, PARAMS, MONITOR_IMAGE, MONITOR_DATA; OTHER is absent (no RAM disk, SEP preload or trust-cache fallback) |
 | Withheld, by kind (data and zero chunks) | KERNEL 13 and 12; MONITOR_DATA 4 and 4; MONITOR_IMAGE 4 and 2; HANDOFF 2; DEVICE_TREE 1; PARAMS 1; TABLES 1 |
 | PARAMS, from the placement | `mem_low` 0x880000000, `mem_high` 0x89b000000 (guest plus reserve: the work base), `watchdog_seconds` 5; destination (x3 of the monitor call) 0x88000c000 = base + 0xC000 |
@@ -37,6 +38,7 @@ Inputs: the boot set of `downloads/extracted/j700ap/` (the kernelcache is 120,93
 | GUEST.DAT SHA-256, handed, 0 | b74826c66352c55737bb1bcb3a9e747c926dd4c9871581dab9a4d77ae9b0ed5c |
 | GUEST.DAT SHA-256, handed, 1 | 5391ea4fc992a3f1ae96e2df8491ea62ac2e3b336dfbf90d3354f1c2b70bdae6 |
 | GUEST.DAT SHA-256, console, 0 | acad28623aebb068320baf3e826f0f53d6a17ace17af602afe286ee9be77a34f |
+| GUEST.DAT SHA-256, console, cpus=1, 0 | a7e159ad6c18832c60264f81763db6e7d5b4c3f3d3d5bafc7efcf6a073752f50 |
 | Determinism | two builds, separate processes (one with another `PYTHONHASHSEED`): all 26 files identical, `build-report.json` and the stage tree included |
 | Stage tree | 18 files, `verify` COMPLETE, `shell_pin: match` (the dry run's base tree and EFI images) |
 | `probes/xnuboot.py --check` | exit 0 at its default base (328 chunks, 12 of 12 addresses resolve); the same check at the bank base with 384 MiB, with no SNAP variable and with the native-call and HVC variables, exit 0 each |

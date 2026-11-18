@@ -51,7 +51,7 @@ sha = lambda data: hashlib.sha256(data).hexdigest()     # noqa: E731
 LLVM = ('clang', 'ld.lld', 'llvm-objcopy', 'llvm-readelf', 'llvm-nm', 'llvm-objdump')
 OWN = ('tools/sp11_stick_bundle_m1.py', 'tools/sp11_monitor_census.py', 'tools/test-sp11-stick-monitor-auth.py', 'tools/test-sp11-stick-monitor-interlock.py',
        'docs/SP11-STICK-MONITOR.md')
-DOC_CAP = 120000        # raised from 94,000 on purpose, to 114,000 for section 20 (K7), by 2,000 more for its second-camera and public-source words (A2: the margin for the notes that come with the record), by 2,000 more for K8 (A3) and by 2,000 more for K8 (h) (A4); 91,000 before draft 5, 88,000 before draft 3; nothing was cut to make room
+DOC_CAP = 126000        # raised from 94,000 on purpose, to 114,000 for section 20 (K7), by 2,000 more for its second-camera and public-source words (A2: the margin for the notes that come with the record), by 2,000 more for K8 (A3), by 2,000 more for K8 (h) (A4) and by 6,000 more for K9 (boot 21: docs batch 7) and K10 (rung 3); the note is about 124 KB; 91,000 before draft 5, 88,000 before draft 3; nothing was cut to make room
 # The records the operator was shown or approved, regenerated here from the files they were made from (docs/SP11-MONITOR-PORT.md section 15 D4/D7).
 RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e035977bf700e',
            'gic and stop dry run': 'c74f7af0217c507e7738673b9d437d6c76589ef3c243c23eef4837b0ca435b3b',
@@ -715,8 +715,8 @@ class Hygiene(unittest.TestCase):
         build = (ROOT / 'docs/SP11-STICK-BUILD.md').read_text()
         self.assertIn('`--m1-run BUILD_REPORT`', build)
         self.assertIn('docs/SP11-STICK-MONITOR.md', build)
-        self.assertLessEqual(len(build.encode()), 36000)
-        self.assertIn('36000', (TOOLS / 'test-sp11-stick-bundle-build.py').read_text(), 'the cap of docs/SP11-STICK-BUILD.md in its own test')
+        self.assertLessEqual(len(build.encode()), 37000)
+        self.assertIn('37000', (TOOLS / 'test-sp11-stick-bundle-build.py').read_text(), 'the cap of docs/SP11-STICK-BUILD.md in its own test')
 
     def test_the_flag_is_documented_where_the_options_are(self):
         done = quietly(bb.main, ['authorisation-template', 'synthetic', '--help'])

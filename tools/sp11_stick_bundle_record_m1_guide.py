@@ -84,7 +84,8 @@ PANEL = {'withheld': dict(
     console='The guest has no panel to write to: its console output goes to a buffer in RAM that SNAPREP prints as MON CON lines.',
     rung='rung 2, the run with the panel handed to the guest')}
 # The keys that hand the guest the panel are in tools/sp11_stick_bundle_panel.py (GUIDE_WORDS): d9, guest_gets, console and rung replace the first run's, and outside,
-# ram_also, ram_note, fault_note, decides, why, stand, hazard, film and step7 are words of their own that the hooks below read with `said`. The first run's words have none of those, so
+# ram_also, ram_note, fault_note, decides, why, stand, hazard, film and step7 are words of their own that the hooks below read with `said`, and a guest that boot 21 ran too
+# adds stand_head, stand_loop and stand_stick (stand_lines). The first run's words have none of those, so
 # its text is what it was.
 PANEL.update(pn.GUIDE_WORDS)
 RAM_NOTE = '(INFERRED; no stage-2 abort in boot 20\'s 5 s, OBSERVED once)'      # of the map that boot 20 ran, RAM only: a panel choice says its own (ram_note)
@@ -122,8 +123,9 @@ SP11_STATUSES = ((-146, 'VCPU_CLUSTERS'), (-147, 'TIMER_GUARD_CNTHCTL'), (-148, 
 
 
 def words(real):
-    """The panel words of a record: `real` is the facts of a real build (None for a synthetic one, which has no panel and is written with the withheld words)."""
-    return PANEL[real['panel'] if real else 'withheld']
+    """The panel words of a record: `real` is the facts of a real build (None for a synthetic one, which has no panel and is written with the withheld words). A guest with a
+    boot-arg word of its own has the words of that record (pn.kind_key)."""
+    return PANEL[pn.kind_key(real)] if real else PANEL['withheld']
 
 
 def said(real, key, box_s=None):
@@ -168,15 +170,17 @@ def reading_lines(real=None):
 def stand_lines(real=None):
     """Section 0a, in every record of this kind (the panel, the box and the kernel do not change it): what the one run of the monitor entry showed, with its labels,
     and nothing beyond it. The numbers are those of the operator's film of boot 20 (record 31e5d4c2...a802, 2026-11-18), read at full resolution. A panel choice may add
-    a paragraph of its own after the second one (its `stand` words, given `real`); the first run's has none."""
+    a paragraph of its own after the second one (its `stand` words, given `real`); the first run's has none. A record of a guest that boot 21 ran as well has its own heading
+    (`stand_head`), its own last sentence of the second paragraph (`stand_loop`) and no line for the stick (`stand_stick` False: its paragraph says it)."""
+    w = words(real)
     return (
-        '0a. Where things stand (boot 20, 2026-11-18, one unit, one boot; OBSERVED unless a sentence says INFERRED)',
+        w.get('stand_head', '0a. Where things stand (boot 20, 2026-11-18, one unit, one boot; OBSERVED unless a sentence says INFERRED)'),
         *wrap('Boot 20 (record 31e5d4c2...a802) ran the monitor entry: the guest executed for its 5 s box, with 3,127 traps, 1,443 monitor calls and no stage-2 abort, and '
               'the run ended as MON STOP WATCHDOG at the kernel address 0xFFFFFE000C1EEF00.'),
-        *wrap('Why the guest was still at that address when the time box ended the run is INFERRED: an early loop in the guest. The same stop address again, after a change '
-              'meant to end the loop, would falsify that.'),
-        *(words(real)['stand'](real) if words(real).get('stand') else ()),
-        *wrap('The stick was unchanged but for the Shell\'s marker and the Mac\'s own .fseventsd entry.'),
+        *wrap('Why the guest was still at that address when the time box ended the run is INFERRED: an early loop in the guest. '
+              + w.get('stand_loop', 'The same stop address again, after a change meant to end the loop, would falsify that.')),
+        *(w['stand'](real) if w.get('stand') else ()),
+        *(wrap('The stick was unchanged but for the Shell\'s marker and the Mac\'s own .fseventsd entry.') if w.get('stand_stick', True) else ()),
         *wrap('The hardware status of everything else is NOT RUN. This text claims no more: not that macOS boots, and not that anything is stable.'))
 
 
@@ -213,8 +217,8 @@ def hazard_lines(real, box_s, low, high):
     guest = kernel_words(real)
     return (
         '0b. The hazards, in plain words',
-        *wrap(f'- {guest[0].upper()}{guest[1:]} runs at EL1 on the boot CPU, one CPU only, for up to {box_s} s, under a monitor that ran once on this machine (boot 20: '
-              'section 0a). What the kernel does there beyond what section 0a says is UNKNOWN. The run ends by the monitor\'s own timer interrupt, by a stage-2 fault or by '
+        *wrap(f'- {guest[0].upper()}{guest[1:]} runs at EL1 on the boot CPU, one CPU only, for up to {box_s} s, under a monitor that {w.get("ran", "ran once on this machine (boot 20: section 0a).")} '
+              'What the kernel does there beyond what section 0a says is UNKNOWN. The run ends by the monitor\'s own timer interrupt, by a stage-2 fault or by '
               'an exception that the kernel takes (section 5a).', first=3, rest=5),
         *wrap(f'- The guest is given {w["guest_gets"]}. An access outside its RAM{w.get("outside", "")} is meant to fault at stage 2 and stop the run.', first=3, rest=5),
         *(wrap('- ' + said(real, 'hazard', box_s), first=3, rest=5) if w.get('hazard') else ()),
@@ -265,8 +269,8 @@ def outcome_lines(real, box_s):
                    'Mac has mounted the stick, its .fseventsd entry, which the coordinator re-reads;'),
         *item('g', 'the A16 monitor is byte-identical with the new gate off (tools/monitor_baseline.py IDENTICAL): a host check of the coordinator, on no page.'),
         *wrap('A STAGE-2 FAULT WITH AN IPA IS SUCCESS' + said(real, 'fault_note', box_s) + ': MON STOP S2_FAULT, with the guest PC, the IPA in A= and ESR_EL2 in B=, is the kernel stopping at its first device '
-              'that the monitor does not model, which the plan expects of M1 (docs/SP11-MONITOR-PORT.md section 14: expected failure 5, "that is success for M1"; INFERRED: '
-              'no run has stopped that way yet, UNKNOWN). Rows c and d hold for it, and the coordinator reads A= and B= to say which address the kernel touched; A=0 means '
+              'that the monitor does not model, which the plan expects of M1 (docs/SP11-MONITOR-PORT.md section 14: expected failure 5, "that is success for M1"; '
+              + (said(real, 'fault_seen', box_s) or 'INFERRED: no run has stopped that way yet, UNKNOWN') + '). Rows c and d hold for it, and the coordinator reads A= and B= to say which address the kernel touched; A=0 means '
               'that no IPA could be named, '
               'and that is a finding, not this end. A touch outside RAM that stage 2 stops IS this end, not a failure and not a retry.'),
         *wrap('A run that uses its whole time box ends as MON STOP WATCHDOG, and MON EXIT PC= beside it (OBSERVED once: boot 20, one unit, one boot). The plan\'s own list '
@@ -345,7 +349,7 @@ def page_lines(m1, box_s, real=None):
         *wrap('- MON STOP <kind> PC= A= B= C=: how the run ended. The forms of the kinds below are read from the monitor\'s sources (INFERRED), and each says whether a run '
               'has shown it:', first=3, rest=5),
         *(line for kind, text in STOP_KINDS.items() for line in wrap(f'{kind}: {text}. ' + ('An expected end of M1. ' if kind in EXPECTED_ENDS else 'A finding (section 5a). ')
-                                                                       + STOP_SEEN.get(kind, STOP_NEVER), first=7, rest=10)),
+                                                                       + {**STOP_SEEN, **words(real).get('stop_seen', {})}.get(kind, STOP_NEVER), first=7, rest=10)),
         *wrap('Any other name is a kind that this text does not list: the coordinator reads it from the monitor\'s sources and it is never guessed at.', first=7, rest=7),
         *wrap('- MON EXIT PC= SPSR= ESR= FAR=: the guest\'s own state at an interrupt stop, where it was.', first=3, rest=5),
         *wrap('- MON EV n <kind> PC= A= B= C=: the first five events of the monitor\'s log, what the kernel asked for first.', first=3, rest=5),
@@ -386,8 +390,10 @@ def action_lines(r):
               '(row f); at a recovery-key screen type and choose nothing.'),
         *item('1.', 'AC power is REQUIRED (D8): the charger may be in Surface Connect or a USB-C port, and stays in from before the boot until the end. One hardware client. '
                     'NO cable to the Mac, no Mac logger, no other device on the USB ports; the stick goes in either port.', hang=7),
-        *item('2.', f'Film 30 frames a second or more (29.97 is fine: boot 20\'s film had it; 60 if the camera can) from the Shell\'s countdown until the first UPTIME heartbeat AFTER the line STAGE=DONE, or until {silence_s(r["time_box_s"])} s after the last page '
-                    'change, whichever comes first. Say the time of day aloud on the video at the start. Keep the whole panel in frame.'
+        *item('2.', 'Film 30 frames a second or more (29.97 is fine: boot 20\'s film had it; 60 if the camera can) from the Shell\'s countdown '
+                    + (said(real, 'film_until', box_s) or f'until the first UPTIME heartbeat AFTER the line STAGE=DONE, or until {silence_s(r["time_box_s"])} s after the last page change, '
+                       'whichever comes first')
+                    + '. Say the time of day aloud on the video at the start. Keep the whole panel in frame.'
                     + said(real, 'film', box_s), hang=7),
         *item('3.', f'Boot the stick as for every SP11 boot before this one. Do not press ESC at the countdown. The Shell then prints AUTORUN {r["label"]} STEP 1 OF 1, CMD1: load '
                     'SP11\\SLBOUNCE-DEVHE-MARK.EFI, CMD2: SP11\\Q1N1-PAYLOAD.EFI --el2 and "Writing SP11\\DONE1.TXT in 5 seconds, then the two commands run. Power off now to '
