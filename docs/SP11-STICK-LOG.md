@@ -5,7 +5,7 @@ the read-only survey S0 ran once on the unit (section 12), and its follow-up S0b
 Two later boots (6 and 7 of 2026-11-15, section 14) ran the third X2 test image and a payload that starts and stops the
 secondary cores, a three-step restart probe the same evening (section 14.1) ran a plain q1n1 page and that payload
 twice more, and a two-step restart control the next night ran only a read-only payload through the same runner; none
-of them read or wrote the stick's USB controller at EL2. Boot 14 (2026-11-17, section 15) ran the wrapper's GIC and stop variant and did not touch it either. Boots 15 and 16 (2026-11-17, section 16) ran the A1 No-Op DMA test, the first xHC register stores at EL2, on `usb_1_ss1`: in the filmed boot the screen went off at the end of the wait before the first RUN store, the unit stayed dark and no No-Op completed (cause UNKNOWN, no restart seen; boot 15 is from the operator's memory only). Boots 17 and 19 (2026-11-17, section 17) ran it again, on `usb_1_ss0` (boot 17) and on `usb_1_ss1` (boot 19, with the stick in the top port and no cable), and ended the same way; boot 18A, a read-only snapshot of both controllers, the clocks and the SMMU, ran to its end with no fault and no black-out (OBSERVED, one unit, one boot each; SC3 stands at 4 of 5). Boot 20 (2026-11-18, section 18) ran the SP11 monitor entry for the first time (M1 rung 1, plan `M1RUN-RUNG1`): the stock kernel executed on one vCPU for the monitor's 5 s box and printed its banner, and the monitor stopped it itself and returned with the registers and the GIC restored (OBSERVED, one unit, one boot, on video); the guest was, INFERRED, spinning in an early loop of the kernel's I/O Kit start-up that cannot end on an image with the panel withheld (one vCPU, 5 s, early boot only; the xHC and the stick's controller were not exercised).**
+of them read or wrote the stick's USB controller at EL2. Boot 14 (2026-11-17, section 15) ran the wrapper's GIC and stop variant and did not touch it either. Boots 15 and 16 (2026-11-17, section 16) ran the A1 No-Op DMA test, the first xHC register stores at EL2, on `usb_1_ss1`: in the filmed boot the screen went off at the end of the wait before the first RUN store, the unit stayed dark and no No-Op completed (cause UNKNOWN, no restart seen; boot 15 is from the operator's memory only). Boots 17 and 19 (2026-11-17, section 17) ran it again, on `usb_1_ss0` (boot 17) and on `usb_1_ss1` (boot 19, with the stick in the top port and no cable), and ended the same way; boot 18A, a read-only snapshot of both controllers, the clocks and the SMMU, ran to its end with no fault and no black-out (OBSERVED, one unit, one boot each; SC3 stands at 4 of 5). Boot 20 (2026-11-18, section 18) ran the SP11 monitor entry for the first time (M1 rung 1, plan `M1RUN-RUNG1`): the stock kernel executed on one vCPU for the monitor's 5 s box and printed its banner, and the monitor stopped it itself and returned with the registers and the GIC restored (OBSERVED, one unit, one boot, on video); the guest was, INFERRED, spinning in an early loop of the kernel's I/O Kit start-up that cannot end on an image with the panel withheld (one vCPU, 5 s, early boot only; the xHC and the stick's controller were not exercised). Boot 21 (2026-11-18, section 19) ran rung 2 with the panel handed to the guest as the kernel's console (plan `M1RUN-CONSOLE-RUNG2`): the stock kernel's boot log was on the panel, it ran through the I/O Kit start-up and the platform-driver matching on one vCPU, and the monitor stopped it itself at the first CPU-start write (`MON STOP S2_FAULT`, 2.04 s into the call; OBSERVED, one unit, one boot, on video; that the write is the CPU-start write is INFERRED, by address).**
 Nothing of the writer ran on a Surface Pro 11 beyond that test, a stand-alone payload of the q1n1 fork. When the study
 was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as an opt-in, read-only survey in
 the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`) and has run
@@ -126,6 +126,11 @@ guarded log writer, and their tests (section 8).
     `-noprogress`); a longer box on the same image only repeats it, and the next run hands the panel (rung 2) or adds `-noprogress`. The run shows nothing about SMP, userspace, a root device,
     a panel console, stability or performance, nor that the kernel boots or that macOS boots; the regime of the NV2 record the gate passed with is still not recorded (UNKNOWN). The stick was
     only the boot medium: it held every staged file byte for byte, and A1 and A2 were not exercised. No next step is authorised.
+15. **Boot 21 (2026-11-18; section 19; on video; OBSERVED, one unit, one boot): M1 rung 2, the panel handed to the guest as the kernel's console (plan `M1RUN-CONSOLE-RUNG2`), PASSED by the record's own rule: the stock kernel
+    ran through its I/O Kit start-up and the platform-driver matching with its boot log on the panel, and the monitor stopped it at the first CPU-start write.** The loop of boot 20 is gone (the video block was the guest input that changed, with the console route; the INFERRED cause chain is consistent
+    with the run, and not proven). The report page ended `MON STOP S2_FAULT` with `PC=0XFFFFFE00097A352C` and `A=0X300734004`, 2.04 s into a call of 5 s, clean (`MON REGS RESTORED=YES`, `GIC RESTORE CLEAN=YES`): a 32-bit write by the guest to an unmapped address, which matches by address the first CPU-start write of the A16 sources
+    (INFERRED; its value was not printed), the plan's expected failure 5. The kernel registered six CPUs and ran one; the SPMI and PMU errors on the panel come from the monitor's empty models (INFERRED) and are not the stop. The stick held 18 of 18 staged files byte for byte but for the Shell's marker. The run shows nothing past the first CPU-start write:
+    not CPU bring-up, not SMP, not a root device, not stability or performance, and not that macOS boots. The next options (a guest-input `cpus=1`, a monitor that accepts the CPU-start write, real secondaries) are INFERRED options and no decision; nothing further is authorised.
 
 ## 2. The problem and the requirements
 
@@ -692,6 +697,7 @@ any claim in section 3 about the unit is true beyond what section 12 records. Ha
 | q1n1 can address a device behind a hub | VERIFIED false (G03) | 7 |
 | The first xHC register stores at EL2 (the A1 No-Op test, boots 15, 16, 17 and 19, on both controllers, with the stick and the Mac's cable in several places): the page ended at `NEXT RUN` and the screen went off about 8 s later, and no No-Op completed | OBSERVED (boots 16, 17 and 19 on video; boot 15 from memory); that the RS store is the cause is INFERRED; the cause is UNKNOWN | 16, 17 |
 | A read-only snapshot of both controllers, the NoC and PHY clocks and the SMMU (boot 18A): 334 loads, no fault, no black-out; the clocks and power domains read on | OBSERVED (one unit, one boot) | 17 |
+| The SP11 monitor entry, run twice: boot 20 (rung 1, panel withheld) and boot 21 (rung 2, the panel handed as the kernel's console, plan `M1RUN-CONSOLE-RUNG2`): in boot 21 the stock kernel's boot log was on the panel, the kernel ran through its I/O Kit start-up and the platform-driver matching on one vCPU, and the monitor stopped it at the first CPU-start write (`MON STOP S2_FAULT`, 2.04 s into the call) | OBSERVED (one unit, one boot each, on video); that the faulting write is the CPU-start write is INFERRED, by address; nothing past it: not CPU bring-up, not SMP, not a root device, not stability or performance | 19 |
 | The SP11 monitor entry, run once (boot 20, M1 rung 1, plan `M1RUN-RUNG1`): the stock J700 26A428 kernel executed at EL1 on one vCPU until the monitor's own 5 s stop (`MON STOP WATCHDOG`), printed its banner and four early console lines, and the call returned with the registers and the GIC restored; no stage-2 abort | OBSERVED (one unit, one boot, on video); the guest was, INFERRED (high), stuck in an early loop of the kernel's I/O Kit start-up (18.5); one vCPU, 5 s, early boot only: nothing about SMP, userspace, a root device, a panel console, stability or performance; the NV2 record's regime UNKNOWN | 18 |
 | The stick's port decides which controller the firmware starts: the top port is `usb_1_ss1` (`Pci(0x81)`), the second port `usb_1_ss0` (`Pci(0x80)`) | INFERRED (the Shell's map line and the latched port word of four boots; the wiring was not traced) | 17 |
 | Any behaviour of the writer on the unit | not established | NOT RUN |
@@ -1937,7 +1943,7 @@ stick and g by the host comparison, and b was not exercised. It is a pass of tha
 | # | Question | Page lines | What the unit showed | Label |
 | --- | --- | --- | --- | --- |
 | 1 | Did the call return, and with what? | `MON CALL`, `MON RET`, `MON STATUS` | The wrapper called the monitor (`X0` to `X4` and `SP` are this boot's addresses) and it returned `0` with `STATUS=0X0 ENTERED=1`: the guest was entered and no prepare check refused (there is no `MON PREPARE FAILED` line). The monitor's stack used 8,736 of 262,144 bytes. The runner's own count for each payload is clean: return 0, `STACK=OK`, no fault, no refusal, no dropped line | OBSERVED |
-| 2 | How long did the call take? | `MON RET ... TICKS=`, `TICKS HZ=` | 96,720,173 ticks of the 19.2 MHz counter, 5.0375 s (arithmetic), for the whole call, against a box of 96,000,000 ticks: 720,173 ticks, 0.0375 s, more. By the record `TICKS` counts the monitor's prepare and the stop's clean as well, so if the box starts at the guest's first instruction the prepare and the clean took at most that long together, far below the record's estimate of about 0.6 s for the clean alone (INFERRED then, never measured). The wrapper's own phases, from the same page: placement 37,914 ticks (0.002 s), copy 30,997,290 (1.61 s), hashing 46,208,412 (2.41 s) | OBSERVED (the figures); INFERRED (what the excess holds) |
+| 2 | How long did the call take? | `MON RET ... TICKS=`, `TICKS HZ=` | 96,720,173 ticks of the 19.2 MHz counter, 5.0375 s (arithmetic), for the whole call, against a box of 96,000,000 ticks: 720,173 ticks, 0.0375 s, more. By the record `TICKS` counts the monitor's prepare and the stop's clean as well, so if the box starts at the guest's first instruction the prepare and the clean took at most that long together, far below the record's estimate of about 0.6 s for the clean alone (INFERRED then, never measured). The wrapper's own phases, from the same page: placement 37,914 ticks (0.002 s), copy 30,997,290 (1.61 s) and `HASHED` 46,208,412 (2.41 s), the last being the wrapper's whole step before the call (checks, copy and verify) counted from its entry, as the dry run's 2.92 s is, and not the hash alone | OBSERVED (the figures); INFERRED (what the excess holds) |
 | 3 | How did the run end? | `MON STOP`, `MON EXIT` | `MON STOP WATCHDOG PC=0XFFFFFE000C1EEF00 A=0X0 B=0X0 C=0XD3AA0A80`: the monitor records `WATCHDOG` when an interrupt reaches EL2 with the EL2 timer's `ISTATUS` set after the deadline (VERIFIED, read in `probes/xnuboot/async.c`), so the monitor's own timer ended the run. For that kind `PC` is the guest's `ELR_EL2`, `A` its `ESR_EL1`, `B` its `FAR_EL1` and `C` its `ELR_EL1` (VERIFIED, read in the same file). `A` and `B` read 0 and `C` is not a kernel address: INFERRED that the guest took no EL1 exception that wrote them since it was entered. `MON EXIT PC=0XFFFFFE000C1EEF00 SPSR=0X804003C4 ESR=0X0 FAR=0X0`: the `ESR` and `FAR` of that line are zero by construction at an interrupt stop (VERIFIED, read in the same file) and carry no information; `SPSR` `0x804003C4` has D, A, I and F all set (INFERRED: the layout is from memory), so the kernel ran with every interrupt masked | OBSERVED (the values); VERIFIED (what the monitor puts in them); INFERRED (the decode) |
 | 4 | What did the monitor count? | `MON COUNTS` | `EVENTS=512 TRAPS=3127 ABORTS=0 STEPS=0 CALLS=1443 DROPPED=834`: 3,127 traps to the monitor, no stage-2 abort, no single step, the monitor's own count of 1,443 calls (what they were is not on the page), 512 events kept and 834 dropped for lack of room. The traps and calls are cumulative counts over the call, not a rate (about 620 traps a second averages a mostly silent 5 s, 18.5) | OBSERVED |
 | 5 | What are the five events? | `MON EV 0` to `MON EV 4` | The first five of the 512 kept: two `OTHER` events at `PC=0X0` and `PC=0X1` whose words equal the `MIDR` (`C=0X512F0011`) and the word that the `MON IDS` line calls `MMFR2` (`A=0X1201011112101011`) on the `REGS` and `MON IDS` lines (INFERRED: the same words), then two `MONITOR` events and one `SYSREG` event at kernel addresses. They are the first milliseconds of the boot, before the VM bootstrap lines, and not the stop: `EV 2` (`A=0XF`) is the SPTM fixups-complete call, `EV 3` (`A=0X12`) the register-exception-return call and `EV 4` an implementation-defined system-register write trapped by TIDCP in an early function (roles INFERRED, 18.5) | OBSERVED (the values); INFERRED (the match, the roles) |
@@ -2026,7 +2032,146 @@ sixth; a longer time box only once the loop is gone, which needs the wrapper's 5
 
 **What follows.** The approval covered one boot and is spent. By the record, any further run (a second rung, another file, kernel, patch value, time box or store class) needs a record of its own that the
 operator approves by its SHA-256, and nothing is authorised by this section. The xHC and stick-writer work stays paused (section 17.6): the writer is UNIMPLEMENTED, no completed No-Op has been seen in any
-boot, and A1 and A2 were not exercised in this one either.
+boot, and A1 and A2 were not exercised in this one either. Boot 21 (section 19) was the next run, rung 2, with the panel handed to the guest.
+
+## 19. Result of boot 21, M1 rung 2 (plan `M1RUN-CONSOLE-RUNG2`), the panel handed to the guest as the kernel's console, on the unit: the stock kernel ran through its I/O Kit start-up and platform-driver matching with its boot log on the panel, and the monitor stopped it at the first CPU-start write (`MON STOP S2_FAULT`), 2.04 s into the call (OBSERVED, one unit, one boot; on video; the identity of that write is INFERRED)
+
+Boot 21 (2026-11-18) is the second run of the SP11 monitor entry and the first with the panel handed to the guest. After boot 20 (section 18: the guest was, INFERRED, stuck in a loop that an all-zero video block makes endless) the operator approved a record of its own for rung 2
+by its SHA-256 at about 09:46 (this log does not repeat the digest). By the record that approval covers one boot, and it also decides the store classes `ram`, `el2_sysreg` and `gic` (D4) for it and the panel choice of D9 (the panel handed, `serial=2`, the kernel stock). The record changes two
+things in the guest and nothing in the programs: the video block is the unit's framebuffer, the runner's GOP of 2880 x 1920, instead of zero, and the kernel's console is routed to the panel (`serial=2` for `serial=3`). `GUEST.DAT` is 118,908,480 bytes in 46 chunks (boot 20's was 118,870,336 in 44); `SNAPMON.BIN` and
+`SNAPREP.BIN` are boot 20's (the same 16-digit prefixes on the page); the time box is 5 s. The record did not add `-noprogress`, so that a result has a cause. Its prediction (INFERRED) was that the report's PC is outside boot 20's loop and that the kernel prints more than its banner; its falsifier was the same PC again. The stick
+was in the port the operator usually uses (the Shell's map line ends `Pci(0x80,0x0)/USB(0x1,0x0)`; 17.3). The film is one video of 58.8 s (29.99 frames a second, not CRC-verified): the whole panel, and a closer view at the end. Everything below is OBSERVED (one unit, one boot, from one video) unless a label says otherwise; the decodes are INFERRED,
+and what was read in a source on the host is VERIFIED and says nothing about hardware.
+
+### 19.1 The film in time
+
+| Video, time | What is on the panel |
+| --- | --- |
+| 0 to 1 s | the Shell's lines of the plan (`AUTORUN M1RUN-CONSOLE-RUNG2: 1 step, one per boot`, `CMD1: load SP11\SLBOUNCE-DEVHE-MARK.EFI`, `CMD2: SP11\Q1N1-PAYLOAD.EFI --el2`, the 5 s countdown before the marker), SL-Bounce, q1n1's UEFI entry and the GOP captured (`0xE4800000`, 2880 x 1920, stride 2880, format 1) |
+| 8 s | q1n1's EL2 page: build `A9F00F9CCBB5`, `UPTIME 0 S`, `MIDR 0x512F0011`, `HCR_EL2 0x88000010 E2H=0 TGE=1` |
+| 16 s | the runner's page: the five `PAYLOAD LOADED` lines (payload 0, 447,855 bytes, `SHA=1D32F5071506A00C`; payload 1, 58,977 bytes, `SHA=EE86676001D89CF6`; `GUEST.DAT`, 118,908,480 bytes, `SHA=` starting `ACAD28623AEB`; `PIN.DAT`, 1,024 bytes; `REPORT.DAT`, 528,384 bytes), `PAYLOAD VERIFY=OK`, `PAYLOAD CALL 0 1D32F5071506A00C`, the wrapper's stage lines to `STAGE=PIN_OK LABEL=M1RUN-CONSOLE-RUNG2 CHUNKS=46` and `NEXT GIC STORES AFTER 8 S`, and the `MON CALL` line |
+| about 16.1 s | the screen goes to the kernel's text (the runner's page is cleared) and fills over about 1.2 s; the first frames after the clear replay the kernel's message buffer from its start |
+| about 18.0 s | the SNAPREP report page appears on the right of the kernel's text, about 1.9 s after the first kernel text (the call took 2.044 s) |
+| 18 to 58.8 s | the kernel's text and the report stay up and q1n1's `UPTIME` heartbeat counts on (17 S at 24 s, 22 S at 29 s, 36 S in the closer view at the end); no black-out, no restart |
+
+### 19.2 The report page as read
+
+The kernel's text had painted over the first lines of the runner's page, so the page that is left starts at the wrapper's `MON RET` line (the lines before it were read before the clear, 19.1). Read on crops at full resolution (t = 29 s; capital letters only; the addresses are this boot's allocations, not constants):
+
+```text
+SNAPMON MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=39245286 STACK=10888/262144
+SNAPMON MON REGS RESTORED=YES
+SNAPMON GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRC VBAR=NONE EL1=NONE
+SNAPMON MON VERDICT=RETURNED FLAGS=0XF SUB=7
+SNAPMON STAGE=DONE RETURN=0
+PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=2 FAULTS=0 REFUSED=0 LINES=29 DROPPED=0
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 1 EE86676001D89CF6
+SNAPREP MONITOR RETURNED STAGE=DONE
+SNAPREP VERDICTS PIN=OK GUEST=OK POLICY=0X3 LINES=29
+SNAPREP REGS EL=0X8 MIDR=0X512F0011 MPIDR=0X80000000 CNTFRQ=19200000
+SNAPREP REGS HCR=0X88000010 SCTLR=0X100030C5183D TCR=0X80843514
+SNAPREP CHUNKS TOTAL=46 COPIED=46 HASHED=27 BYTES_COPIED=161041856 BYTES_HASHED=118904848
+SNAPREP TICKS HZ=19200000 PLACED=49395 COPIED=31134285 HASHED=46611176
+SNAPREP PLACE BASE=0X880000000 SIZE=0X2A000000 DESC=221 DBASE=0X880000000 DPAGES=0X780000
+SNAPREP GUEST.DAT BASE=0XC5CFE000 BYTES=118908480
+SNAPREP MON VERDICT=RETURNED FLAGS=0XF SUB=7
+SNAPREP MON IMAGE OFF=0X20000 BYTES=316783 SHA=0XAD4EBAA27314296C BOX_S=5 ESF=0X0 GPUF=0X0
+SNAPREP MON IDS MMFR2=0X1201011112101011 MMFR4=0X0 REVIDR=0X0
+SNAPREP MON IDS ISAR1=0X110111101211052 ISAR2=0X10000012
+SNAPREP MON CALL X0=0XCE7F0000 X1=0X89B000000 X2=0XF000000 X3=0X88000C000 X4=0X0 SP=0XCE870000
+SNAPREP MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=39245286 STACK=10888/262144
+SNAPREP MON REGS RESTORED=YES
+SNAPREP MON STATUS=OK ENTERED=0X1
+SNAPREP MON COUNTS EVENTS=512 TRAPS=136424 ABORTS=0 STEPS=925 CALLS=65955 DROPPED=96475
+SNAPREP MON STOP S2_FAULT PC=0XFFFFFE00097A352C A=0X300734004 B=0X93970045 C=0XFFFFFE60A0178004
+SNAPREP MON EXIT PC=0XFFFFFE00097A352C SPSR=0X604003C4 ESR=0X93970045 FAR=0XFFFFFE60A0178004
+SNAPREP MON EV 0 OTHER PC=0X0 A=0X1201201023111111 B=0X21 C=0X512F0011
+SNAPREP MON EV 1 OTHER PC=0X1 A=0X1201011112101011 B=0X0 C=0X2100122100001024
+SNAPREP MON EV 2 MONITOR PC=0XFFFFFE000C2640AC A=0XF B=0X0 C=0X1
+SNAPREP MON EV 3 MONITOR PC=0XFFFFFE000C22B9E0 A=0X12 B=0XFFFFFE000B86FBB0 C=0XFFFFFE0006F84000
+SNAPREP MON EV 4 SYSREG PC=0XFFFFFE000C2448CC A=0X3A7FE2 B=0X0 C=0X0
+SNAPREP GIC GICD CTLR=0X10 ARE=1 DS=0 G1A=0 NEED_G=1 TYPER=0XF87F051E IIDR=0X401043B
+SNAPREP GIC GICR IDX=0 TYPER=0XD0000E7 WAKER=0X0 ISEN=0X4E800001 PEND=0 ACT=0
+SNAPREP GIC CPU SRE=0XF EOIMODE=1 PMR=0XF8 BPR1=0X3 IGRPEN1=0 PRIO=0XA0 CFG=0X0 GRP=0 CTL=0X0
+SNAPREP GIC NEW GICD=0X13 RB=0X12 ISEN=0X4000000 PRIO=0X80 PMR=0XF8 IGRPEN1=1
+SNAPREP GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRC VBAR=NONE EL1=NONE
+PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=1 FAULTS=0 REFUSED=0 LINES=29 DROPPED=0
+```
+
+The 29 `SNAPREP` lines are what `PAYLOAD DONE INDEX=1` counts (`LINES=29`; boot 20's reporter printed 35, six of them `MON CON` lines): this page has none, as the record predicted for `serial=2` (INFERRED then, OBSERVED now: the console text is on the panel and not in the report's window). The page differs from boot 20's in the guest's numbers
+(`CHUNKS`, `BYTES`, `DESC=221` where boot 20 had 220), in `TRAPS`, `CALLS`, `STEPS`, `DROPPED`, in the stack used (10,888 of 262,144 bytes; boot 20: 8,736), and in the stop: `MON STOP S2_FAULT` where boot 20 had `WATCHDOG`. The five events and the GIC lines are boot 20's, word for word. The whole call took 39,245,286 ticks of the 19.2 MHz counter,
+2.044 s (arithmetic), against the box of 5 s (96,000,000 ticks): the box was not used up. `ABORTS` counts the stage-2 aborts that the monitor handled on its monitor-call pages and `STEPS` its completed single-steps (VERIFIED, read in `probes/xnuboot/trap_dispatch.c`), so the fault that ended the run is not in `ABORTS`; what armed 925 single-steps, where boot 20 had none, is UNKNOWN.
+
+### 19.3 The verdict against the record's results and rows a to g
+
+The record names four results for rung 2 (its section 5d) beside M1's own rows (its section 5a; [SP11-MONITOR-PORT.md](SP11-MONITOR-PORT.md) section 2).
+
+| Result or row | The rule | What the page and the film show | Label |
+| --- | --- | --- | --- |
+| RUNG 2 PASSED | a stop report with a PC that is not in boot 20's loop (`0XFFFFFE000C1EEF00` to `0XFFFFFE000C1EEF10`) and kernel glyphs on the panel, in any frame, beyond the lines that the runner drew before the call | held: a stop report (`MON STATUS=OK ENTERED=0X1`, `MON STOP S2_FAULT`), clean (`MON REGS RESTORED=YES`, `GIC RESTORE CLEAN=YES`, no window overrun, no full stack), with `PC=0XFFFFFE00097A352C`, which is not in the loop; and the kernel's text on the panel in many frames from the first one after the clear | OBSERVED |
+| not the NOT PASSED case | `MON STOP S2_FAULT` with `A=` inside the panel range (a finding about the panel) | `A=0X300734004` is far from the panel range (`0xE4800000`, 0x1518000 bytes) | OBSERVED |
+| a | the runner loads the files and both hashes agree | held: `PAYLOAD VERIFY=OK` for both payloads; both 16-digit prefixes equal the record's (read against the record) | OBSERVED |
+| b | the wrapper refuses on any precondition mismatch | not exercised: nothing mismatched, so no `REFUSED` line, which is no pass | OBSERVED (the absence) |
+| c | the guest ran: `MON STATUS=OK ENTERED=0X1`, the stop PC inside the kernel image | held: the PC lies in the kernelcache's `__TEXT_EXEC` range (`0xFFFFFE0008A08000` to `0xFFFFFE000C264000`; VERIFIED, host arithmetic on the local copy, the loader mapping the kernel at its link addresses: 18.5), and the kernel printed its boot log | OBSERVED (the page); VERIFIED (the range, host) |
+| d | the run ended by the monitor's own stop; a stage-2 fault with an IPA is the plan's expected success | held: `MON STOP S2_FAULT` with an IPA in `A=`, the plan's expected failure 5 ([SP11-MONITOR-PORT.md](SP11-MONITOR-PORT.md) section 14), which section 5a of the record counts as success for M1 | OBSERVED |
+| e | the stop came inside the time box (96,000,000 ticks) | held, and proved: `TICKS=39245286` is 2.044 s | OBSERVED |
+| f | no disk was written: the stick is byte-identical but for the Shell's marker | held: every file of the staged list passes `shasum -a 256 -c` (18 of 18), `REPORT.DAT` is still the all-zero staged file, and the only changes since staging are `SP11\DONE1.TXT` (44 bytes, the Shell's marker) and macOS's own `.fseventsd` entry; the unit's own storage was not read back (NOT RUN) | OBSERVED (host check of the stick, read only, one boot) |
+| g | the A16 monitor is byte-identical with the new gate off | held: the monitor sources probes/ compat/ shadow/ config/ gpu/ drivers/ are unchanged by git diff between ea59368 (the tree of boot 20) and eb6ba3b (the source of the record) (VERIFIED, host; says nothing about hardware); the byte comparison of boot 20's row g was not repeated for this tree (NOT RUN) | VERIFIED (host) |
+
+M1's own verdict (record, 5a) is the same page's: rows a, c, d, e and f hold, and a stage-2 fault with an IPA is the success that the plan expects. The approval is spent (`PAYLOAD CALL 0` printed). Rung 2 passed by the record's own rule, and the pass is of that rule and of nothing else: gate X4's "kernel executes" stays at PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start; [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.4).
+
+### 19.4 What the panel showed, as a list of roles
+
+The text on the panel is the stock kernel's own console: the first frames after the clear replay its message buffer from the start (bracketed timestamps beginning at about 45.57 s of the kernel's own clock), and the film then holds the text as it grew. Read on frames (OBSERVED, one boot; the film was not CRC-verified and the lines are short quotes only; the roles of the phases are INFERRED from the public source and from boot 20's analysis):
+
+| # | Role | What was read |
+| --- | --- | --- |
+| 1 | machine set-up | cache geometry (`do_cacheid`), `kprintf initialized`, `Serial mode specified: 00000002`, and `initialize_screen: b=E4800000, w=00000B40, h=00000780, r=00002D00, d=00000000`: the video block exactly as the loader gave it (base `0xE4800000`, 2880 x 1920, 11,520 bytes a row, text mode) |
+| 2 | interrupt controller and timer | `pe_arm_init_interrupts`, `pe_arm_map_interrupt_controller` with `soc_phys: 0x210000000` (the base of the monitor's emulated AIC: INFERRED from the models), `found timer` |
+| 3 | banner and VM bootstrap | the Darwin banner (`xnu-13432.1.9~1`, `RELEASE_ARM64_T8140`), `pmap_startup()` 626 microsec, `vm_page_bootstrap: 9344 free pages, 15200 wired pages`, `VM bootstrap: 73 maps, 256 entries and 64 nodes`, `ptr-packing max`, `VM bootstrap done` |
+| 4 | scheduler and CPUs | the scheduler's quantum lines and `[processor_init] processor 1 ... 5 belongs to processor set 0 of type ...`: the six CPUs of the guest's device tree registered (CPUs 0 to 3 of type 0, 4 and 5 of type 1), only CPU 0 running |
+| 5 | logging and debug set-up | log queues and the firehose, `trap_telemetry`, `debug_log_init: Error!! gPanicBase is still not initialized` (the kernel's own message, and it went on), `libTXM_KernelVersion`, `kdp_core`, `Serial requested, consistent debug disabled ... configuring debugging over serial` |
+| 6 | I/O Kit start-up | `iBoot Stage 1 version:` and `iBoot version:`, the first statement of `PE_init_iokit` (INFERRED). The code that held boot 20's loop comes after that statement in the same function (INFERRED, the order of the public source), so these lines alone do not show that it was passed; rows 7 and 8 do |
+| 7 | security policy | the MAC policy initialisation (`AppleImage4`, `AppleMobileFileIntegrity`, `Sandbox`, `Quarantine`: INFERRED, TXM calls are modelled by the monitor) |
+| 8 | platform drivers | `AppleA7IOPNub` nub allocations, RTBuddy start lines (SIO, GFX, GFX1, AOP, AOP2, DCPEXT), `AppleSEPManager::start` (`SEP memory IS coherent`, `control endpoints created`), `AppleCLPCv3`, `AppleGPIOICController`, `AppleEventLogHandler: started`, `AppleDockChannel::start`, `AppleHIDTransportDeviceFIFO`, `AppleStockholmSPMI`, `AppleDialogSPMIPMU` |
+| 9 | errors in that phase | many `[mub-spmi0]:extendedReadWriteCommand ... parity error` and `AppleDialogSPMIPMU::_readRegs failed: e00002bc` lines (addresses `f700`, `f702`, `f718`, `f719`), and `Couldn't alloc class "AFKFirmwareService"`; the RTKit endpoint logs say `General panic behavior: debugFacility = 0x00000001`, which is not a panic |
+
+The kernel therefore ran `kernel_bootstrap`, `PE_init_iokit`, its second thread, the I/O Kit start-up, the MAC policy initialisation and the platform-driver matching in about 2 s (the call took 2.044 s), with six CPUs registered and one running; the stop was the monitor's own and no kernel panic message was read in the frames examined. The SPMI errors come while the kernel reads SPMI devices that the monitor models as empty (INFERRED from the models' names in the sources), so they are the expected noise of this guest and not the stop; that they are harmless in general is not shown (UNKNOWN).
+
+### 19.5 The stop: the first CPU-start write (the match is by address; INFERRED)
+
+`MON STOP S2_FAULT PC=0XFFFFFE00097A352C A=0X300734004 B=0X93970045 C=0XFFFFFE60A0178004` is the guest's own fault, not the watchdog. The PC is a kernel address far from boot 20's loop (`0xFFFFFE000C1EEF00`), and `SPSR` `0x604003C4` is EL1t with D, A, I and F masked (INFERRED: the layout is from memory). Decode of `ESR` `0x93970045` (INFERRED, from the layout as remembered): exception class `0x24`
+(a data abort from a lower exception level), `ISV` 1, access size word (32 bits), register `SRT` 23, `WnR` 1 (a write), `DFSC` `0x05` (a translation fault at level 1: no stage-2 mapping). So the guest wrote a 32-bit value to the unmapped intermediate physical address `0x300734004` (`FAR` `0xFFFFFE60A0178004`, the same page offset), whose low 16 bits are `0x4004`. The monitor's own sources name this address: its CPU-start window is `0x300734004` to `0x30073400c` (the global core mask at +4, then the cluster starts; a write there is routed to the release code only when a host CPU set is configured, and the M1 profile has none), and the guest's device-tree window 24 is `0x300730000`, so the address is that window plus `0x4004` (`probes/xnuboot/trap_dispatch.c`, lines 430 to 444, and `probes/devicemodel.py`, lines 752 to 757; VERIFIED, read in the sources; the address itself is the page's: OBSERVED). `0x4004` is also the offset that the A16 sources document for
+XNU's first CPU-start write (PMGR register block 24, which stopped the A16 run in the same way; compat/boot-relocate.h, lines 147 to 153). That the guest's write is that write is INFERRED, and not more: the value written (`x23`) and the writing function were not printed. It is the plan's expected failure 5 ([SP11-MONITOR-PORT.md](SP11-MONITOR-PORT.md) section 14): the monitor starts no secondary (`x4` = 0) and models no device at that address, so the first write
+to it ends in a stage-2 fault with an IPA, which the record counts as success for M1. The monitor stopped the guest 2.04 s into the call and put its registers and the GIC back.
+
+### 19.6 What this settles, what it does not, the hypotheses and the next options
+
+**What it settles (OBSERVED, one unit, one boot; the roles of the phases are INFERRED).**
+
+- The stock kernel runs through `kernel_bootstrap`, `PE_init_iokit`, the I/O Kit start-up, the MAC policy initialisation and the platform-driver matching on the SP11 under the monitor, with one vCPU and the panel as its console; its boot log is on the panel.
+- The loop of boot 20 is gone. The report's PC is another kernel address (OBSERVED), and the panel shows phases that follow `PE_init_iokit` (the MAC policy initialisation and the platform-driver matching), so the kernel passed the code that held the loop (INFERRED: the order is that of the public source, and only structural for 26A428). The falsifier of boot 20's analysis (the same stop PC again) did not occur, so the INFERRED cause chain, an all-zero video block (section 18.5), is consistent with this run. It is not separated from the other change
+  of the record, `serial=2` (INFERRED: that route does not touch the loop).
+- The stop is the plan's expected failure 5: a stage-2 fault with an IPA at the first access to a device the monitor does not model, 2.04 s into a call of 5 s, clean. That the guest's write is the first CPU-start write is a match by address (INFERRED).
+- The monitor entry returned cleanly again: registers and GIC restored, 10,888 of 262,144 stack bytes used, with 136,424 traps and 65,955 calls (boot 20: 3,127 and 1,443 in 5.04 s) and the kernel's real boot work behind them. The unit stayed up (`UPTIME` 36 S on the closer view), with no restart.
+
+**What it does not settle (UNKNOWN unless a label says otherwise).**
+
+- Anything past the first CPU-start write: whether CPU bring-up works (it was not reached), SMP, a root device, storage, userspace, a longer run. One vCPU, 2.04 s of the 5 s box. This boot does not show that macOS boots, nor stability or performance.
+- That the guest's write is the CPU-start write (an address match only), and its value. Why 925 single-steps were counted (UNKNOWN).
+- That the SPMI and PMU errors are harmless beyond this run (UNKNOWN), and what the kernel would do about the empty models later.
+- That `-noprogress` or the panel is the one cause of boot 20's spin: the chain stays INFERRED.
+
+**The next options (INFERRED options from a design note after the boot; none is a decision, none is authorised, none is run).**
+
+- A guest-input change only: `cpus=1` in the guest's command line (a new `GUEST.DAT` digest and record; no monitor, wrapper or reporter byte changes). The kernel would then register one CPU and start no other, so no CPU-start write and no `failed to boot` panic (public XNU source: INFERRED for 26A428). The A16's record says that a reduced CPU set trips a PMGR assertion earlier in boot ([BOOT-CHAIN.md](BOOT-CHAIN.md); no log of it
+  survives, so which assertion, and whether this guest repeats it, are UNKNOWN); if it does, the panel text should name it (INFERRED).
+- A monitor change: accept the CPU-start write and start nothing, with a guest word that lets the kernel wait longer for the CPU (a new `SNAPMON.BIN` digest, its census and an independent review). The kernel would then panic with `cpu N failed to boot` about a second later (INFERRED from the public source), the first real test of a guest deadline on the stop timer's own line.
+- Real secondaries (monitor and wrapper): the A16's path exists, but on the SP11 the wrapper cannot build the secondary configuration (UNIMPLEMENTED), the cores differ in MIDR by cluster (the NV2 gate per core, INFERRED), and the board restarted by itself after two of three `cpuon` boots (section 14; cause UNKNOWN). The note ranks it last.
+- The order of the note is its judgement, not a measurement: the guest-input change first, because it is the cheapest, the monitor change if it fails, real secondaries last. Each needs the operator's decision and a record of its own.
+
+**What follows.** The approval was for one boot and is spent. By the record, any further run needs a record of its own that the operator approves by its SHA-256, and nothing is authorised by this section. The xHC and stick-writer work stays paused (section 17.6): A1 and A2 were not exercised (the monitor's guest has no USB controller and no disk).
 
 ## Appendix A. The page lines of the survey boot (S0; EXPERIMENTAL in the q1n1 fork; ran once on the unit, section 12)
 
