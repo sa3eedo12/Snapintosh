@@ -169,6 +169,12 @@ def check(text, facts):
         need(len(r) == 6 and all(r), f'Appendix D row {r[0]} has an empty cell')
         need(len(r) == 6 and any(label in r[5] for label in LABELS), f'Appendix D row {r[0]} has no label in its Today cell')
         need(len(r) == 6 and bool(re.search(r'\byes\b|\bno\b|VERIFIED|host', r[2])), f'Appendix D row {r[0]} does not say whether it is offline')
+    # what boot 22 (session 1, 2026-11-18) changed in the Today column: four questions read in two boots, the SMMU and the DMA reach still UNKNOWN
+    today = {r[0]: r[5] for r in rows if len(r) == 6}
+    for question in ('D3', 'D4', 'D8', 'D15'):
+        need('OBSERVED in two boots' in today.get(question, ''), f'Appendix D row {question} does not say OBSERVED in two boots')
+    need(today.get('D2', '').startswith('OBSERVED once'), 'Appendix D row D2 is not OBSERVED once (the segment comes from the MCFG: the page prints none)')
+    need(today.get('D7', '').startswith('UNKNOWN (session 1 ran') and today.get('D14') == 'UNKNOWN', 'Appendix D rows D7 and D14 are not UNKNOWN after session 1')
 
     # the sessions
     body = section(text, '9. The first three storage hardware sessions')
@@ -180,6 +186,18 @@ def check(text, facts):
             need(label in block, f'session {n + 1} has no "{label}"')
     flat = body.replace('**', '').replace('\n', ' ')
     need('nothing is written to the SSD in any of the three' in flat, 'section 9 does not say that nothing is written to the SSD')
+    # what session 1 did on 2026-11-18 (boot 22): it ran, read only, and left the SMMU's mode and the DMA reach UNKNOWN
+    result = re.search(r'\*\*Result of session 1 \(boot 22, 2026-11-18;.*?(?=\n\*\*Session 2:)', body, re.S)
+    need(result is not None, 'section 9 has no result paragraph of session 1 before session 2')
+    said = ' '.join(result.group(0).split()) if result else ''
+    for phrase in ('OBSERVED, one unit, one boot, from a film that started late', 'a chain of two read-only payloads, `nvmesnap` and then `smmuprobe`', 'both ended with no fault and no refused read',
+                   'the registers equal the X2 image\'s reading of 2026-11-15, so the state the firmware leaves repeats across two boots',
+                   'got a translation fault at level 3: the page has no stage-1 mapping at EL2, no SMMU register was read, and the verdict is `UNKNOWN` with `SMMU_PAGE_UNMAPPED`; it is not treated as bypass',
+                   '**Not settled:** the SMMU\'s mode (D7), why its page is unmapped, whether the SSD\'s DMA reaches a monitor-owned extent after a takeover (D14), anything about writes, D11, and anything about the Wi-Fi '
+                   'beyond the shared SMMU.', 'The approval is spent.', 'session 2\'s prerequisite, a verdict of bypass or a proven stage 2, is not met'):
+        need(phrase in said, f'the result of session 1 lost {phrase[:50]!r}')
+    need('VERIFIED' not in said and not re.search(r'MODE=(?!UNKNOWN)', said), 'the result of session 1 upgrades a label or gives the SMMU a mode')
+    need('session 1, a read-only survey, ran once on 2026-11-18 (section 9)' in ' '.join(head.split()), 'the status line does not say that session 1 ran once, read only')
     registers = re.search(r'<!-- storage-registers -->\n(.*?)<!-- /storage-registers -->', body, re.S)
     got = [(ticks(r[1])[0], ticks(r[2])[0]) for r in table(registers.group(1))] if registers else []
     need(got == REGISTERS, f'the register order is {got}')
@@ -266,7 +284,19 @@ class StorageDoc(unittest.TestCase):
             'a broken link': seeded('FULL-INSTALL.md#partition-plan', 'FULL-INSTALL.md#partition-plans'),
             'a missing document': seeded('(SP11-NVME-WINDOW.md#7-appendix-d-answered-the-per-machine-questions)', '(SP11-NVME-WINDOW-OLD.md#7)'),
             'a test that does not exist': seeded('python3 tools/test-snapmac-image-sp11.py ', 'python3 tools/test-snapmac-images-sp11.py '),
-            'a lost status line': seeded('**Status: EXPERIMENTAL (host only). Hardware status: NOT RUN.**', '**Status: EXPERIMENTAL (host only).**'),
+            'a lost status line': seeded('**Status: EXPERIMENTAL (host only). Hardware status: NOT RUN for the tooling and for sessions 2 and 3; session 1, a read-only survey, ran once on 2026-11-18 (section 9).**',
+                                         '**Status: EXPERIMENTAL (host only).**'),
+            'a status line that says session 1 never ran': seeded('session 1, a read-only survey, ran once on 2026-11-18 (section 9).**', 'session 1 has never run (section 9).**'),
+            'a lost result of session 1': seeded('**Result of session 1 (boot 22, 2026-11-18;', '**Note on session 1 (boot 22, 2026-11-18;'),
+            'a result that gives the SMMU a mode': seeded('it is not treated as bypass.', 'it is bypass.'),
+            'a result that settles the DMA reach': seeded('whether the SSD\'s DMA reaches a monitor-owned extent after a takeover (D14), anything about writes', 'that the SSD\'s DMA reaches a monitor-owned extent after a takeover (D14), anything about writes'),
+            'a result that settles why the page is unmapped': seeded('**Not settled:** the SMMU\'s mode (D7), why its page is unmapped,', '**Not settled:** the SMMU\'s mode (D7), that its page is firmware-owned,'),
+            'a prerequisite of session 2 that is met': seeded('a verdict of bypass or a proven stage 2, is not met.', 'a verdict of bypass or a proven stage 2, is met.'),
+            'a spent approval that stands': seeded('The approval is spent.', 'The approval stands.'),
+            'an upgraded D8': seeded('| none | OBSERVED in two boots: enabled, ready, two-entry firmware queues, the registers identical |', '| none | VERIFIED: enabled, ready, two-entry firmware queues, the registers identical |'),
+            'a D3 observed once again': seeded('| none | OBSERVED in two boots: 01:00.0, RID `0x0100` |', '| none | OBSERVED once: 01:00.0, RID `0x0100` |'),
+            'a D7 that is no longer unknown': seeded('| UNKNOWN (session 1 ran: the SMMU\'s page was unmapped at EL2, so nothing was read) |', '| bypass (session 1 ran) |'),
+            'a D14 that is settled': seeded('| none to read | UNKNOWN |\n| D15 |', '| none to read | OBSERVED once |\n| D15 |'),
             'a non-ASCII character': TEXT + '\nthe dash \u2014 here\n',
             'a machine name': TEXT + '\nrun it in /Us' + 'ers/someone/work\n',
             'a claim that something is written to the SSD': seeded('**nothing is\nwritten to the SSD in any of the three.**', '**something is\nwritten to the SSD in session 2.**'),

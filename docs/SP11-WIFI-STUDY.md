@@ -635,7 +635,7 @@ class and the ids. "Gate" is where the plan would measure it.
 | W5 | Is the link trained? | none for the SP11 | C3 (X12a) | DLLLA set, Gen3 x2 | UNKNOWN |
 | W6 | Which BARs, and is memory decode on? | none | C5, C7 (X12a) | recorded | UNKNOWN at EL2; in the firmware's PCI I/O view BAR0 `0x7C400000` and decode off: OBSERVED once (above) |
 | W7 | Are PERST#, CLKREQ# and WAKE# on GPIO 146 to 148? | an unreferenced pin state names them (WE15) | T4 to T6 (X12a) | recorded | UNKNOWN |
-| W8 | What does the PCIe SMMU do for StreamID `0x40100`? | "Controlled by Gunyah"; the overlay's map (WE12) | S5 (X12a) | translate, bypass or abort | UNKNOWN |
+| W8 | What does the PCIe SMMU do for StreamID `0x40100`? | "Controlled by Gunyah"; the overlay's map (WE12) | S5 (X12a) | translate, bypass or abort | UNKNOWN; this is the SMMU node of the storage stream, whose page has no stage-1 mapping at EL2 (OBSERVED once, 2026-11-18, in the storage survey: [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md#72-what-the-s1-survey-read-on-2026-11-18-boot-22)); nothing else about the Wi-Fi |
 | W9 | Can a 64 MiB arena be reached by the card? | none | the S5 walk, then the arena check (X12b) | identity read/write below `1 << 36` | UNKNOWN |
 | W10 | Is the module in its boot ROM? | the A16 refuses otherwise; a warm reboot may leave firmware running (WE26) | MHI and BHI reads after the authorized memory-decode write (X12b) | PBL or EDL | UNKNOWN |
 | W11 | Which board entry will the firmware ask for? | the community's chip 2, board 255 | the QMI target reply (X12c) | chip 2, board 255 | OBSERVED |

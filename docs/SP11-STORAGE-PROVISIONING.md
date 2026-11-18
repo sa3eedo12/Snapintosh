@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MIT -->
 # SP11 storage provisioning: the offline flow, its tools and the first storage hardware sessions
 
-**Status: EXPERIMENTAL (host only). Hardware status: NOT RUN.** Nothing here has touched a Surface Pro, and nothing in this
+**Status: EXPERIMENTAL (host only). Hardware status: NOT RUN for the tooling and for sessions 2 and 3; session 1, a read-only survey, ran once on 2026-11-18 (section 9).** Nothing here has touched a Surface Pro except the read-only payloads of that session, and nothing in this
 document, in the tools it describes or in the q1n1 payload it plans authorises a run ([AGENTS.md](../AGENTS.md), section 5:
 access to the repository is not authorisation). It is the design for the storage items of [SURFACE-PRO-11.md](SURFACE-PRO-11.md)
 (WS-D S1, S3 and S5, gate X6) under decision D3 (macOS lives in a partition window of the unit's internal NVMe; this document
@@ -223,25 +223,25 @@ window is served correctly by the monitor (session 3 of section 9). Hardware: NO
 The sixteen per-machine questions are those of [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md#7-appendix-d-answered-the-per-machine-questions)
 (Appendix D of the plan). "Offline" means answered, or answerable, with the SSD on the Mac and the Windows exports, with no run on the
 unit. "Unit" names the probe or session that must read it from the unit. "Authorisation" names what a run needs beyond the operator's
-explicit approval of the run itself. "Today" is the state: OBSERVED once means one unit and one boot.
+explicit approval of the run itself. "Today" is the state: OBSERVED once means one unit and one boot, and OBSERVED in two boots means two boots of that unit.
 
 | # | Question | Offline | Unit (probe or session) | Authorisation | Today |
 | --- | --- | --- | --- | --- | --- |
 | D1 | GPT matches the Windows record | **yes**: M1 and M2a (the four readers; the capture of 2026-11-10 is the first view) | none | none for reading; the operator's backup and the recovery key off the device | the layout is OBSERVED once (no free space before the shrink); the four-reader agreement is not run |
 | D2 | PCIe segment | yes, the MCFG of the dumped ACPI tables | session 1 prints the constants it reads | none | OBSERVED once: 6 |
-| D3 | BDF | no | session 1 reads both headers (00:00.0, 01:00.0) | none | OBSERVED once: 01:00.0, RID `0x0100` |
-| D4 | ECAM base | yes, the MCFG | session 1 reads through it | none | OBSERVED once: `0x70000000`, buses 0 to 1 |
-| D5 | which SMMU | **yes**: the IORT of the dumped tables has one SMMUv3 node at `0x15400000` | session 1 reads its ID registers; a fault is itself the finding | none | the node is OBSERVED in the dump; the registers UNKNOWN (the read faulted at EL2 in two boots, runs 6 and 7 of the X2 image: [SP11-X2-TESTS.md](SP11-X2-TESTS.md), test T07) |
+| D3 | BDF | no | session 1 reads both headers (00:00.0, 01:00.0) | none | OBSERVED in two boots: 01:00.0, RID `0x0100` |
+| D4 | ECAM base | yes, the MCFG | session 1 reads through it | none | OBSERVED in two boots: `0x70000000`, buses 0 to 1 |
+| D5 | which SMMU | **yes**: the IORT of the dumped tables has one SMMUv3 node at `0x15400000` | session 1 reads its ID registers; a fault is itself the finding | none | the node is OBSERVED in the dump; the registers UNKNOWN (the read faulted at EL2 in two boots, runs 6 and 7 of the X2 image: [SP11-X2-TESTS.md](SP11-X2-TESTS.md), test T07; session 1's `smmuprobe` found the page unmapped at EL2 and read nothing) |
 | D6 | StreamID | **yes**: the IORT maps the segment-6 root complex RIDs `0..0xFFFF` to `0x60000 + RID`, so `0x60100` for RID `0x0100` | session 1 reads the entry of that StreamID | none | the declared map is OBSERVED in the dump; the SMMU's own state UNKNOWN |
-| D7 | translating, bypass or abort | no | session 1 (`smmuprobe`: verdict) | none to read; a verdict that ends at an SMMU write needs its own, named authorisation (K4, first bullet) | UNKNOWN |
-| D8 | controller state after ExitBootServices | no | any later read of CAP to ACQ (session 2 reads them again) | none | OBSERVED once: enabled, ready, two-entry firmware queues |
+| D7 | translating, bypass or abort | no | session 1 (`smmuprobe`: verdict) | none to read; a verdict that ends at an SMMU write needs its own, named authorisation (K4, first bullet) | UNKNOWN (session 1 ran: the SMMU's page was unmapped at EL2, so nothing was read) |
+| D8 | controller state after ExitBootServices | no | any later read of CAP to ACQ (session 2 reads them again) | none | OBSERVED in two boots: enabled, ready, two-entry firmware queues, the registers identical |
 | D9 | Identify facts | no | session 2 (Identify controller and namespace) | the controller takeover (section 9) | UNKNOWN |
 | D10 | LBA format never switched | host: the monitor's admin allow-list refuses Format NVM, the only way to switch it (VERIFIED on the host model by `test_identify_supplies_the_current_format_and_never_a_better_one` in `tools/test-nvme-window-hamoa.py`; that the device keeps its format is UNKNOWN) | session 2 (FLBAS before and after) | the controller takeover | UNKNOWN on the device |
 | D11 | Windows boots after a controller reset | no | session 2, last step | the controller takeover; the Windows boot itself is a normal boot | UNKNOWN |
 | D12 | slot and attributes Windows picks | **yes**, after W2: `verify` records the entry's slot, attributes and name | none | the operator's one GPT entry (section 8 of the plan: "Create the Snapintosh GPT entry", X6) | UNKNOWN |
 | D13 | interrupts needed | host: INFERRED from the design (the window polls its queue and creates its completion queue without interrupts, `compat/nvme-host.h`); no host test asserts it | none | none | INFERRED (design); UNKNOWN on the device |
-| D14 | the SSD reaches the DMA window | no | session 1 decides whether it holds by construction (bypass); a translating verdict needs the stage-2 walk that follows; sessions 2 and 3 show it by use | none to read | UNKNOWN |
-| D15 | link up, SSD powered | no | session 1 reads the link status of both ends again, every run | none | OBSERVED once: Gen4 x4, link active |
+| D14 | the SSD reaches the DMA window | no | session 1 was to decide whether it holds by construction (bypass) and did not, the SMMU's page being unmapped at EL2; a translating verdict needs the stage-2 walk that follows; sessions 2 and 3 show it by use | none to read | UNKNOWN |
+| D15 | link up, SSD powered | no | session 1 reads the link status of both ends again, every run | none | OBSERVED in two boots: Gen4 x4, link active |
 | D16 | volatile write cache, HMB | no | session 2 (Identify controller VWC, HMPRE, HMMIN) | the controller takeover | UNKNOWN |
 
 ## 9. The first three storage hardware sessions
@@ -303,7 +303,9 @@ decides nothing and is never treated as bypass.
   read of a group (the payload stops that group; do not retry); a verdict of abort; Windows not booting normally afterwards; battery
   under 50% off AC; a thermal-guard trip.
 - Closes: D5 to D7 and D14's first half; the hardware half of X6's first sub-step (read-only analysis), the layout half being the
-  offline capture. It decides whether K4's first bullet can fire.
+  offline capture. It decides whether K4's first bullet can fire. That was the design; boot 22 read no SMMU register and so closed none of them from the unit (the result below).
+
+**Result of session 1 (boot 22, 2026-11-18; OBSERVED, one unit, one boot, from a film that started late; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 20).** It ran as a chain of two read-only payloads, `nvmesnap` and then `smmuprobe` (the q1n1 fork, commit `241b7ca`), under one approval by SHA-256 for one boot; both ended with no fault and no refused read. `nvmesnap` read the SSD's link (Gen4 x4, the data link layer link active), the endpoint (D0, memory space and bus mastering on), the controller (enabled and ready, version 1.4.0, admin queues of two entries at `0xCF3E7000` and `0xCF3E8000`) and the two queue slots (two Identify commands with success completions): the registers equal the X2 image's reading of 2026-11-15, so the state the firmware leaves repeats across two boots. `smmuprobe` asked EL2's stage 1 about the SMMU's page `0x15400000` and got a translation fault at level 3: the page has no stage-1 mapping at EL2, no SMMU register was read, and the verdict is `UNKNOWN` with `SMMU_PAGE_UNMAPPED`; it is not treated as bypass. **Not settled:** the SMMU's mode (D7), why its page is unmapped, whether the SSD's DMA reaches a monitor-owned extent after a takeover (D14), anything about writes, D11, and anything about the Wi-Fi beyond the shared SMMU. No stop rule fired (no `FAULT`; no hang on the film; the time from `CALL` to `DONE` is not on it). The approval is spent. Reading the SMMU now needs an EL2 stage-1 mapping of its page (a q1n1 or monitor change, not a payload), and session 2's prerequisite, a verdict of bypass or a proven stage 2, is not met.
 
 **Session 2: the controller adoption read path.** The takeover quiesces the controller (`CC.SHN` normal shutdown, `CC.EN` 0), gives it
 queues of its own and enables it again; then Identify controller and namespace, the error, SMART and firmware-slot log pages,

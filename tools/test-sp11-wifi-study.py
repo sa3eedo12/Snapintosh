@@ -590,6 +590,30 @@ class StudyStructure(unittest.TestCase):
         for phrase in ('VERIFIED (negative', 'did not open the package', 'UNKNOWN'):
             self.assertIn(phrase, self.text)
 
+    @staticmethod
+    def w8_problems(text):
+        """What is wrong with the W8 row after the storage survey of boot 22: one fact about the SMMU node it shares with the storage stream, and no claim about the Wi-Fi; [] is a pass."""
+        rows = [line for line in text.splitlines() if line.startswith('| W8 |')]
+        if len(rows) != 1:
+            return ['W8 is not one row']
+        state = rows[0].strip().strip('|').split('|')[-1].strip()
+        problems = [] if state.startswith('UNKNOWN;') else ['the state of the SMMU for the Wi-Fi stream is not UNKNOWN']
+        for phrase in ('this is the SMMU node of the storage stream, whose page has no stage-1 mapping at EL2 (OBSERVED once, 2026-11-18, in the storage survey:',
+                       '(SP11-NVME-WINDOW.md#72-what-the-s1-survey-read-on-2026-11-18-boot-22)', '; nothing else about the Wi-Fi'):
+            if phrase not in state:
+                problems.append(f'W8 lost {phrase[:50]!r}')
+        if re.search(r'bypass|VERIFIED|protected|works|translat', state):
+            problems.append('W8 claims more than an unmapped page')
+        return problems
+
+    def test_the_w8_row_says_one_thing_about_the_storage_survey_and_nothing_about_the_wifi(self):
+        self.assertEqual(self.w8_problems(self.text), [])
+        for old, new in (('UNKNOWN; this is the SMMU node', 'VERIFIED; this is the SMMU node'), ('whose page has no stage-1 mapping at EL2 (OBSERVED once,', 'which is in bypass (OBSERVED once,'),
+                         ('(OBSERVED once, 2026-11-18, in the storage survey:', '(VERIFIED, 2026-11-18, in the storage survey:'), ('; nothing else about the Wi-Fi |', '; the Wi-Fi works through it |'),
+                         ('#72-what-the-s1-survey-read-on-2026-11-18-boot-22', '#7-appendix-d-answered-the-per-machine-questions'), ('UNKNOWN; this is the SMMU node', 'bypass; this is the SMMU node')):
+            self.assertIn(old, self.text, f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.w8_problems(self.text.replace(old, new, 1)), f'a seeded fault went unseen: {old!r} -> {new!r}')
+
 
 class RepositoryCitations(unittest.TestCase):
     def test_every_citation_points_at_what_it_cites(self):

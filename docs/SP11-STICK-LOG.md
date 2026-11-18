@@ -5,7 +5,7 @@ the read-only survey S0 ran once on the unit (section 12), and its follow-up S0b
 Two later boots (6 and 7 of 2026-11-15, section 14) ran the third X2 test image and a payload that starts and stops the
 secondary cores, a three-step restart probe the same evening (section 14.1) ran a plain q1n1 page and that payload
 twice more, and a two-step restart control the next night ran only a read-only payload through the same runner; none
-of them read or wrote the stick's USB controller at EL2. Boot 14 (2026-11-17, section 15) ran the wrapper's GIC and stop variant and did not touch it either. Boots 15 and 16 (2026-11-17, section 16) ran the A1 No-Op DMA test, the first xHC register stores at EL2, on `usb_1_ss1`: in the filmed boot the screen went off at the end of the wait before the first RUN store, the unit stayed dark and no No-Op completed (cause UNKNOWN, no restart seen; boot 15 is from the operator's memory only). Boots 17 and 19 (2026-11-17, section 17) ran it again, on `usb_1_ss0` (boot 17) and on `usb_1_ss1` (boot 19, with the stick in the top port and no cable), and ended the same way; boot 18A, a read-only snapshot of both controllers, the clocks and the SMMU, ran to its end with no fault and no black-out (OBSERVED, one unit, one boot each; SC3 stands at 4 of 5). Boot 20 (2026-11-18, section 18) ran the SP11 monitor entry for the first time (M1 rung 1, plan `M1RUN-RUNG1`): the stock kernel executed on one vCPU for the monitor's 5 s box and printed its banner, and the monitor stopped it itself and returned with the registers and the GIC restored (OBSERVED, one unit, one boot, on video); the guest was, INFERRED, spinning in an early loop of the kernel's I/O Kit start-up that cannot end on an image with the panel withheld (one vCPU, 5 s, early boot only; the xHC and the stick's controller were not exercised). Boot 21 (2026-11-18, section 19) ran rung 2 with the panel handed to the guest as the kernel's console (plan `M1RUN-CONSOLE-RUNG2`): the stock kernel's boot log was on the panel, it ran through the I/O Kit start-up and the platform-driver matching on one vCPU, and the monitor stopped it itself at the first CPU-start write (`MON STOP S2_FAULT`, 2.04 s into the call; OBSERVED, one unit, one boot, on video; that the write is the CPU-start write is INFERRED, by address).**
+of them read or wrote the stick's USB controller at EL2. Boot 14 (2026-11-17, section 15) ran the wrapper's GIC and stop variant and did not touch it either. Boots 15 and 16 (2026-11-17, section 16) ran the A1 No-Op DMA test, the first xHC register stores at EL2, on `usb_1_ss1`: in the filmed boot the screen went off at the end of the wait before the first RUN store, the unit stayed dark and no No-Op completed (cause UNKNOWN, no restart seen; boot 15 is from the operator's memory only). Boots 17 and 19 (2026-11-17, section 17) ran it again, on `usb_1_ss0` (boot 17) and on `usb_1_ss1` (boot 19, with the stick in the top port and no cable), and ended the same way; boot 18A, a read-only snapshot of both controllers, the clocks and the SMMU, ran to its end with no fault and no black-out (OBSERVED, one unit, one boot each; SC3 stands at 4 of 5). Boot 20 (2026-11-18, section 18) ran the SP11 monitor entry for the first time (M1 rung 1, plan `M1RUN-RUNG1`): the stock kernel executed on one vCPU for the monitor's 5 s box and printed its banner, and the monitor stopped it itself and returned with the registers and the GIC restored (OBSERVED, one unit, one boot, on video); the guest was, INFERRED, spinning in an early loop of the kernel's I/O Kit start-up that cannot end on an image with the panel withheld (one vCPU, 5 s, early boot only; the xHC and the stick's controller were not exercised). Boot 21 (2026-11-18, section 19) ran rung 2 with the panel handed to the guest as the kernel's console (plan `M1RUN-CONSOLE-RUNG2`): the stock kernel's boot log was on the panel, it ran through the I/O Kit start-up and the platform-driver matching on one vCPU, and the monitor stopped it itself at the first CPU-start write (`MON STOP S2_FAULT`, 2.04 s into the call; OBSERVED, one unit, one boot, on video; that the write is the CPU-start write is INFERRED, by address). Boot 22 (2026-11-18, section 20) ran the first storage session, a read-only survey of the SSD's link, controller and admin queues and of the PCIe SMMU's mapping (the payloads `nvmesnap` and `smmuprobe`): the controller was enabled and ready with the firmware's two-entry admin queues, as on 2026-11-15, and the SMMU's page had no stage-1 mapping at EL2, so its state is still UNKNOWN (OBSERVED, one unit, one boot, from a film that started late; nothing was written). Boot 23 (2026-11-18, section 21) ran rung 3 of the monitor entry with one CPU asked for (`cpus=1`, plan `M1RUN-CPUS1-RUNG3`): the guest honoured it, the CPU-start stop of boot 21 is gone, the kernel ran on one vCPU for 2.17 s, further than boot 21, and the monitor stopped it at an exception that it took at EL1 (`MON STOP GUEST_EXC`), INFERRED to be the kernel's own debugger trap (OBSERVED, one unit, one boot, on video; the identity of the stop is INFERRED and the cause UNKNOWN); the rung's own verdict is NOT PASSED (c) by the letter of its record, and M1's is PASSED.**
 Nothing of the writer ran on a Surface Pro 11 beyond that test, a stand-alone payload of the q1n1 fork. When the study
 was written nothing in q1n1 or slbounce had been changed; stage S0 has since been built as an opt-in, read-only survey in
 the q1n1 fork (`docs/SP11-STK-SURVEY.md` there; branch `sa3eedo12-sp11-boot`, commits `8ed0c4f` and `8235433`) and has run
@@ -131,6 +131,13 @@ guarded log writer, and their tests (section 8).
     with the run, and not proven). The report page ended `MON STOP S2_FAULT` with `PC=0XFFFFFE00097A352C` and `A=0X300734004`, 2.04 s into a call of 5 s, clean (`MON REGS RESTORED=YES`, `GIC RESTORE CLEAN=YES`): a 32-bit write by the guest to an unmapped address, which matches by address the first CPU-start write of the A16 sources
     (INFERRED; its value was not printed), the plan's expected failure 5. The kernel registered six CPUs and ran one; the SPMI and PMU errors on the panel come from the monitor's empty models (INFERRED) and are not the stop. The stick held 18 of 18 staged files byte for byte but for the Shell's marker. The run shows nothing past the first CPU-start write:
     not CPU bring-up, not SMP, not a root device, not stability or performance, and not that macOS boots. The next options (a guest-input `cpus=1`, a monitor that accepts the CPU-start write, real secondaries) are INFERRED options and no decision; nothing further is authorised.
+16. **Boot 22 (2026-11-18; section 20; on video, which started at about `UPTIME 30 S`; OBSERVED, one unit, one boot): the first storage session, the S1 survey (plan `nvmesnap-s1`), read only, ran to its end: the SSD's link, controller and
+    admin queues as the firmware left them were read, and the PCIe SMMU's page was found unmapped at EL2.** The payloads `nvmesnap` and then `smmuprobe` (q1n1 commit `241b7ca`) printed their verdicts and ended with `FAULTS=0 REFUSED=0`: `CTRL=RUNNING QUEUES=READ LINK=UP` for the SSD on segment 6
+    (Gen4 x4, the data link layer link active, D0, no error status) and `MODE=UNKNOWN WHY=SMMU_PAGE_UNMAPPED` for the stream `0x60100`. The controller's `CAP`, `CC`, `CSTS`, `AQA`, `ASQ` and `ACQ` equal the X2 image's reading of 2026-11-15, so the state the firmware leaves repeats across two boots
+    (OBSERVED), and the two admin queue slots hold two Identify commands whose completions say success (the firmware's own DMA worked when it ran: INFERRED, indirect). The SMMU's page `0x15400000` has no stage-1 mapping at EL2 (a translation fault at level 3, no access made), so no SMMU register was read:
+    its mode (bypass, identity, translating or aborting) is UNKNOWN, and so is why the page is unmapped. The survey shows nothing about whether DMA reaches a monitor-owned extent after the takeover, nothing about writes and nothing about D11. The stick held 15 of 15 staged files byte for byte but for the Shell's marker.
+    No next step is authorised.
+17. **Boot 23 (2026-11-18; section 21; on video; OBSERVED, one unit, one boot): M1 rung 3, the console panel with `cpus=1` (plan `M1RUN-CPUS1-RUNG3`): the guest honoured `cpus=1`, the CPU-start stop is gone, and the monitor stopped the guest at an exception it took at EL1 (`MON STOP GUEST_EXC`) 2.17 s into the call; the record's rung 3 verdict is NOT PASSED (c) by its letter, M1's own (5a) PASSED.** The film shows one processor line (`processor 0`) where boot 21 had six, and a log queue sized for one CPU (INFERRED); the kernel's log went beyond boot 21's last line (the storage driver classes probed an `(ANS2)` provider; nothing says that any driver started). The report page ended `MON STOP GUEST_EXC` with `A=0X2000000` (`ESR_EL1`: exception class 0, an undefined instruction taken at EL1: INFERRED) on a clean report (`TICKS=41593665`, 2.166 s, `ABORTS=0`, registers and GIC restored). A host analysis after the boot INFERS (high confidence) that the exception is the guest kernel's own debugger trap, so that the kernel had entered its panic or debugger funnel; its text is printed only after the trap, which the monitor stopped on, so the panel shows none, and the cause is UNKNOWN. The run shows nothing past that: not that any driver started or finished, not a root device, not stability or performance, and not that macOS boots. No next step is authorised.
 
 ## 2. The problem and the requirements
 
@@ -697,7 +704,9 @@ any claim in section 3 about the unit is true beyond what section 12 records. Ha
 | q1n1 can address a device behind a hub | VERIFIED false (G03) | 7 |
 | The first xHC register stores at EL2 (the A1 No-Op test, boots 15, 16, 17 and 19, on both controllers, with the stick and the Mac's cable in several places): the page ended at `NEXT RUN` and the screen went off about 8 s later, and no No-Op completed | OBSERVED (boots 16, 17 and 19 on video; boot 15 from memory); that the RS store is the cause is INFERRED; the cause is UNKNOWN | 16, 17 |
 | A read-only snapshot of both controllers, the NoC and PHY clocks and the SMMU (boot 18A): 334 loads, no fault, no black-out; the clocks and power domains read on | OBSERVED (one unit, one boot) | 17 |
-| The SP11 monitor entry, run twice: boot 20 (rung 1, panel withheld) and boot 21 (rung 2, the panel handed as the kernel's console, plan `M1RUN-CONSOLE-RUNG2`): in boot 21 the stock kernel's boot log was on the panel, the kernel ran through its I/O Kit start-up and the platform-driver matching on one vCPU, and the monitor stopped it at the first CPU-start write (`MON STOP S2_FAULT`, 2.04 s into the call) | OBSERVED (one unit, one boot each, on video); that the faulting write is the CPU-start write is INFERRED, by address; nothing past it: not CPU bring-up, not SMP, not a root device, not stability or performance | 19 |
+| The first storage session, the S1 survey (boot 22, plan `nvmesnap-s1`: the read-only payloads `nvmesnap`, then `smmuprobe`): the SSD's link (Gen4 x4, the data link layer link active), its controller (enabled and ready, version 1.4.0) and its two admin queue slots (two Identify commands with success completions) read as the firmware left them, with `CAP`, `CC`, `CSTS`, `AQA`, `ASQ` and `ACQ` equal to the X2 image's reading of 2026-11-15; the PCIe SMMU's page `0x15400000` has no stage-1 mapping at EL2 (a translation fault at level 3), so no SMMU register was read | OBSERVED (one unit, one boot, from a film that started late); the decodes and the firmware's own DMA are INFERRED; the SMMU's mode, why its page is unmapped, the DMA reach after a takeover, writes and D11 are UNKNOWN | 20 |
+| The SP11 monitor entry, its first two runs: boot 20 (rung 1, panel withheld) and boot 21 (rung 2, the panel handed as the kernel's console, plan `M1RUN-CONSOLE-RUNG2`): in boot 21 the stock kernel's boot log was on the panel, the kernel ran through its I/O Kit start-up and the platform-driver matching on one vCPU, and the monitor stopped it at the first CPU-start write (`MON STOP S2_FAULT`, 2.04 s into the call) | OBSERVED (one unit, one boot each, on video); that the faulting write is the CPU-start write is INFERRED, by address; nothing past it: not CPU bring-up, not SMP, not a root device, not stability or performance | 19 |
+| The third run of the SP11 monitor entry (boot 23, M1 rung 3, plan `M1RUN-CPUS1-RUNG3`, `cpus=1` in the guest's command line): the guest honoured `cpus=1` (one processor line, a log queue sized for one CPU), the CPU-start stop of boot 21 is gone, the kernel's log went beyond boot 21's last line, and the monitor stopped the guest at an exception it took at EL1 (`MON STOP GUEST_EXC`, 2.17 s into the call) | OBSERVED (one unit, one boot, on video); the decode of the stop, and its identity as the guest kernel's own debugger trap (host analysis, high confidence), are INFERRED; the cause and anything past the stop are UNKNOWN; rung 3 is NOT PASSED (c) by the letter of its record, M1 PASSED by its own rows | 21 |
 | The SP11 monitor entry, run once (boot 20, M1 rung 1, plan `M1RUN-RUNG1`): the stock J700 26A428 kernel executed at EL1 on one vCPU until the monitor's own 5 s stop (`MON STOP WATCHDOG`), printed its banner and four early console lines, and the call returned with the registers and the GIC restored; no stage-2 abort | OBSERVED (one unit, one boot, on video); the guest was, INFERRED (high), stuck in an early loop of the kernel's I/O Kit start-up (18.5); one vCPU, 5 s, early boot only: nothing about SMP, userspace, a root device, a panel console, stability or performance; the NV2 record's regime UNKNOWN | 18 |
 | The stick's port decides which controller the firmware starts: the top port is `usb_1_ss1` (`Pci(0x81)`), the second port `usb_1_ss0` (`Pci(0x80)`) | INFERRED (the Shell's map line and the latched port word of four boots; the wiring was not traced) | 17 |
 | Any behaviour of the writer on the unit | not established | NOT RUN |
@@ -2171,9 +2180,296 @@ to it ends in a stage-2 fault with an IPA, which the record counts as success fo
 - Real secondaries (monitor and wrapper): the A16's path exists, but on the SP11 the wrapper cannot build the secondary configuration (UNIMPLEMENTED), the cores differ in MIDR by cluster (the NV2 gate per core, INFERRED), and the board restarted by itself after two of three `cpuon` boots (section 14; cause UNKNOWN). The note ranks it last.
 - The order of the note is its judgement, not a measurement: the guest-input change first, because it is the cheapest, the monitor change if it fails, real secondaries last. Each needs the operator's decision and a record of its own.
 
-**What follows.** The approval was for one boot and is spent. By the record, any further run needs a record of its own that the operator approves by its SHA-256, and nothing is authorised by this section. The xHC and stick-writer work stays paused (section 17.6): A1 and A2 were not exercised (the monitor's guest has no USB controller and no disk).
+**What follows.** The approval was for one boot and is spent. By the record, any further run needs a record of its own that the operator approves by its SHA-256, and nothing is authorised by this section. The xHC and stick-writer work stays paused (section 17.6): A1 and A2 were not exercised (the monitor's guest has no USB controller and no disk). Boot 22 (section 20) was not a run of the monitor: it was the read-only storage survey, S1.
+
+## 20. Result of boot 22, the S1 survey (plan `nvmesnap-s1`: the read-only payloads `nvmesnap`, then `smmuprobe`), on the unit: the SSD's link, controller and two admin commands as the firmware left them, and the page of the PCIe SMMU unmapped at EL2 (OBSERVED, one unit, one boot, from one film that started late)
+
+Boot 22 (2026-11-18, about 15:05 by the Shell's marker) is the first run of session 1 of the storage sessions ([SP11-STORAGE-PROVISIONING.md](SP11-STORAGE-PROVISIONING.md) section 9; the coordinator's notes call it the S1 survey, which is not the partition plan's item S1). The stick runner called two payloads of the q1n1 fork in one chain, `nvmesnap` first and `smmuprobe` last (the order their documents give: a read that hangs takes the earlier lines with it, and the SMMU read was the likelier staller). The operator approved the two payload files and their manifest by SHA-256 for one boot, at about 14:58; this log does not repeat the digests of the approval (the 16-digit prefixes that the runner prints are on the page). By the payloads' documents (q1n1 commit `241b7ca`; VERIFIED only as read in them) both are read only: no store but to their own stack, no doorbell, no `CC` write and no admin command, and `smmuprobe` reads no SMMU register when EL2's stage 1 does not map the SMMU's page. The boot asked two questions ([SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md) section 7: D5 to D8, D14 and D15): in what state did the firmware leave the SSD's link, endpoint and NVMe controller, and what were the two commands in its admin queue; and what does the PCIe SMMU do with the SSD's stream, `0x60100`. The film is one video of 15.25 s (59.94 frames a second, not CRC-verified) that starts late: its last frame reads `UPTIME 45 S`, so it starts at about `UPTIME 30 S` (the tens digit of its first frame's heartbeat is not legible), and the first 30 s of the boot (the Shell's countdown, the loading, the runner's start) are not on it. The `SHA=` of both payloads is on the page's `LOADED` lines. Everything below is OBSERVED (one unit, one boot, from that one film) unless a label says otherwise; the decodes of what a field means are INFERRED, and what was read in a document or a source on the host is VERIFIED only as read.
+
+### 20.1 The film in time
+
+| Video, time | What is on the panel |
+| --- | --- |
+| before the film (the first 30 s of `UPTIME`) | not filmed: the Shell's countdown, SL-Bounce, q1n1's UEFI entry, the loading of the two payloads and the start of the chain |
+| 0 s (about `UPTIME 30 S`) | q1n1's EL2 page (build `A9F00F9CCBB5`) with the runner's page at its right, drawn down to `PAYLOAD SMMUPROBE NEXT PCIE_CAPS AFTER 8 S`: the five runner lines, the whole page of `nvmesnap` and the first lines of `smmuprobe` |
+| by 7 s | the eight-second wait of that block is over and the first PCIe capability line of `smmuprobe` (`RP.PCIE`) is drawn |
+| 14 s to 15.25 s | the page is complete (both `PAYLOAD DONE` lines) and stays so; q1n1's `UPTIME` heartbeat counts on (`UPTIME 44 S` at 14 s, `UPTIME 45 S` in the last frame); no hang, no fault page, no restart |
+
+### 20.2 The page as read
+
+Read at full resolution on crops and frames (capital letters only; the addresses are this boot's assignments, not constants). The page holds the five runner lines, the 27 lines of `nvmesnap`, its `DONE`, the second payload's `VERIFY` and `CALL`, the 16 lines of `smmuprobe` and its `DONE` (52 lines):
+
+```text
+PAYLOAD LOADED INDEX=0 BASE=0XCECB2000 BYTES=19857 SHA=A3DF0F84DDF56B74 TYPE=1
+PAYLOAD LOADED INDEX=1 BASE=0XCECAC000 BYTES=14994 SHA=71F6FF4A583B0E78 TYPE=1
+PAYLOAD READY FILES=2 RANGES=5 CODE=2
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 0 A3DF0F84DDF56B74
+PAYLOAD NVMESNAP START CURRENTEL=0X8 FREQ=19200000 ECAM=0X70000000 WINDOW=0X70300000
+PAYLOAD NVMESNAP MAP RP=DEVICE.OS.NS1 EP=DEVICE.OS.NS1
+PAYLOAD NVMESNAP RP ID=0X11117CB CMDSTS=0X100003 CLASSREV=0X6040000 HDR=0X10000 BUSES=0X10100
+PAYLOAD NVMESNAP RP MEMWIN=0X70307030 CAPPTR=0X40
+PAYLOAD NVMESNAP EP ID=0XA80B144D CMDSTS=0X100006 CLASSREV=0X1080202 HDR=0X0 BAR0=0X70300004
+PAYLOAD NVMESNAP EP BAR1=0X0 CAPPTR=0X40
+PAYLOAD NVMESNAP NEXT CAPS AFTER 8 S
+PAYLOAD NVMESNAP RP.LINK LINK=GEN4.X4 TYPE=4 DLLA=1 LT=0 ASPM=0 LNKCAP=0X7B4C44 LNKCTLSTA=0XF0440048
+PAYLOAD NVMESNAP EP.PM PMCSR=0X8 D=0
+PAYLOAD NVMESNAP EP.LINK LINK=GEN4.X4 TYPE=0 ASPM=0 LNKCAP=0X437844 LNKCTLSTA=0X10440040
+PAYLOAD NVMESNAP GATE LINK=UP RPMEM=1 MEM=1 BME=1 D=0 BAR0=0X70300000 MAP=DEVICE.OS.NS1 WHY=NONE
+PAYLOAD NVMESNAP NEXT NVME_REGS AFTER 8 S
+PAYLOAD NVMESNAP NVME CAP=0X303C0301FF CSTS=0X1 CC=0X460001 VS=0X10400
+PAYLOAD NVMESNAP CAP MQES=511 CQR=1 TO=60 DSTRD=0 NSSRS=1 CSS=0X1 MPSMIN=0 MPSMAX=0 PMRS=0 CMBS=0
+PAYLOAD NVMESNAP CTRL VER=1.4.0 EN=1 RDY=1 CFS=0 SHST=0 CSS=0 MPS=0 AMS=0 SHN=0 IOSQES=6 IOCQES=4
+PAYLOAD NVMESNAP NEXT NVME_AQ AFTER 8 S
+PAYLOAD NVMESNAP NVME.AQ CSTS2=0X1 AQA=0X10001 ASQ=0XCF3E7000 ACQ=0XCF3E8000
+PAYLOAD NVMESNAP AQ ASQE=2 ACQE=2
+PAYLOAD NVMESNAP NEXT ADMIN_QUEUES
+PAYLOAD NVMESNAP ASQ AT=0XCF3E7000 MEMMAP_TYPE=4 MAP=WB.OS.NS1
+PAYLOAD NVMESNAP SQ0 DW0=0X120006 OPC=0X6 CID=0X12 NSID=0X1 PRP1=0XCECAF018 CDW10=0X0 CDW11=0X0
+PAYLOAD NVMESNAP SQ1 DW0=0X110006 OPC=0X6 CID=0X11 NSID=0X1 PRP1=0XCECB5018 CDW10=0X0 CDW11=0X0
+PAYLOAD NVMESNAP ACQ AT=0XCF3E8000 MEMMAP_TYPE=4 MAP=WB.OS.NS1
+PAYLOAD NVMESNAP CQ0 DW0=0X0 DW3=0X12 CID=0X12 P=0 SC=0X0 SCT=0 SQHD=0X1 SQID=0X0
+PAYLOAD NVMESNAP CQ1 DW0=0X0 DW3=0X10011 CID=0X11 P=1 SC=0X0 SCT=0 SQHD=0X0 SQID=0X0
+PAYLOAD NVMESNAP VERDICT CTRL=RUNNING QUEUES=READ LINK=UP WHY=NONE
+PAYLOAD NVMESNAP DONE NVME_GROUP_RAN LOADS=53 FAULTS=0 REFUSED=0 NVME_TRIED=8
+PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=53 FAULTS=0 REFUSED=0 LINES=27 DROPPED=0
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 1 71F6FF4A583B0E78
+PAYLOAD SMMUPROBE START CURRENTEL=0X8 FREQ=19200000 ECAM=0X70000000 SMMU=0X15400000
+PAYLOAD SMMUPROBE MAP RP=DEVICE.OS.NS1 EP=DEVICE.OS.NS1 SMMU=FAULT=0X7:TRANS_L3
+PAYLOAD SMMUPROBE RP ID=0X11117CB CMDSTS=0X100003 CLASSREV=0X6040000 HDR=0X10000 BUSES=0X10100
+PAYLOAD SMMUPROBE RP CAPPTR=0X40
+PAYLOAD SMMUPROBE EP ID=0XA80B144D CMDSTS=0X100006 CLASSREV=0X1080202 HDR=0X0 BAR0=0X70300004
+PAYLOAD SMMUPROBE EP BAR1=0X0 CAPPTR=0X40
+PAYLOAD SMMUPROBE NEXT PCIE_CAPS AFTER 8 S
+PAYLOAD SMMUPROBE RP.PCIE AT=0X70 HDR=0XB420010 TYPE=4 DEVCTLSTA=0X102930 LNKCAP=0X7B4C44
+PAYLOAD SMMUPROBE RP.PCIE LNKCTLSTA=0XF0440048 LINK=GEN4.X4 DLLA=1 LNKCAP2=0X180001E
+PAYLOAD SMMUPROBE RP.PCIE LNKCTL2STA2=0X21E0004
+PAYLOAD SMMUPROBE EP.PCIE AT=0X70 HDR=0X2B010 TYPE=0 DEVCTLSTA=0X1030 LNKCAP=0X437844
+PAYLOAD SMMUPROBE EP.PCIE LNKCTLSTA=0X10440040 LINK=GEN4.X4 LNKCAP2=0X8180001E LNKCTL2STA2=0X11E0004
+PAYLOAD SMMUPROBE RP.AER AT=0X100 UESTA=0X0 UEMASK=0X4400000 CESTA=0X0 CEMASK=0XE000 ROOTERR=0X0
+PAYLOAD SMMUPROBE EP.AER AT=0X100 UESTA=0X0 UEMASK=0X400000 CESTA=0X0 CEMASK=0XE000
+PAYLOAD SMMUPROBE VERDICT STREAM=0X60100 MODE=UNKNOWN WHY=SMMU_PAGE_UNMAPPED
+PAYLOAD SMMUPROBE DONE SMMU_GROUP_SKIPPED LOADS=39 FAULTS=0 REFUSED=0 SMMU_TRIED=0
+PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=39 FAULTS=0 REFUSED=0 LINES=16 DROPPED=0
+```
+
+The two `LINES=` counts are the payloads' own and equal the 27 `NVMESNAP` and 16 `SMMUPROBE` lines of the block (arithmetic). `LOADS=53` and `LOADS=39` are the guarded loads each payload made, with `FAULTS=0 REFUSED=0` in both. The last digit of `NVME_TRIED` read 8 on two crops and in the full frame; the counter is the payload document's and is not decoded here. The runner's page also carries q1n1's usual EL2 page on its left half (build `A9F00F9CCBB5`, `MIDR` `0x512F0011`, `HCR_EL2` `0x88000010` with `E2H=0 TGE=1`), as in earlier boots; this section does not transcribe it.
+
+### 20.3 The verdict against the payloads' outcome tables, and the plan's stop rules
+
+| What | The rule (read in the payload documents and in section 9 of the storage plan) | What the page and the host check show | Label |
+| --- | --- | --- | --- |
+| `nvmesnap`'s verdict | `CTRL=RUNNING`, `QUEUES=READ`, `LINK=UP` is the row for a controller that is enabled and ready, with the link proven up and the two commands and completions of the admin queues shown | printed: `VERDICT CTRL=RUNNING QUEUES=READ LINK=UP WHY=NONE`, after `DONE NVME_GROUP_RAN` | OBSERVED (the page); VERIFIED (the row, as read) |
+| `smmuprobe`'s verdict | `UNKNOWN` with `SMMU_PAGE_UNMAPPED`: the MMU said, before any read, that EL2's stage 1 does not map the SMMU's register page; nothing of the SMMU was read, so no `NEXT SMMU_REGISTERS` line and no wait | printed: `MAP ... SMMU=FAULT=0X7:TRANS_L3`, no `NEXT SMMU_REGISTERS` line, `VERDICT STREAM=0X60100 MODE=UNKNOWN WHY=SMMU_PAGE_UNMAPPED`, `DONE SMMU_GROUP_SKIPPED ... SMMU_TRIED=0` | OBSERVED (the page); VERIFIED (the row, as read) |
+| both payloads ended | `RETURN=0X0 STACK=OK`, `FAULTS=0 REFUSED=0 DROPPED=0` on `PAYLOAD DONE INDEX=0` and `INDEX=1` | printed as shown | OBSERVED |
+| the plan's stop rules for session 1 | any `FAULT` on the first read of a group; no `DONE` within 60 s of `CALL`; Windows not booting normally afterwards; a verdict of abort | no `FAULT`, no `REFUSED`; no hang on the film and the page complete when it ends; the time from `CALL 0` to the last `DONE` is not on the film (it started late) and Windows' boot afterwards is not recorded here (UNKNOWN) | OBSERVED (the absence of a fault); UNKNOWN (the rest) |
+| the stick (host check, read only, after the boot) | no file of the staged list changed | every line of `shasum -a 256 -c` over the staged list (15 files) is OK; the only changes since the staging at 15:01 are `SP11\DONE1.TXT` (36 bytes, the Shell's marker `AUTORUN nvmesnap-s1 STEP 1 STARTED`) and macOS's own `.fseventsd` entry | OBSERVED (host check, one boot) |
+
+### 20.4 What the page shows, field by field (the decodes are INFERRED)
+
+| Item | As read | What it means |
+| --- | --- | --- |
+| where it ran | `CURRENTEL=0X8`, `FREQ=19200000`, `ECAM=0X70000000`, `WINDOW=0X70300000` | EL2 (`CurrentEL` 0x8); the counter at 19.2 MHz; the ECAM base of segment 6 and the start of the window in which BAR0 may be read (the payload's argument) |
+| the two configuration pages | `MAP RP=DEVICE.OS.NS1 EP=DEVICE.OS.NS1` | EL2's stage 1 maps both as Device memory (`OS` outer-shareable and `NS1` the NS bit: the abbreviations are read in the payload's source comment, VERIFIED as read) |
+| the root port | `ID=0X11117CB` (vendor `0x17CB`, device `0x0111`), `CLASSREV=0X6040000` (class `0x060400`, a PCI bridge, revision 0), `HDR=0X10000` (header type 1), `BUSES=0X10100` (primary 0, secondary 1, subordinate 1), `MEMWIN=0X70307030` (a memory window of `0x70300000` to `0x703FFFFF`), `CMDSTS=0X100003` | the same ids as in the X2 image's reading of 2026-11-15; the window holds BAR0; the command word `0x0003` is I/O and memory space on and bus master off (the firmware's own view of this root port before ExitBootServices, on 2026-11-15, listed `0x0007`: [SP11-X2-V3.md](SP11-X2-V3.md)); what the bit means for the endpoint's DMA through this root port is not examined here: UNKNOWN |
+| the endpoint | `ID=0XA80B144D` (vendor `0x144D`, device `0xA80B`), `CLASSREV=0X1080202` (class `0x010802`, NVMe, revision 2), `HDR=0X0`, `CMDSTS=0X100006` (command `0x0006`: memory space and bus master on; status `0x0010`: capability list), `BAR0=0X70300004` and `BAR1=0X0` | one 64-bit memory BAR at `0x70300000`, inside the root port's window; the endpoint's command word equals the one of the X2 image |
+| link and power | `RP.LINK` and `EP.LINK`: `GEN4.X4`; the port's `DLLA=1 LT=0`, `LNKCTLSTA=0XF0440048` (status `0xF044`: current speed 4, width 4, data link layer link active); the endpoint's `LNKCTLSTA=0X10440040` (status `0x1044`: speed 4, width 4); `ASPM=0` at both ends; `EP.PM PMCSR=0X8 D=0` | Gen4 x4 with the data link layer link active, no training in progress, no ASPM, the endpoint in D0 |
+| the gate | `GATE LINK=UP RPMEM=1 MEM=1 BME=1 D=0 BAR0=0X70300000 MAP=DEVICE.OS.NS1 WHY=NONE` | the payload's conditions for reading the controller held (link up, bridge and endpoint memory space on, endpoint bus master on, D0, BAR0 inside both windows, its page mapped as Device) |
+| controller | `CAP=0X303C0301FF`: `MQES=511 CQR=1 TO=60 DSTRD=0 NSSRS=1 CSS=0X1 MPSMIN=0 MPSMAX=0 PMRS=0 CMBS=0`; `CSTS=0X1`; `CC=0X460001`; `VS=0X10400`; `CTRL VER=1.4.0 EN=1 RDY=1 CFS=0 SHST=0 CSS=0 MPS=0 AMS=0 SHN=0 IOSQES=6 IOCQES=4`; `CSTS2=0X1` | an NVMe 1.4.0 controller that is enabled and ready, not fatal, no shutdown, with 512 entries possible per queue, 4 KiB pages, a ready timeout of 30 s (60 units of 500 ms), no controller memory buffer or persistent memory region; the second `CSTS` reading equals the first |
+| admin queues | `AQA=0X10001`, `ASQ=0XCF3E7000`, `ACQ=0XCF3E8000`, `ASQE=2 ACQE=2`; both pages `MEMMAP_TYPE=4` (boot-services data) and mapped `WB.OS.NS1` | two entries in each queue, in memory that the map calls boot-services data and EL2 maps write-back |
+| the two commands | `SQ0 DW0=0X120006 OPC=0X6 CID=0X12 NSID=0X1 PRP1=0XCECAF018 CDW10=0X0` and `SQ1 DW0=0X110006 OPC=0X6 CID=0X11 NSID=0X1 PRP1=0XCECB5018 CDW10=0X0`; `CQ0 CID=0X12 P=0 SC=0X0 SCT=0 SQHD=0X1` and `CQ1 CID=0X11 P=1 SC=0X0 SCT=0 SQHD=0X0` | two Identify commands (opcode 6) for namespace 1 with `CDW10` 0 (the namespace form), whose completions have status success: the firmware's own DMA worked when it ran. Slot 0 holds the later command (CID `0x12`) with phase 0 and slot 1 the earlier (CID `0x11`) with phase 1, which reads as a queue that has wrapped once, so at least three commands were issued and the first is no longer in the ring |
+| PCIe capability and AER | `RP.PCIE` and `EP.PCIE` at `0x70`, `RP.AER` and `EP.AER` at `0x100`; `UESTA=0X0`, `CESTA=0X0`, `ROOTERR=0X0` | no uncorrectable or correctable error status and no root error at either end |
+| the SMMU | `SMMU=0X15400000`, `MAP ... SMMU=FAULT=0X7:TRANS_L3`, `VERDICT STREAM=0X60100 MODE=UNKNOWN WHY=SMMU_PAGE_UNMAPPED`, `SMMU_TRIED=0` | the question `AT S1E2R` put to EL2's stage 1 about the SMMU's page ended in a translation fault at level 3 (fault status `0x7`, which the payload prints as `TRANS_L3`): the page has no stage-1 mapping at EL2; no access was made; no SMMU register was read; the stream is `0x60100` as the unit's IORT declares it |
+
+### 20.5 What this settles, what it does not, and what it changes
+
+**What it settles (OBSERVED, one unit, one boot; the decodes are INFERRED).**
+
+- The unit's own SSD (vendor `0x144D`, device `0xA80B`) sits behind the ECAM at `0x70000000` (PCIe segment 6 by the MCFG entry of [SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md) section 7.1: the page prints no segment number), behind the root port 00:00.0 (`0x17CB:0x0111`) as endpoint 01:00.0, with BAR0 at `0x70300000`: Gen4 x4 with the data link layer link active, D0, memory space and bus mastering on at the endpoint, no error status at either end.
+- The NVMe controller runs after the bounce: `CC.EN` 1, `CSTS.RDY` 1, `CFS` 0, version 1.4.0, with a two-entry admin queue at `0xCF3E7000` and `0xCF3E8000`.
+- **The firmware-left state repeats across two boots:** `CAP`, `CC`, `CSTS`, `AQA`, `ASQ` and `ACQ` (and `VS` and BAR0) equal what the X2 image read on 2026-11-15, in another image and another boot ([SP11-NVME-WINDOW.md](SP11-NVME-WINDOW.md) section 7.1). Two boots agree; that does not make them constants, and the record keeps them per run.
+- The two queue slots hold two Identify commands whose completions say success: the controller read them and wrote the completions in RAM, so DMA reached the firmware's queue memory when the firmware ran (INFERRED, indirect: it says nothing about EL2's own state or a buffer of ours).
+- **The page of the PCIe SMMU, `0x15400000`, has no stage-1 mapping at EL2:** the walk ended in a translation fault at level 3 and made no access. It is UNMAPPED, not aborting, and `smmuprobe` skipped the SMMU's registers by its own rule. This fits the X2 image's two reads of that page that faulted (2026-11-14 and 2026-11-15), without proving the same cause (INFERRED).
+
+**What it does not settle (UNKNOWN unless a label says otherwise).**
+
+- The SMMU's mode for the SSD's stream (bypass, identity, translating or aborting): no register was read, so `MODE=UNKNOWN` is the whole answer (D7). Nor is it shown that the SMMU is protected: the page is only unmapped at EL2's stage 1, and why is UNKNOWN (a firmware-owned page, or simply a page that is not in EL2's map).
+- Whether the SSD's DMA reaches a monitor-owned extent after ExitBootServices and the hand-over of the SMMU (D14): UNKNOWN. The first read-only takeover with an Identify into our own buffer would decide it, and it needs a write to the controller (a quiesce) that is not authorised.
+- Anything about writes: the boot wrote nothing to the SSD, the SMMU or any device register (by the payloads' documents; the stick's own marker file is the Shell's). Whether Windows boots normally after a controller reset (D11) is UNKNOWN and was not exercised.
+- The meaning of `NVME_TRIED`, the Identify data, the SSD's namespace and LBA format, its serial number and its write cache: not read.
+- Whether the root port's bus-master bit (clear in this reading, set in the firmware's own view of 2026-11-15) matters for the endpoint's DMA: UNKNOWN.
+- Anything about the Wi-Fi module beyond this: it shares this SMMU node ([SP11-WIFI-STUDY.md](SP11-WIFI-STUDY.md)), and its own state was not read.
+
+**What it changes in the plan (a design document, the coordinator's file `storage-core-report.md`, section 9: EXPERIMENTAL, not committed).** An SMMU that cannot be read at EL2 gives the takeover core no mode and no DMA-proof flag: no takeover can claim DMA reach until the SMMU is read, and the first step is to find out why the page is unmapped. An enabled and ready controller means that a takeover must quiesce it (a shutdown, then `CC.EN` 0: a reset that the firmware's driver never expects), which counts against D11. That BAR0 repeated lets the descriptor pin it, still re-proved each run.
+
+### 20.6 The next options (INFERRED; none is a decision, none is authorised, none is run)
+
+- **Read the SMMU:** a q1n1 or monitor change that gives EL2's stage 1 a Device mapping of the SMMU's page (not a payload: a payload cannot add a mapping), so that `smmuprobe`'s register group can run read only. Its own code, review and authorisation; the coordinator's file `storage-delta.md` calls the stage-1 map part of N2 and an SMMU write path N2b, which only a verdict of translating without a mapping or of abort would need.
+- **The first read-only takeover** (a quiesce, queues of the monitor's own, one Identify into a buffer of ours): the only run that decides D14 for a buffer of ours; it writes the controller, D11 gates it and it is UNIMPLEMENTED (the takeover core exists on the host only).
+- **Neither changes the stick-writer pause** (section 17.6) or the monitor ladder (sections 18 and 19): the S1 survey was independent of the monitor and of the xHC.
+- The order is the plan's judgement, not a measurement: the SMMU read first, because it needs no write to the SSD's controller. Each step needs the operator's decision, and a record or an authorisation of its own.
+
+**What follows.** The approval of S1 was for one boot and is spent. Nothing is authorised by this section. Boot 23 (section 21) was the next run of the monitor entry, rung 3.
+
+## 21. Result of boot 23, M1 rung 3 (plan `M1RUN-CPUS1-RUNG3`, `cpus=1`), on the unit: the guest honoured `cpus=1`, the CPU-start stop is gone, and the monitor stopped the guest at an exception it took at EL1 (`MON STOP GUEST_EXC`) 2.17 s into the call, INFERRED to be the kernel's own debugger trap (OBSERVED, one unit, one boot; on video; the decode and the identity of the stop are INFERRED, and why the kernel entered its debugger funnel is UNKNOWN)
+
+Boot 23 (2026-11-18, about 15:59 by the unit's clock) is the third run of the SP11 monitor entry and the first with a CPU-count word in the guest's command line; the S1 survey (boot 22, section 20) was staged and run before it. After boot 21 (section 19: the monitor stopped the guest at what is INFERRED, by address, to be its first CPU-start write) the operator approved a record of its own for rung 3 by its SHA-256 at about 15:05 (this log does not repeat the digest). By the record that approval covers one boot, and it also decides the store classes `ram`, `el2_sysreg` and `gic` (D4) for it and the panel choice of D9 (the panel handed, `serial=2`, the kernel stock). The record changes one word in the guest and nothing in the programs: `cpus=1` after rung 2's command line (`-v debug=0x8 serial=2 cluster_power=0 wdt=-1 cpus=1`), which asks XNU to run with one CPU, so that only processor 0 exists and the kernel does not make the write that stopped boot 21 (INFERRED from the public XNU source; the A16's record says that a reduced CPU set once tripped a PMGR assertion earlier in boot, which is UNKNOWN for this guest). `GUEST.DAT` is 118,908,480 bytes in 46 chunks, the size of boot 21's, with its own digest (its 16-digit prefix is on the page's `LOADED` line); `SNAPMON.BIN` and `SNAPREP.BIN` are boots 20's and 21's (the same 16-digit prefixes); the time box is 5 s and the label is `M1RUN-CPUS1-RUNG3`. The record names six results for rung 3 (its section 5d) beside M1's own rows (its section 5a; [SP11-MONITOR-PORT.md](SP11-MONITOR-PORT.md) section 2). The film is one video of 25.19 s (59.94 frames a second, 3840 x 2160, not CRC-verified) that the operator stopped about 7 s after the report page appeared; the record asked for 60 s, the page is static from about 18.3 s so nothing of it was lost, and what the unit did after the film ended is not on it. Everything below is OBSERVED (one unit, one boot, from one video) unless a label says otherwise; the decodes are INFERRED, and what was read in a source on the host is VERIFIED and says nothing about hardware.
+
+### 21.1 The film in time
+
+| Video, time | What is on the panel |
+| --- | --- |
+| 0 to 4 s | the Shell's countdown |
+| 5 to 16 s | q1n1's EL2 page (build `A9F00F9CCBB5`, `UPTIME 0 S`, framebuffer `0xE4800000`, the `SP11 EBS` rows R0 to R7) with the runner's page at its right: the five `PAYLOAD LOADED` lines (payload 0, 447,855 bytes, `SHA=1D32F5071506A00C`; payload 1, 58,977 bytes, `SHA=EE86676001D89CF6`; `GUEST.DAT`, 118,908,480 bytes, `SHA=A7E159AD6C18832C`; `PIN.DAT`, 1,024 bytes, `SHA=339D64BE6D857808`; `REPORT.DAT`, 528,384 bytes, `SHA=2AF25E8AC647A885`), `READY FILES=5 RANGES=8 CODE=2`, `PAYLOAD VERIFY=OK`, `PAYLOAD CALL 0 1D32F5071506A00C`, the wrapper's stage lines to `STAGE=PIN_OK LABEL=M1RUN-CPUS1-RUNG3 CHUNKS=46` and `NEXT GIC STORES AFTER 8 S`, and at about 16.0 s the `MON CALL` line |
+| about 16.05 to 18.2 s | the panel is cleared and the kernel's log fills it; the first frames after the clear replay the kernel's message buffer from its start (the bracketed timestamps begin at about 45.4 s of the kernel's own clock) |
+| about 18.2 s | the SNAPREP report page appears at the right of the kernel's text, about 2.2 s after the `MON CALL` line (the call took 2.166 s) |
+| 18.3 to 25.19 s | the page is static and the kernel's text stays; q1n1's heartbeat reads `UPTIME 18 S` at the end of the film; no black-out and no restart in the 7 s after the page that the film holds |
+
+### 21.2 The report page as read
+
+The kernel's text had painted over the first lines of the runner's page, so the page that is left starts at the wrapper's `MON RET` line (the lines before it were read before the clear, 21.1). Read on four crops at full resolution (capital letters only; the addresses are this boot's allocations, not constants; the page is cut at 100 columns):
+
+```text
+SNAPMON MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=41593665 STACK=10888/262144
+SNAPMON MON REGS RESTORED=YES
+SNAPMON GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRC VBAR=NONE EL1=NONE
+SNAPMON MON VERDICT=RETURNED FLAGS=0XF SUB=7
+SNAPMON STAGE=DONE RETURN=0
+PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=2 FAULTS=0 REFUSED=0 LINES=29 DROPPED=0
+PAYLOAD VERIFY=OK
+PAYLOAD CALL 1 EE86676001D89CF6
+SNAPREP MONITOR RETURNED STAGE=DONE
+SNAPREP VERDICTS PIN=OK GUEST=OK POLICY=0X3 LINES=29
+SNAPREP REGS EL=0X8 MIDR=0X512F0011 MPIDR=0X80000000 CNTFRQ=19200000
+SNAPREP REGS HCR=0X88000010 SCTLR=0X100030C5183D TCR=0X80843514
+SNAPREP CHUNKS TOTAL=46 COPIED=46 HASHED=27 BYTES_COPIED=161041856 BYTES_HASHED=118904848
+SNAPREP TICKS HZ=19200000 PLACED=38331 COPIED=31120213 HASHED=46577566
+SNAPREP PLACE BASE=0X880000000 SIZE=0X2A000000 DESC=221 DBASE=0X880000000 DPAGES=0X780000
+SNAPREP GUEST.DAT BASE=0XC5CFE000 BYTES=118908480
+SNAPREP MON VERDICT=RETURNED FLAGS=0XF SUB=7
+SNAPREP MON IMAGE OFF=0X20000 BYTES=316783 SHA=0XAD4EBAA27314296C BOX_S=5 ESF=0X0 GPUF=0X0
+SNAPREP MON IDS MMFR2=0X1201011112101011 MMFR4=0X0 REVIDR=0X0
+SNAPREP MON IDS ISAR1=0X110111101211052 ISAR2=0X10000012
+SNAPREP MON CALL X0=0XCE7D6000 X1=0X89B000000 X2=0XF000000 X3=0X88000C000 X4=0X0 SP=0XCE856000
+SNAPREP MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=41593665 STACK=10888/262144
+SNAPREP MON REGS RESTORED=YES
+SNAPREP MON STATUS=OK ENTERED=0X1
+SNAPREP MON COUNTS EVENTS=512 TRAPS=135562 ABORTS=0 STEPS=989 CALLS=65209 DROPPED=96264
+SNAPREP MON STOP GUEST_EXC PC=0XFFFFFE000B8C2288 A=0X2000000 B=0XFFFFFEA937FDC000 C=0XFFFFFE000B8C22
+SNAPREP MON EXIT PC=0XFFFFFE000B86C000 SPSR=0X604003C5 ESR=0X8200000F FAR=0X0
+SNAPREP MON EV 0 OTHER PC=0X0 A=0X1201201023111111 B=0X21 C=0X512F0011
+SNAPREP MON EV 1 OTHER PC=0X1 A=0X1201011112101011 B=0X0 C=0X2100122100001024
+SNAPREP MON EV 2 MONITOR PC=0XFFFFFE000C2640AC A=0XF B=0X0 C=0X1
+SNAPREP MON EV 3 MONITOR PC=0XFFFFFE000C22B9E0 A=0X12 B=0XFFFFFE000B86FBB0 C=0XFFFFFE0006F84000
+SNAPREP MON EV 4 SYSREG PC=0XFFFFFE000C2448CC A=0X3A7FE2 B=0X0 C=0X0
+SNAPREP GIC GICD CTLR=0X10 ARE=1 DS=0 G1A=0 NEED_G=1 TYPER=0XF87F051E IIDR=0X401043B
+SNAPREP GIC GICR IDX=0 TYPER=0XD0000E7 WAKER=0X0 ISEN=0X4E800001 PEND=0 ACT=0
+SNAPREP GIC CPU SRE=0XF EOIMODE=1 PMR=0XF8 BPR1=0X3 IGRPEN1=0 PRIO=0XA0 CFG=0X0 GRP=0 CTL=0X0
+SNAPREP GIC NEW GICD=0X13 RB=0X12 ISEN=0X4000000 PRIO=0X80 PMR=0XF8 IGRPEN1=1
+SNAPREP GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRC VBAR=NONE EL1=NONE
+PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=1 FAULTS=0 REFUSED=0 LINES=29 DROPPED=0
+```
+
+The 29 `SNAPREP` lines are what `PAYLOAD DONE INDEX=1` counts (`LINES=29`), and, as in boot 21 (`serial=2`), the page has no `MON CON` line. Against boot 21's page the differences are the guest's allocations (`X0`, `SP`), `TICKS`, `TRAPS`, `STEPS`, `CALLS`, `DROPPED` and the stop; the five events, the GIC lines, the ID words and the stack used (10,888 of 262,144 bytes) are boot 21's, word for word. Three limits of the reading. The `MON STOP` line is cut by the page's width: its full text is 94 characters (arithmetic, with a 16-digit `C=`), the runner adds the 8-character prefix `SNAPREP `, and 102 columns do not fit the page's 100, so the last two hex digits of `C=` are not on the page; `REPORT.DAT` is a RAM area that the run does not write back to the stick (row f of 21.3: the staged file on the stick is unchanged), so they cannot be read from the stick either. The `TICKS HZ` line is partly under a reflection of the panel (the last digit of `COPIED=` and the first letters of `HASHED=` are read, not certain), and nothing in this section depends on it. The `MON EXIT` line is the monitor's own fault and not the guest's (21.4). The whole call took 41,593,665 ticks of the 19.2 MHz counter, 2.166 s (arithmetic), against the box of 5 s (96,000,000 ticks): the box was not used up. The comparison with boot 21:
+
+| Item | Boot 21 (rung 2) | Boot 23 (rung 3) |
+| --- | --- | --- |
+| the guest's command line | `-v debug=0x8 serial=2 cluster_power=0 wdt=-1` | the same and `cpus=1` |
+| `TICKS` at 19.2 MHz | 39,245,286 (2.044 s) | 41,593,665 (2.166 s), 2,348,379 ticks (0.122 s) more |
+| `TRAPS` and `CALLS` | 136,424 and 65,955 | 135,562 and 65,209 |
+| `ABORTS`, `STEPS` and `DROPPED` | 0, 925 and 96,475 | 0, 989 and 96,264 |
+| the stop | `MON STOP S2_FAULT` with `A=0X300734004` | `MON STOP GUEST_EXC` with `A=0X2000000` |
+
+`TRAPS`, `CALLS`, `STEPS` and `DROPPED` are cumulative counts, not rates. `ABORTS` counts the stage-2 aborts that the monitor handled on its monitor-call pages (VERIFIED, read in `probes/xnuboot/trap_dispatch.c`), so `ABORTS=0` says that no such abort happened, as in boots 20 and 21; why `STEPS` is 989 where boot 21's was 925 is UNKNOWN.
+
+### 21.3 The verdict against the record's results and rows a to g
+
+The record names six results for rung 3 (its section 5d) beside M1's own rows (its section 5a; [SP11-MONITOR-PORT.md](SP11-MONITOR-PORT.md) section 2). The classification is applied by the letter.
+
+| Result or row | The rule | What the page and the film show | Label |
+| --- | --- | --- | --- |
+| M1 PASSED (5a) | `MON STATUS=OK ENTERED=0X1` and a `MON STOP` of kind `WATCHDOG`, `S2_FAULT` or `GUEST_EXC`, with `C=` a kernel address on `GUEST_EXC`, on a clean report (none of `MON REGS RESTORED=NO`, `WINDOW OVERRUN`, `STACK FULL`, `GIC RESTORE CLEAN=NO`); rows a, c, d and e hold and the coordinator checks f and g | held: `MON STATUS=OK ENTERED=0X1`, `MON STOP GUEST_EXC` with `C=0XFFFFFE000B8C22` (a kernel address: row c below), `MON REGS RESTORED=YES`, `GIC RESTORE CLEAN=YES`, and none of the finding lines on the page; f and g below | OBSERVED |
+| rung 3 PASSED | `processor 0` the only processor line of the replayed log; the stop is not an `S2_FAULT` with `A=` in `0X300734004..0X30073400C`; no panic text on the panel; the log reaches boot 21's last line or goes beyond it; and the stop is a later device fault (`S2_FAULT` at another address, `A=` not 0, outside the panel range) or the box end (`WATCHDOG`, the kernel still running), on a clean report | not met: one processor line, no CPU-start stop, no panic text on the panel, the log beyond boot 21's last line and a clean report all held (21.6), but the stop is `GUEST_EXC`, which PASSED does not allow | OBSERVED |
+| rung 3 NOT PASSED (a) | the processor 1 to 5 lines still printed and boot 21's stop again: 26A428 did not honour `cpus=1` | not the case: `cpus=1` was honoured (21.6) and the stop is not boot 21's | OBSERVED |
+| rung 3 PANIC TEXT (b) | an ApplePMGR or CLPC assertion, or another panic, is on the panel | not the case: no `panic(cpu` text was read in the frames examined; the host analysis (21.5) INFERS that the kernel had entered its debugger funnel and that the monitor stopped it at the trap, before any text was printed | OBSERVED (the absence in the frames examined); INFERRED (why) |
+| rung 3 PARTIAL | only `processor 0` in the log and still the CPU-start stop | not the case: the CPU-start stop is gone | OBSERVED |
+| rung 3 NOT PASSED (c) | 'any other end that none of the results above names' (the record's words); the coordinator reads it first | this is the result, by the letter of the record's 5d: `MON STOP GUEST_EXC` is not among the ends that PASSED allows and no other result names it | OBSERVED (the page); the classification is the record's rule applied as written |
+| a | the runner loads the files and both hashes agree | held: `PAYLOAD VERIFY=OK` for both payloads; the five 16-digit prefixes on the film are those of the staged files (the coordinator read them against the stage tree) | OBSERVED |
+| b | the wrapper refuses on any precondition mismatch | not exercised: nothing mismatched, so no `REFUSED` line, which is no pass | OBSERVED (the absence) |
+| c | the guest ran: `MON STATUS=OK ENTERED=0X1`, and the stop's PC inside the kernel image (on `GUEST_EXC`, `PC=` is the guest's `x30` and `C=` the address to check) | held: `x30` (`0xFFFFFE000B8C2288`) and the 14 digits of `C=` that the page keeps (`0xFFFFFE000B8C22`, so an address in `0xFFFFFE000B8C2200` to `0xFFFFFE000B8C22FF`) lie in the kernelcache's `__TEXT_EXEC` range (`0xFFFFFE0008A08000` to `0xFFFFFE000C264000`; VERIFIED, host arithmetic on the local copy, as in 19.3), and the kernel printed its boot log | OBSERVED (the page); VERIFIED (the range, host) |
+| d | the run ended by the monitor's own stop (`WATCHDOG`, `S2_FAULT` or `GUEST_EXC`), never a hang or a reset | held: `MON STOP GUEST_EXC` and the monitor returned (`MON RET=0X0 STATUS=0X0`) | OBSERVED |
+| e | the stop came inside the time box (96,000,000 ticks) | held, and proved: `TICKS=41593665` is 2.166 s | OBSERVED |
+| f | no disk was written: the stick is byte-identical but for the Shell's marker and macOS's own `.fseventsd` entry | held: every file of the staged list passes `shasum -a 256 -c` from the stick's root (18 of 18, every line OK, exit 0), `REPORT.DAT` still has the digest of the all-zero staged file (the prefix `2AF25E8AC647A885` of the film's `PAYLOAD LOADED` line: a run does not write the report back, because `REPORT.DAT` is loaded into RAM, so the page is the only record of the run, as after boots 20 and 21), and the only changes since the staging at 15:12 are `SP11\DONE1.TXT` (42 bytes, the Shell's marker `AUTORUN M1RUN-CPUS1-RUNG3 STEP 1 STARTED`) and macOS's own `.fseventsd` entry; the unit's own storage was not read back (NOT RUN) | OBSERVED (host check of the stick, read only, about 16:32, one boot) |
+| g | the A16 monitor is byte-identical with the new gate off | held as a host source comparison: the monitor sources probes/ compat/ shadow/ config/ gpu/ drivers/ are unchanged by git diff between ea59368 (the tree of boot 20) and 3f48b0a (the source of the record) (VERIFIED, host; says nothing about hardware); the byte comparison of the builds was not repeated for this tree (NOT RUN) | VERIFIED (host) |
+
+M1's own verdict (record, 5a) is the same page's: M1 PASSED by the rows a, c, d and e of the page, with row f held by the host check of the stick and row g held on the host. Rung 3's own verdict is **NOT PASSED, (c), by the letter of 5d**: the record's PASSED result allows a later device fault or the box end as the stop and `GUEST_EXC` is neither, and (c) is 'any other end that none of the results above names'. It is not (a): `cpus=1` was honoured. It is not (b): no panic text was seen on the panel. It is not PARTIAL: the CPU-start stop is gone. The classification is the record's rule applied as written; it is neither softened nor upgraded here. The approval is spent (`PAYLOAD CALL 0` is on the film), and gate X4's "kernel executes" stays at PARTIAL (one vCPU, 2.17 s, further than boot 21; [SURFACE-PRO-11.md](SURFACE-PRO-11.md) section 6.4).
+
+### 21.4 What the page decodes to (the decode is INFERRED)
+
+`MON STOP GUEST_EXC` is the event 'XNU took its own exception': the monitor records the guest's `x30`, `ESR_EL1`, `FAR_EL1` and `ELR_EL1` as the stop line's `PC=`, `A=`, `B=` and `C=` (`probes/xnuboot/report_layout.c`, line 139, and `probes/xnuboot/trap_dispatch.c`, lines 262 to 340; VERIFIED, read in the sources, not run on the unit).
+
+| Field | As read | What it is (INFERRED unless a label says otherwise) |
+| --- | --- | --- |
+| `PC=` | `0XFFFFFE000B8C2288` | not the faulting instruction: on this kind `PC=` is the guest's `x30`, its link register |
+| `A=` | `0X2000000` | `ESR_EL1`: exception class 0 (`unknown reason`), `IL` 1 (a 32-bit instruction), `ISS` 0: an unallocated or undefined instruction taken at EL1 |
+| `B=` | `0XFFFFFEA937FDC000` | `FAR_EL1`, stale and not meaningful for class 0 |
+| `C=` | `0XFFFFFE000B8C22` (two digits cut) | `ELR_EL1`, the address of the instruction that raised the exception, in `0xFFFFFE000B8C2200` to `0xFFFFFE000B8C22FF`: the same 256 bytes as `x30` |
+| `MON EXIT` | `PC=0XFFFFFE000B86C000`, `SPSR=0X604003C5`, `ESR=0X8200000F`, `FAR=0X0` | the monitor's own fault on the page that it guards for the guest's exception vectors, which is how it sees every guest exception entry: `ESR` class `0x20` (an instruction abort from a lower exception level), `IFSC` `0x0F` (a permission fault, level 3 by the encoding); `SPSR` is EL1h with D, A, I and F masked and PAN set (the layout from memory) |
+
+An exception of class 0 reaches the `GUEST_EXC` record only when the monitor's optional `skip_undef` (step over such an exception and count it) is off (VERIFIED, read in `probes/xnuboot/trap_dispatch.c`, lines 292 to 317), so it was off in this run (INFERRED). The monitor stops at the vector entry, before XNU's own handler runs, so what XNU would have done with the exception, and whether it would have printed anything, is not on the page. Which instruction it is: 21.5.
+
+### 21.5 What the stop is (host analysis; INFERRED, high confidence; the cause is UNKNOWN)
+
+A read-only analysis on the host after the boot (a file, not a run: the local kernelcache and the public XNU source, tag `xnu-12377.121.6`; the KDK is absent, so no symbolication: NOT RUN) asked which word of the guest's code can have raised the exception. The 256 bytes that the clipped `C=` leaves open, `0xFFFFFE000B8C2200` to `0xFFFFFE000B8C22FF`, hold 64 words and the guest's `x30`; a host decode rejects exactly one of them as unallocated (VERIFIED, host; says nothing about hardware): XNU's own debugger-trap word, a public constant (`TRAP_DEBUGGER` in `osfmk/kern/debug.c` and `GDB_TRAP_INSTR2` in `osfmk/arm/trap_internal.h`). The exact `ELR` is therefore INFERRED to be `0xFFFFFE000B8C22A0` (high confidence; not read, because two digits of the page are clipped), 0x18 bytes after the page's `PC=`. So the stop is the guest kernel's own debugger trap and not a CPU feature that the unit lacks (INFERRED, high confidence): the kernel executes that word on purpose when it enters its debugger funnel, so hiding a feature in the ID registers does not apply, and emulating an instruction in the monitor is the wrong tool (INFERRED: no `HCR_EL2` trap bit applies to an unallocated opcode at EL1, and the monitor sees the exception only through its guard on the vector page, the `MON EXIT` line). The kernel therefore entered its panic or debugger funnel (INFERRED; a panic is far likelier than a stackshot or a profile-guided-optimisation path), and the panic text, the backtrace and any halt or reboot are printed only after that trap, which the monitor stopped on, so the panel shows none. Which call entered the funnel, why, and so the cause are UNKNOWN. The function that holds the word is INFERRED, by structure against the public source, to be the debugger-trap function of `osfmk/kern/debug.c` (`DebuggerTrapWithState` there); no kernel name was read.
+
+### 21.6 What the panel showed: `cpus=1` honoured, and the log beyond boot 21's last line
+
+Read on frames side by side with boot 21's (OBSERVED, one boot each; the film was not CRC-verified and the lines are short quotes only; the roles are INFERRED from the public source and from the list in 19.4). The first frames after the clear replay the kernel's message buffer from its start, so the early lines are on the film.
+
+| Line | Boot 21 (rung 2) | Boot 23 (rung 3) |
+| --- | --- | --- |
+| `[processor_init] processor 0 belongs to processor set 0 of type 0` | present | present (at about 45.46 s of the kernel's own clock) |
+| `[processor_init] processor 1` to `5 belongs to ...` | five lines, after `Setting scheduler priority decay band limit 18` (CPUs 1 to 3 of type 0, 4 and 5 of type 1) | none: the line after `Setting scheduler priority decay band limit 18` is `Long logs support configured` |
+| `Log queues configured: slot count: ...` | `slot count: 54, per-slot size: 32768, total size: 1769472` | `slot count: 9, per-slot size: 32768, total size: 294912` |
+
+54 is 6 x 9 and 1,769,472 is 6 x 294,912 (arithmetic): the same ratio as six CPUs to one. So `cpus=1` was honoured by this guest's kernel (OBSERVED: the processor lines; INFERRED: that the log queue is sized by the CPU count). A text-recognition pass over 72 frames of the replay (noisy) found the `processor 0` line and no `processor 1` to `5` line; that is not proof of absence, because the replay changes screens faster than the film samples, so the side-by-side frames are the evidence. The kernel's banner is boot 21's (Darwin 27.0.0, `RELEASE_ARM64_T8140`). Beyond boot 21's last line (`RTBuddy(DCPEXT)` start and `Couldn't alloc class "AFKFirmwareService"`) the film shows:
+
+| # | Role | What was read |
+| --- | --- | --- |
+| 1 | the storage driver family | `RTBuddy(ANS2)` start, then probe lines of `AppleANS2CGv2Controller` (`Found (ANS2) provider and coastguard, returning score 400000`), `AppleANS2NVMeController` (score 100000), `AppleANS3CGv2Controller` (500000) and `AppleANS3NVMeController` (300000): the driver classes matched an `(ANS2)` provider and probed it |
+| 2 | security services | `AppleSEPKeyStore::start`, `AppleCredentialManager` `startIpc`, `ACMLockdownModeKernelService` start |
+| 3 | other platform services | `AppleDockConnectIIC`, `CoreAnalyticsHub` start |
+| 4 | the platform-driver lines of boot 21 | `AppleA7IOPNub` nub allocations, RTBuddy start lines (SIO, GFX, AOP, AOP2), `AppleSEPManager`, `AppleDialogSPMIPMU` |
+| 5 | noise, as in 19.4 | many SPMI parity-error and PMU register-read and register-write failure lines; the RTKit banners say `General panic behavior: debugFacility = 0x00000001`, a firmware banner and not a panic |
+
+The provider of the probe lines is the `(ANS2)` node of the guest's device tree (INFERRED: the M1 bundle carries no ANS model, section 18 of [SP11-STICK-MONITOR.md](SP11-STICK-MONITOR.md), so no model stands behind that node); the lines say that the classes matched, and nothing on the panel says that any of them started or finished (UNKNOWN). No `panic(cpu` text was read in the frames examined (OBSERVED once; a film is not proof of absence, and 21.5 says why none is expected). The log's tail is the same kind of noise as boot 21's, with the SPMI errors coming from the monitor's empty models (INFERRED); that they are harmless in general is not shown (UNKNOWN).
+
+### 21.7 What this settles, what it does not, and the next options
+
+**What it settles (OBSERVED, one unit, one boot; the decodes and the identity of the stop are INFERRED).**
+
+- `cpus=1` was honoured by the guest's kernel: one processor line, a log queue sized for one CPU (INFERRED), and the stop of boot 21 did not recur. The kernel ran on one vCPU for 2.17 s under the monitor, further than boot 21's 2.04 s, through the platform-driver matching and the storage driver classes' probes of an `(ANS2)` provider, and the run ended at an exception that the monitor stopped on (`MON STOP GUEST_EXC`), on a clean report: registers and GIC restored, 10,888 of 262,144 stack bytes used, `ABORTS=0`.
+- The exception is, INFERRED with high confidence, the guest kernel's own debugger trap, and not a CPU feature that the unit lacks; the kernel had therefore entered its panic or debugger funnel (INFERRED; a panic is far likelier). The monitor stopped it at the trap, before any text was printed (21.5).
+- M1 passed by its own rows (record, 5a; row f held by the host check of the stick, row g on the host); rung 3's own verdict is NOT PASSED (c) by the letter of its record (21.3).
+
+**What it does not settle (UNKNOWN unless a label says otherwise).**
+
+- Why the kernel entered its debugger funnel, which call entered it, and so the cause of the panic (UNKNOWN): no register, slot or console tail of the run was kept, and the text is printed only after the trap. Whether `cpus=1` has anything to do with it cannot be told from boots 21 and 23 (UNKNOWN).
+- The exact `ELR` (INFERRED `0xFFFFFE000B8C22A0`, not read) and the function name (INFERRED, by structure, no KDK).
+- That any driver started or finished, that ANS2 works, that the storage path is reachable, or anything about timing beyond `TICKS`. Why 989 single-steps were counted (UNKNOWN).
+- Whether the unit stayed up after the film ended (7 s after the page) (UNKNOWN). The stick cannot say: it holds no record of the run beyond the Shell's marker, because `REPORT.DAT` is loaded into RAM and not written back (row f, 21.3; OBSERVED once, host read), so the clipped digits of `C=` and anything else that the page does not show are not on it.
+- That the SPMI and PMU errors are harmless beyond this run (UNKNOWN). This boot does not show that macOS boots, nor stability or performance.
+
+**The next options (INFERRED options; none is a decision, none is authorised, none is run).**
+
+- Let the guest's own panic handler run: the monitor already has a `let_panic` diagnostic, a data word of its PARAMS that hands such an exception to the guest's own handler (off in this run, INFERRED, since the stop was recorded), so that the text the kernel prints after the trap would reach the panel. It is data only: the monitor's two programs would stay byte-identical (INFERRED); it needs a record of its own and the operator's decision. Whether the panic path survives on this stack, and what follows the text (a halt, a reboot, a device reset, a stage-2 fault at a reset register or the watchdog at the box end), are UNKNOWN. Stepping over the trap with `skip_undef` is not an option: the kernel would fall silently into its post-trap path (INFERRED).
+- The order is not a measurement. The record's rule for a further run is the same as before: nothing is run without a record of its own that the operator approves by its SHA-256.
+
+**What follows.** The approval was for one boot and is spent. Nothing is authorised by this section. The xHC and stick-writer work stays paused (section 17.6): A1 and A2 were not exercised (the monitor's guest has no USB controller and no disk).
 
 ## Appendix A. The page lines of the survey boot (S0; EXPERIMENTAL in the q1n1 fork; ran once on the unit, section 12)
+
 
 The survey as built differs from this table in a few named places (extra verdict names, extra fields and lines, the baseline
 read through the firmware's PCI I/O instead of raw MMIO); the fork's `docs/SP11-STK-SURVEY.md` lists them.

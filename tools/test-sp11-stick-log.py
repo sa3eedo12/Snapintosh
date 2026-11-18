@@ -1755,7 +1755,7 @@ class Document(unittest.TestCase):
     @classmethod
     def section_19_problems(cls, text):
         """What is wrong with section 19, boot 21 (the second run of the SP11 monitor entry, M1 rung 2, the panel as the kernel's console), or with the places that count on it; an empty list is a pass."""
-        body = text.split('## 19. Result of boot 21', 1)[1].split('## Appendix A.', 1)[0]
+        body = text.split('## 19. Result of boot 21', 1)[1].split('## 20. Result of boot 22', 1)[0]
         flat = ' '.join(body.split())
         problems = []
         pages = re.findall(r'```text\n(.*?)```', body, re.S)
@@ -1851,7 +1851,7 @@ class Document(unittest.TestCase):
         for place, needle in (('the top paragraph', 'Boot 21 (2026-11-18, section 19) ran rung 2 with the panel handed to the guest as the kernel\'s console (plan `M1RUN-CONSOLE-RUNG2`)'),
                               ('item 15 of section 1', '15. **Boot 21 (2026-11-18; section 19; on video; OBSERVED, one unit, one boot): M1 rung 2, the panel handed to the guest as the kernel\'s console (plan `M1RUN-CONSOLE-RUNG2`), PASSED by the record\'s own rule'),
                               ('item 15 of section 1', 'The run shows nothing past the first CPU-start write: not CPU bring-up, not SMP, not a root device, not stability or performance, and not that macOS boots.'),
-                              ('the evidence summary', 'The SP11 monitor entry, run twice: boot 20 (rung 1, panel withheld) and boot 21 (rung 2, the panel handed as the kernel\'s console, plan `M1RUN-CONSOLE-RUNG2`)'),
+                              ('the evidence summary', 'The SP11 monitor entry, its first two runs: boot 20 (rung 1, panel withheld) and boot 21 (rung 2, the panel handed as the kernel\'s console, plan `M1RUN-CONSOLE-RUNG2`)'),
                               ('section 18.6', 'Boot 21 (section 19) was the next run, rung 2, with the panel handed to the guest.')):
             if needle not in ' '.join(text.split()):
                 problems.append(f'{place} does not count on boot 21')
@@ -1886,7 +1886,7 @@ class Document(unittest.TestCase):
                  ('none is a decision, none is authorised, none is run', 'each is decided and authorised'), ('The approval was for one boot and is spent.', 'The approval stands for further boots.'),
                  ('Why 925 single-steps were counted (UNKNOWN).', 'Why 925 single-steps were counted (VERIFIED).'), ('(INFERRED then, OBSERVED now', '(OBSERVED then, VERIFIED now'),
                  ('the panel shows phases that follow `PE_init_iokit`', 'the panel shows the first statement of `PE_init_iokit`'), ('(17 S at 24 s, 22 S at 29 s, 36 S in the closer view at the end); no black-out, no restart', '(17 S at 24 s); a black-out and a restart'),
-                 ('## Appendix A.', 'Digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\n## Appendix A.'), ('## Appendix A.', 'The record is 1AD122B3 and the stop PC is at file offset 0x51EAF00.\n\n## Appendix A.'),
+                 ('## 20. Result of boot 22', 'Digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\n## 20. Result of boot 22'), ('## 20. Result of boot 22', 'The record is 1AD122B3 and the stop PC is at file offset 0x51EAF00.\n\n## 20. Result of boot 22'),
                  ('Boot 21 (section 19) was the next run, rung 2, with the panel handed to the guest.', 'Boot 21 was a run.'))
         marker = '## 19. Result of boot 21'
         head, rest = self.text.split(marker, 1)
@@ -1898,21 +1898,435 @@ class Document(unittest.TestCase):
                 mutated = head.replace(old, new, 1) + marker + rest
             self.assertTrue(self.section_19_problems(mutated), f'a seeded fault went unseen: {old!r} -> {new!r}')
 
+    @classmethod
+    def section_20_problems(cls, text, window):
+        """What is wrong with section 20, boot 22 (the S1 survey: the read-only payloads `nvmesnap`, then `smmuprobe`), with the places that count on it, or with the register values that it
+        shares with section 7.1 of docs/SP11-NVME-WINDOW.md (window: that document's text); an empty list is a pass."""
+        body = text.split('## 20. Result of boot 22', 1)[1].split('## 21. Result of boot 23', 1)[0]
+        flat = ' '.join(body.split())
+        problems = []
+        pages = re.findall(r'```text\n(.*?)```', body, re.S)
+        if [len(page.splitlines()) for page in pages] != [52]:
+            return ['the page of boot 22 is not one block of 52 lines']
+        page = pages[0]
+        lines = page.splitlines()
+        for prefix, expected in (('PAYLOAD NVMESNAP ', 27), ('PAYLOAD SMMUPROBE ', 16)):
+            if len([line for line in lines if line.startswith(prefix)]) != expected:
+                problems.append(f'the page does not hold {expected} lines of {prefix.split()[1]}')
+        if 'PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=53 FAULTS=0 REFUSED=0 LINES=27 DROPPED=0' not in page or \
+                lines[-1] != 'PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=39 FAULTS=0 REFUSED=0 LINES=16 DROPPED=0':
+            problems.append('the LINES= counts of the two PAYLOAD DONE lines are not the 27 and the 16 lines of the block')
+        for needle in ('PAYLOAD LOADED INDEX=0 BASE=0XCECB2000 BYTES=19857 SHA=A3DF0F84DDF56B74 TYPE=1', 'PAYLOAD LOADED INDEX=1 BASE=0XCECAC000 BYTES=14994 SHA=71F6FF4A583B0E78 TYPE=1',
+                       'PAYLOAD READY FILES=2 RANGES=5 CODE=2', 'PAYLOAD CALL 0 A3DF0F84DDF56B74', 'PAYLOAD CALL 1 71F6FF4A583B0E78', 'PAYLOAD VERIFY=OK',
+                       'PAYLOAD NVMESNAP START CURRENTEL=0X8 FREQ=19200000 ECAM=0X70000000 WINDOW=0X70300000',
+                       'PAYLOAD NVMESNAP GATE LINK=UP RPMEM=1 MEM=1 BME=1 D=0 BAR0=0X70300000 MAP=DEVICE.OS.NS1 WHY=NONE',
+                       'PAYLOAD NVMESNAP NVME CAP=0X303C0301FF CSTS=0X1 CC=0X460001 VS=0X10400', 'PAYLOAD NVMESNAP NVME.AQ CSTS2=0X1 AQA=0X10001 ASQ=0XCF3E7000 ACQ=0XCF3E8000',
+                       'PAYLOAD NVMESNAP AQ ASQE=2 ACQE=2', 'PAYLOAD NVMESNAP ASQ AT=0XCF3E7000 MEMMAP_TYPE=4 MAP=WB.OS.NS1', 'PAYLOAD NVMESNAP ACQ AT=0XCF3E8000 MEMMAP_TYPE=4 MAP=WB.OS.NS1',
+                       'PAYLOAD NVMESNAP VERDICT CTRL=RUNNING QUEUES=READ LINK=UP WHY=NONE', 'PAYLOAD NVMESNAP DONE NVME_GROUP_RAN LOADS=53 FAULTS=0 REFUSED=0 NVME_TRIED=8',
+                       'PAYLOAD SMMUPROBE START CURRENTEL=0X8 FREQ=19200000 ECAM=0X70000000 SMMU=0X15400000', 'PAYLOAD SMMUPROBE MAP RP=DEVICE.OS.NS1 EP=DEVICE.OS.NS1 SMMU=FAULT=0X7:TRANS_L3',
+                       'PAYLOAD SMMUPROBE RP.AER AT=0X100 UESTA=0X0 UEMASK=0X4400000 CESTA=0X0 CEMASK=0XE000 ROOTERR=0X0', 'PAYLOAD SMMUPROBE EP.AER AT=0X100 UESTA=0X0 UEMASK=0X400000 CESTA=0X0 CEMASK=0XE000',
+                       'PAYLOAD SMMUPROBE VERDICT STREAM=0X60100 MODE=UNKNOWN WHY=SMMU_PAGE_UNMAPPED', 'PAYLOAD SMMUPROBE DONE SMMU_GROUP_SKIPPED LOADS=39 FAULTS=0 REFUSED=0 SMMU_TRIED=0'):
+            if needle not in page:
+                problems.append(f'the page lost {needle!r}')
+        if 'NEXT SMMU_REGISTERS' in page or re.search(r'MODE=(?!UNKNOWN)', body):
+            problems.append('the page of a skipped SMMU group has a NEXT SMMU_REGISTERS line, or the text gives the SMMU a mode')
+
+        def words(prefix):
+            line = next((line for line in lines if line.startswith(prefix)), '')
+            return {name: int(value, 16) for name, value in re.findall(r'\b([A-Z][A-Z0-9_]*)=0X([0-9A-F]+)', line)}
+        # The decodes of section 20.4, redone from the words on the page.
+        regs, queue = words('PAYLOAD NVMESNAP NVME CAP='), words('PAYLOAD NVMESNAP NVME.AQ ')
+        cap, cc, vs, aqa = regs.get('CAP', 0), regs.get('CC', 0), regs.get('VS', 0), queue.get('AQA', 0)
+        if (cap & 0xFFFF, (cap >> 16) & 1, (cap >> 24) & 0xFF, (cap >> 32) & 0xF, (cap >> 36) & 1, (cap >> 37) & 0xFF, (cap >> 48) & 0xF, (cap >> 52) & 0xF, (cap >> 56) & 3) != (511, 1, 60, 0, 1, 1, 0, 0, 0):
+            problems.append('CAP 0x303C0301FF is not MQES 511, CQR 1, TO 60, DSTRD 0, NSSRS 1, CSS 1, MPSMIN 0, MPSMAX 0 and no PMR or CMB')
+        if (cc & 1, (cc >> 16) & 0xF, (cc >> 20) & 0xF, cc & 0xFFFE) != (1, 6, 4, 0) or (vs >> 16, (vs >> 8) & 0xFF, vs & 0xFF) != (1, 4, 0) or ((aqa & 0xFFF) + 1, ((aqa >> 16) & 0xFFF) + 1) != (2, 2):
+            problems.append('CC 0x460001, VS 0x10400 or AQA 0x10001 is not EN 1 with entry sizes 2^6 and 2^4, NVMe 1.4.0 and two entries in each admin queue')
+        rp, ep = words('PAYLOAD NVMESNAP RP ID='), words('PAYLOAD NVMESNAP EP ID=')
+        identity = lambda w: (w.get('ID', 0) & 0xFFFF, w.get('ID', 0) >> 16, w.get('CLASSREV', 0) >> 8, w.get('CLASSREV', 0) & 0xFF, (w.get('HDR', 0) >> 16) & 0x7F)      # noqa: E731
+        if identity(rp) != (0x17CB, 0x0111, 0x060400, 0, 1) or identity(ep) != (0x144D, 0xA80B, 0x010802, 2, 0):
+            problems.append('the ids, classes, revisions and header types are not 0x17CB:0x0111 (a bridge, revision 0, type 1) and 0x144D:0xA80B (NVMe, revision 2, type 0)')
+        for name in ('RP ID=', 'EP ID='):
+            if words('PAYLOAD NVMESNAP ' + name) != words('PAYLOAD SMMUPROBE ' + name):
+                problems.append(f'the two payloads read different words for {name[:-4]}')
+        buses, memwin, bar0 = rp.get('BUSES', 0), words('PAYLOAD NVMESNAP RP MEMWIN=').get('MEMWIN', 0), ep.get('BAR0', 0)
+        if (buses & 0xFF, (buses >> 8) & 0xFF, (buses >> 16) & 0xFF) != (0, 1, 1) or ((memwin & 0xFFF0) << 16, (((memwin >> 16) & 0xFFF0) << 16) | 0xFFFFF) != (0x70300000, 0x703FFFFF) or \
+                (bar0 & 0xF, bar0 & ~0xF) != (4, 0x70300000):
+            problems.append('BUSES, MEMWIN and BAR0 are not buses 0 to 1, the window 0x70300000 to 0x703FFFFF and a 64-bit memory BAR at 0x70300000')
+        if (rp.get('CMDSTS', 0) & 0xFFFF, ep.get('CMDSTS', 0) & 0xFFFF, rp.get('CMDSTS', 0) >> 16, ep.get('CMDSTS', 0) >> 16) != (0x0003, 0x0006, 0x0010, 0x0010):
+            problems.append('the command words are not 0x0003 (bus master off) at the root port and 0x0006 (memory space and bus master on) at the endpoint, with status 0x0010 at both')
+        links = (words('PAYLOAD NVMESNAP RP.LINK ').get('LNKCTLSTA', 0) >> 16, words('PAYLOAD NVMESNAP EP.LINK ').get('LNKCTLSTA', 0) >> 16)
+        if [(status & 0xF, (status >> 4) & 0x3F, (status >> 13) & 1) for status in links] != [(4, 4, 1), (4, 4, 0)]:
+            problems.append('the link status words 0xF044 and 0x1044 are not speed 4, width 4, with the data link layer link active at the root port')
+        sq0, sq1, cq0, cq1 = (words(f'PAYLOAD NVMESNAP {name} ') for name in ('SQ0', 'SQ1', 'CQ0', 'CQ1'))
+        if (sq0.get('DW0', 0) & 0xFF, sq0.get('DW0', 0) >> 16, sq1.get('DW0', 0) & 0xFF, sq1.get('DW0', 0) >> 16, sq0.get('CDW10', 1), sq1.get('CDW10', 1)) != (6, 0x12, 6, 0x11, 0, 0) or \
+                (cq0.get('DW3', 0) & 0xFFFF, (cq0.get('DW3', 0) >> 16) & 1, cq1.get('DW3', 0) & 0xFFFF, (cq1.get('DW3', 0) >> 16) & 1) != (0x12, 0, 0x11, 1):
+            problems.append('the queue slots are not two Identify commands (opcode 6, CIDs 0x12 and 0x11, CDW10 0) with completions of phase 0 and phase 1, the reading of a queue that has wrapped once')
+        if not 29 <= 45 - 15.25 <= 31:
+            problems.append('the film starts at about UPTIME 30 S: 45 S at the last frame less 15.25 s')
+        # The registers that boot 22 read again are those that the X2 image read on 2026-11-15, in section 7.1 of the NVME-WINDOW document.
+        section_71 = window.split('### 7.1 ', 1)[1].split('### 7.2 ', 1)[0]
+        known = {int(value, 16) for value in re.findall(r'0x([0-9A-Fa-f]+)', section_71)}
+        for name, value in (('CAP', cap), ('VS', vs), ('CC', cc), ('AQA', aqa), ('ASQ', queue.get('ASQ', 0)), ('ACQ', queue.get('ACQ', 0)), ('BAR0', bar0 & ~0xF)):
+            if value not in known:
+                problems.append(f'{name} of boot 22 is not among the values of section 7.1 of docs/SP11-NVME-WINDOW.md')
+        for phrase in (
+                # what ran, how it was read, what is not on the film
+                'Boot 22 (2026-11-18, about 15:05 by the Shell\'s marker) is the first run of session 1 of the storage sessions',
+                'the coordinator\'s notes call it the S1 survey, which is not the partition plan\'s item S1',
+                'The operator approved the two payload files and their manifest by SHA-256 for one boot, at about 14:58; this log does not repeat the digests of the approval',
+                'both are read only: no store but to their own stack, no doorbell, no `CC` write and no admin command, and `smmuprobe` reads no SMMU register when EL2\'s stage 1 does not map the SMMU\'s page',
+                'The film is one video of 15.25 s (59.94 frames a second, not CRC-verified) that starts late: its last frame reads `UPTIME 45 S`, so it starts at about `UPTIME 30 S`',
+                'and the first 30 s of the boot (the Shell\'s countdown, the loading, the runner\'s start) are not on it',
+                'what was read in a document or a source on the host is VERIFIED only as read',
+                '| before the film (the first 30 s of `UPTIME`) | not filmed:', '(`UPTIME 44 S` at 14 s, `UPTIME 45 S` in the last frame); no hang, no fault page, no restart',
+                # the page
+                'The two `LINES=` counts are the payloads\' own and equal the 27 `NVMESNAP` and 16 `SMMUPROBE` lines of the block (arithmetic).',
+                'the counter is the payload document\'s and is not decoded here',
+                # the verdict
+                'the time from `CALL 0` to the last `DONE` is not on the film (it started late)', 'OBSERVED (the absence of a fault); UNKNOWN (the rest)',
+                'every line of `shasum -a 256 -c` over the staged list (15 files) is OK',
+                'the only changes since the staging at 15:01 are `SP11\\DONE1.TXT` (36 bytes, the Shell\'s marker `AUTORUN nvmesnap-s1 STEP 1 STARTED`) and macOS\'s own `.fseventsd` entry',
+                # the decodes (INFERRED)
+                '`ID=0X11117CB` (vendor `0x17CB`, device `0x0111`)', '`CLASSREV=0X6040000` (class `0x060400`, a PCI bridge, revision 0)', '`BUSES=0X10100` (primary 0, secondary 1, subordinate 1)',
+                '`MEMWIN=0X70307030` (a memory window of `0x70300000` to `0x703FFFFF`)', 'the command word `0x0003` is I/O and memory space on and bus master off', 'listed `0x0007`',
+                '`ID=0XA80B144D` (vendor `0x144D`, device `0xA80B`)', '`CLASSREV=0X1080202` (class `0x010802`, NVMe, revision 2)',
+                '`CMDSTS=0X100006` (command `0x0006`: memory space and bus master on; status `0x0010`: capability list)', 'one 64-bit memory BAR at `0x70300000`, inside the root port\'s window',
+                '(status `0xF044`: current speed 4, width 4, data link layer link active)', '(status `0x1044`: speed 4, width 4)',
+                'an NVMe 1.4.0 controller that is enabled and ready, not fatal, no shutdown, with 512 entries possible per queue, 4 KiB pages, a ready timeout of 30 s (60 units of 500 ms)',
+                'two entries in each queue, in memory that the map calls boot-services data and EL2 maps write-back',
+                'two Identify commands (opcode 6) for namespace 1 with `CDW10` 0 (the namespace form), whose completions have status success: the firmware\'s own DMA worked when it ran',
+                'which reads as a queue that has wrapped once, so at least three commands were issued and the first is no longer in the ring',
+                'no uncorrectable or correctable error status and no root error at either end',
+                'a translation fault at level 3 (fault status `0x7`, which the payload prints as `TRANS_L3`): the page has no stage-1 mapping at EL2; no access was made; no SMMU register was read',
+                # what it settles
+                'The NVMe controller runs after the bounce: `CC.EN` 1, `CSTS.RDY` 1, `CFS` 0, version 1.4.0', 'The firmware-left state repeats across two boots:', 'Two boots agree; that does not make them constants',
+                'so DMA reached the firmware\'s queue memory when the firmware ran (INFERRED, indirect: it says nothing about EL2\'s own state or a buffer of ours)',
+                'It is UNMAPPED, not aborting, and `smmuprobe` skipped the SMMU\'s registers by its own rule.',
+                'This fits the X2 image\'s two reads of that page that faulted (2026-11-14 and 2026-11-15), without proving the same cause (INFERRED).',
+                # what it does not settle
+                'so `MODE=UNKNOWN` is the whole answer (D7). Nor is it shown that the SMMU is protected: the page is only unmapped at EL2\'s stage 1, and why is UNKNOWN (a firmware-owned page, or simply a page that is not in EL2\'s map)',
+                'Whether the SSD\'s DMA reaches a monitor-owned extent after ExitBootServices and the hand-over of the SMMU (D14): UNKNOWN.',
+                'Anything about writes: the boot wrote nothing to the SSD, the SMMU or any device register',
+                'Whether Windows boots normally after a controller reset (D11) is UNKNOWN and was not exercised.',
+                'The meaning of `NVME_TRIED`, the Identify data, the SSD\'s namespace and LBA format, its serial number and its write cache: not read.',
+                'Whether the root port\'s bus-master bit (clear in this reading, set in the firmware\'s own view of 2026-11-15) matters for the endpoint\'s DMA: UNKNOWN.',
+                'Anything about the Wi-Fi module beyond this: it shares this SMMU node', 'which counts against D11.', 'That BAR0 repeated lets the descriptor pin it, still re-proved each run.',
+                # the options
+                'none is a decision, none is authorised, none is run',
+                'a q1n1 or monitor change that gives EL2\'s stage 1 a Device mapping of the SMMU\'s page (not a payload: a payload cannot add a mapping)',
+                'it writes the controller, D11 gates it and it is UNIMPLEMENTED (the takeover core exists on the host only)',
+                'The approval of S1 was for one boot and is spent. Nothing is authorised by this section.'):
+            if phrase not in flat:
+                problems.append(f'section 20 lost {phrase[:70]!r}')
+        if flat.count('OBSERVED (the page); VERIFIED (the row, as read)') != 2:
+            problems.append('the two verdict rows of 20.3 do not both say OBSERVED (the page); VERIFIED (the row, as read)')
+        for row in body.split('### 20.3', 1)[1].split('### 20.4', 1)[0].splitlines():
+            if row.startswith('| ') and not row.startswith(('| ---', '| What ')) and not re.search(r'OBSERVED|VERIFIED|INFERRED|UNKNOWN|NOT RUN', row.rsplit('|', 2)[-2]):
+                problems.append(f'a row of 20.3 has no label: {row[:50]!r}')
+        if re.search(r'\b[0-9a-fA-F]{32,}\b', body) or re.search(r'file offset|fileoff', body, re.I):
+            problems.append('section 20 gives a record digest or a kernelcache file offset')
+        whole = ' '.join(text.split())
+        for place, needle in (('the top paragraph', 'Boot 22 (2026-11-18, section 20) ran the first storage session, a read-only survey of the SSD\'s link, controller and admin queues and of the PCIe SMMU\'s mapping '
+                                                    '(the payloads `nvmesnap` and `smmuprobe`): the controller was enabled and ready with the firmware\'s two-entry admin queues, as on 2026-11-15, and the SMMU\'s page '
+                                                    'had no stage-1 mapping at EL2, so its state is still UNKNOWN (OBSERVED, one unit, one boot, from a film that started late; nothing was written).'),
+                              ('item 16 of section 1', '16. **Boot 22 (2026-11-18; section 20; on video, which started at about `UPTIME 30 S`; OBSERVED, one unit, one boot): the first storage session, the S1 survey '
+                                                       '(plan `nvmesnap-s1`), read only, ran to its end:'),
+                              ('item 16 of section 1', 'The survey shows nothing about whether DMA reaches a monitor-owned extent after the takeover, nothing about writes and nothing about D11.'),
+                              ('the evidence summary', 'The first storage session, the S1 survey (boot 22, plan `nvmesnap-s1`: the read-only payloads `nvmesnap`, then `smmuprobe`)'),
+                              ('the evidence summary', 'the SMMU\'s mode, why its page is unmapped, the DMA reach after a takeover, writes and D11 are UNKNOWN | 20 |'),
+                              ('section 19.6', 'Boot 22 (section 20) was not a run of the monitor: it was the read-only storage survey, S1.')):
+            if needle not in whole:
+                problems.append(f'{place} does not count on boot 22')
+        return problems
+
+    def test_section_20_keeps_the_facts_of_boot_22(self):
+        """Section 20 transcribes one page read from one film that started late (the read-only S1 survey: the payloads `nvmesnap`, then `smmuprobe`), decodes its fields (INFERRED) and says what it
+        does not settle; sections 1, 9 and 19.6 count on it and its registers are those of section 7.1 of docs/SP11-NVME-WINDOW.md: a drifted value, count or label fails here, and each seeded fault
+        below must be found."""
+        window = (ROOT / 'docs' / 'SP11-NVME-WINDOW.md').read_text()
+        self.assertEqual(self.section_20_problems(self.text, window), [])
+        body_seeds = (
+            ('PAYLOAD NVMESNAP VERDICT CTRL=RUNNING QUEUES=READ LINK=UP WHY=NONE', 'PAYLOAD NVMESNAP VERDICT CTRL=RUNNING QUEUES=READ LINK=DOWN WHY=NONE'),
+            ('CAP=0X303C0301FF CSTS=0X1 CC=0X460001', 'CAP=0X303C0301FE CSTS=0X1 CC=0X460001'), ('ASQ=0XCF3E7000 ACQ=0XCF3E8000', 'ASQ=0XCF3E7000 ACQ=0XCF3E8008'),
+            ('PAYLOAD NVMESNAP AQ ASQE=2 ACQE=2', 'PAYLOAD NVMESNAP AQ ASQE=32 ACQE=32'), ('SMMU=FAULT=0X7:TRANS_L3', 'SMMU=OK'),
+            ('MODE=UNKNOWN WHY=SMMU_PAGE_UNMAPPED', 'MODE=BYPASS WHY=NONE'), ('SMMU_TRIED=0', 'SMMU_TRIED=3'),
+            ('LOADS=39 FAULTS=0 REFUSED=0 LINES=16 DROPPED=0', 'LOADS=39 FAULTS=0 REFUSED=0 LINES=15 DROPPED=0'), ('LOADS=53 FAULTS=0 REFUSED=0 LINES=27 DROPPED=0', 'LOADS=53 FAULTS=0 REFUSED=0 LINES=26 DROPPED=0'),
+            ('PAYLOAD SMMUPROBE EP BAR1=0X0 CAPPTR=0X40\n', ''), ('PAYLOAD SMMUPROBE NEXT PCIE_CAPS AFTER 8 S\nPAYLOAD SMMUPROBE RP.PCIE', 'PAYLOAD SMMUPROBE NEXT SMMU_REGISTERS AFTER 8 S\nPAYLOAD SMMUPROBE RP.PCIE'),
+            ('DW3=0X10011 CID=0X11 P=1', 'DW3=0X00011 CID=0X11 P=0'), ('SQ0 DW0=0X120006 OPC=0X6', 'SQ0 DW0=0X120002 OPC=0X2'),
+            ('PAYLOAD NVMESNAP RP ID=0X11117CB CMDSTS=0X100003', 'PAYLOAD NVMESNAP RP ID=0X11117CB CMDSTS=0X100007'), ('LNKCTLSTA=0XF0440048', 'LNKCTLSTA=0XF0430048'),
+            ('PAYLOAD NVMESNAP RP MEMWIN=0X70307030', 'PAYLOAD NVMESNAP RP MEMWIN=0X70307020'), ('BYTES=14994 SHA=71F6FF4A583B0E78', 'BYTES=14995 SHA=71F6FF4A583B0E78'),
+            ('PAYLOAD CALL 0 A3DF0F84DDF56B74', 'PAYLOAD CALL 0 A3DF0F84DDF56B75'),
+            ('one video of 15.25 s (59.94 frames a second', 'one video of 45 s (59.94 frames a second'), ('so it starts at about `UPTIME 30 S`', 'so it starts at `UPTIME 0 S`'),
+            ('at about 14:58; this log does not repeat the digests of the approval', 'at about 14:58; the digest of the approval is below'),
+            ('over the staged list (15 files) is OK', 'over the staged list (14 files) is OK'), ('`SP11\\DONE1.TXT` (36 bytes,', '`SP11\\DONE1.TXT` (44 bytes,'),
+            ('is not on the film (it started late)', 'was 4 s'), ('OBSERVED (the absence of a fault); UNKNOWN (the rest)', 'the absence of a fault'),
+            ('| OBSERVED (the page); VERIFIED (the row, as read) |', '| the page |'), ('a ready timeout of 30 s (60 units of 500 ms)', 'a ready timeout of 60 s (60 units of 500 ms)'),
+            ('the command word `0x0003` is I/O and memory space on and bus master off', 'the command word `0x0003` is I/O and memory space on and bus master on'),
+            ('(status `0xF044`: current speed 4, width 4,', '(status `0xF044`: current speed 3, width 4,'),
+            ('which reads as a queue that has wrapped once, so at least three commands were issued', 'which reads as a queue that has not wrapped, so two commands were issued'),
+            ('two Identify commands (opcode 6) for namespace 1', 'two Read commands (opcode 2) for namespace 1'), ('without proving the same cause (INFERRED).', 'proving the same cause (VERIFIED).'),
+            ('Nor is it shown that the SMMU is protected', 'The SMMU is protected'), ('(D14): UNKNOWN.', '(D14): it does.'),
+            ('Anything about writes: the boot wrote nothing', 'Anything about writes: the boot wrote a quiesce'), ('(D11) is UNKNOWN and was not exercised.', '(D11) is shown.'),
+            ('The firmware-left state repeats across two boots:', 'The firmware-left state is constant:'), ('(INFERRED, indirect: it says nothing', '(VERIFIED, direct: it says nothing'),
+            ('matters for the endpoint\'s DMA: UNKNOWN.', 'matters for the endpoint\'s DMA: it does not.'), ('Anything about the Wi-Fi module beyond this', 'The Wi-Fi module works'),
+            ('a translation fault at level 3 (fault status `0x7`', 'a permission fault at level 3 (fault status `0x7`'),
+            ('is the first run of session 1 of the storage sessions', 'is the first run of session 2 of the storage sessions'),
+            ('none is a decision, none is authorised, none is run', 'each is decided and authorised'),
+            ('The approval of S1 was for one boot and is spent.', 'The approval of S1 stands for further boots.'),
+            ('## 21. Result of boot 23', 'Digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\n## 21. Result of boot 23'),
+            ('## 21. Result of boot 23', 'The stop is at file offset 0x51EAF00.\n\n## 21. Result of boot 23'))
+        place_seeds = (
+            ('so its state is still UNKNOWN (OBSERVED, one unit, one boot, from a film that started late; nothing was written).', 'so its state is bypass (VERIFIED).'),
+            ('The survey shows nothing about whether DMA reaches a monitor-owned extent after the takeover, nothing about writes and nothing about D11.', 'The survey shows that DMA reaches a monitor-owned extent after the takeover.'),
+            ('the SMMU\'s mode, why its page is unmapped, the DMA reach after a takeover, writes and D11 are UNKNOWN | 20 |', 'the SMMU is in bypass | 20 |'),
+            ('Boot 22 (section 20) was not a run of the monitor: it was the read-only storage survey, S1.', 'Boot 22 was a run.'))
+        marker = '## 20. Result of boot 22'
+        head, rest = self.text.split(marker, 1)
+        limit = rest.index('## 21. Result of boot 23') + len('## 21. Result of boot 23')
+        for old, new in body_seeds:
+            self.assertIn(old, rest[:limit], f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.section_20_problems(head + marker + rest.replace(old, new, 1), window), f'a seeded fault went unseen: {old!r} -> {new!r}')
+        for old, new in place_seeds:
+            self.assertIn(old, head, f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.section_20_problems(head.replace(old, new, 1) + marker + rest, window), f'a seeded fault went unseen: {old!r} -> {new!r}')
+        for old, new in (('0xCF3E8000', '0xCF3E8008'), ('0x303C0301FF', '0x303C0301FE'), ('0x00010400', '0x00010300')):
+            section_71 = window.split('### 7.1 ', 1)[1].split('### 7.2 ', 1)[0]
+            self.assertIn(old, section_71, f'the seed {old!r} no longer matches section 7.1: fix the seed, not the check')
+            self.assertTrue(self.section_20_problems(self.text, window.replace(old, new)), f'a seeded fault in section 7.1 went unseen: {old!r} -> {new!r}')
+
+    @classmethod
+    def section_21_problems(cls, text):
+        """What is wrong with section 21, boot 23 (the third run of the SP11 monitor entry, M1 rung 3, `cpus=1`), or with the places that count on it; an empty list is a pass."""
+        body = text.split('## 21. Result of boot 23', 1)[1].split('## Appendix A.', 1)[0]
+        flat = ' '.join(body.split())
+        problems = []
+        pages = re.findall(r'```text\n(.*?)```', body, re.S)
+        if [len(page.splitlines()) for page in pages] != [38]:
+            return ['the page of boot 23 is not one block of 38 lines']
+        page = pages[0]
+        lines = page.splitlines()
+        counted = re.search(r'PAYLOAD DONE INDEX=1 .* LINES=(\d+)', page)
+        if not counted or int(counted.group(1)) != len([line for line in lines if line.startswith('SNAPREP ')]):
+            problems.append('SNAPREP lines are not the LINES= count of PAYLOAD DONE INDEX=1')
+        if len([line for line in lines if line.startswith('SNAPMON ')]) != 5 or 'PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=2 FAULTS=0 REFUSED=0 LINES=29 DROPPED=0' not in page:
+            problems.append('the five SNAPMON lines left on the page, or the wrapper\'s LINES=29, changed')
+        ticks = [int(n) for n in re.findall(r'MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=(\d+) STACK=10888/262144', page)]
+        if ticks != [41593665, 41593665]:
+            problems.append(f'the call is not 41,593,665 ticks on both lines: {ticks}')
+        elif not (0 < 96_000_000 - ticks[0] and abs(ticks[0] / 19_200_000 - 2.166) < 5e-4 and ticks[0] - 39245286 == 2348379 and abs(2348379 / 19_200_000 - 0.122) < 5e-4):
+            problems.append('the arithmetic of the call: 2.166 s inside the box of 5 s (96,000,000 ticks), and 2,348,379 ticks (0.122 s) more than boot 21\'s 39,245,286')
+        for needle in ('MON STATUS=OK ENTERED=0X1', 'MON COUNTS EVENTS=512 TRAPS=135562 ABORTS=0 STEPS=989 CALLS=65209 DROPPED=96264',
+                       'SNAPREP MON STOP GUEST_EXC PC=0XFFFFFE000B8C2288 A=0X2000000 B=0XFFFFFEA937FDC000 C=0XFFFFFE000B8C22\n',
+                       'SNAPREP MON EXIT PC=0XFFFFFE000B86C000 SPSR=0X604003C5 ESR=0X8200000F FAR=0X0', 'MON REGS RESTORED=YES',
+                       'GIC RESTORE CLEAN=YES FAILED=0X0 RETRIED=0X0 BEGUN=GRC VBAR=NONE EL1=NONE', 'MON VERDICT=RETURNED FLAGS=0XF SUB=7', 'PAYLOAD CALL 1 EE86676001D89CF6', 'PAYLOAD VERIFY=OK',
+                       'SNAPMON STAGE=DONE RETURN=0', 'SNAPREP GIC NEW GICD=0X13 RB=0X12 ISEN=0X4000000 PRIO=0X80 PMR=0XF8 IGRPEN1=1', 'SNAPREP CHUNKS TOTAL=46 COPIED=46 HASHED=27 BYTES_COPIED=161041856 BYTES_HASHED=118904848',
+                       'SNAPREP GUEST.DAT BASE=0XC5CFE000 BYTES=118908480', 'SNAPREP TICKS HZ=19200000 PLACED=', 'DESC=221', 'SNAPREP MON IMAGE OFF=0X20000 BYTES=316783 SHA=0XAD4EBAA27314296C BOX_S=5',
+                       'SNAPREP MON CALL X0=0XCE7D6000 X1=0X89B000000 X2=0XF000000 X3=0X88000C000 X4=0X0 SP=0XCE856000',
+                       'SNAPREP MON EV 3 MONITOR PC=0XFFFFFE000C22B9E0 A=0X12 B=0XFFFFFE000B86FBB0 C=0XFFFFFE0006F84000'):
+            if needle not in page:
+                problems.append(f'the page lost {needle!r}')
+        if lines[-1] != 'PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=1 FAULTS=0 REFUSED=0 LINES=29 DROPPED=0' or 'MON CON' in page:
+            problems.append('the page does not end at PAYLOAD DONE INDEX=1, or has a MON CON line (a serial=2 boot has none)')
+        # The stop, decoded from the words on the page: the document's decode must be the arithmetic of ESR_EL1 0x2000000, ESR_EL2 0x8200000F and SPSR 0x604003C5.
+        esr_el1, esr_el2, spsr, x30 = 0x2000000, 0x8200000F, 0x604003C5, 0xFFFFFE000B8C2288
+        if (esr_el1 >> 26, (esr_el1 >> 25) & 1, esr_el1 & 0x1FFFFFF) != (0, 1, 0):
+            problems.append('the decode of A=0X2000000 is not EC 0, IL 1, ISS 0')
+        if ((esr_el2 >> 26) & 0x3F, (esr_el2 >> 25) & 1, esr_el2 & 0x3F) != (0x20, 1, 0x0F):
+            problems.append('the decode of ESR 0x8200000F is not EC 0x20, IL 1, IFSC 0x0F')
+        if (spsr & 0xF, (spsr >> 6) & 0xF, (spsr >> 22) & 1) != (5, 0xF, 1):
+            problems.append('the decode of SPSR 0x604003C5 is not EL1h, DAIF masked, PAN set')
+        elr_low, elr_high, elr = 0xFFFFFE000B8C2200, 0xFFFFFE000B8C22FF, 0xFFFFFE000B8C22A0
+        if not (elr_low <= x30 <= elr_high and elr_low <= elr <= elr_high and elr - x30 == 0x18 and 'C=0XFFFFFE000B8C22\n' in page and int('FFFFFE000B8C22', 16) << 8 == elr_low):
+            problems.append('x30, the 14 digits of C= and the inferred ELR 0xFFFFFE000B8C22A0 do not lie in the 256 bytes 0xFFFFFE000B8C2200 to 0xFFFFFE000B8C22FF, 0x18 after x30')
+        if not 0xFFFFFE0008A08000 <= x30 < 0xFFFFFE000C264000 or not 0xFFFFFE0008A08000 <= elr_high < 0xFFFFFE000C264000:
+            problems.append('the stop is not in the kernelcache\'s __TEXT_EXEC range')
+        stop_text = 'MON STOP GUEST_EXC PC=0XFFFFFE000B8C2288 A=0X2000000 B=0XFFFFFEA937FDC000 C=0XFFFFFE000B8C22A0'
+        if len(stop_text) != 94 or len(stop_text) + len('SNAPREP ') != 102 or not 100 < len(stop_text) + len('SNAPREP ') <= 102:
+            problems.append('the stop line is 94 characters, 102 with the SNAPREP prefix: two digits fall off a page of 100 columns')
+        if not (54 * 32768 == 1769472 and 9 * 32768 == 294912 and 54 // 9 == 6 and 1769472 // 294912 == 6 and 54 % 9 == 0):
+            problems.append('the log queue arithmetic of 21.6: 54 slots and 1,769,472 bytes against 9 slots and 294,912 bytes, a ratio of 6')
+        if not (abs(16.0 + 2.166 - 18.2) < 0.1 and 18.3 < 25.19 and abs(25.19 - 18.3 - 6.9) < 0.1):
+            problems.append('the film in time: the call of 2.166 s from 16.0 s, the page static from 18.3 s, the film of 25.19 s')
+        # No kernel address beyond the page's own values, and no instruction word, disassembly or function offset of the analysis note (21.5).
+        allowed = {token.upper() for token in re.findall(r'0[xX]FFFFFE[0-9A-Fa-f]*', page)} | {'0XFFFFFE000B8C22A0', '0XFFFFFE000B8C2200', '0XFFFFFE000B8C22FF', '0XFFFFFE0008A08000', '0XFFFFFE000C264000'}
+        stray = sorted({token.upper() for token in re.findall(r'0[xX]FFFFFE[0-9A-Fa-f]*', body)} - allowed)
+        if stray:
+            problems.append(f'section 21 quotes kernel addresses that are not the page\'s: {stray}')
+        if re.search(r'E7FFDEFF|DEADDEFF|B8C106C|B8C25D8|48BE288|B8C221C|B8C2310|pacibsp|retab|TPIDR|GENTER|AppleCotaBTM|configSampling', body, re.I):
+            problems.append('section 21 gives an instruction word, a function offset, a per-instruction detail or a claim about the cause of the panic')
+        for phrase in (
+                # what ran, how it was read
+                'Boot 23 (2026-11-18, about 15:59 by the unit\'s clock) is the third run of the SP11 monitor entry and the first with a CPU-count word in the guest\'s command line',
+                'the operator approved a record of its own for rung 3 by its SHA-256 at about 15:05 (this log does not repeat the digest)',
+                '`cpus=1` after rung 2\'s command line (`-v debug=0x8 serial=2 cluster_power=0 wdt=-1 cpus=1`), which asks XNU to run with one CPU',
+                '`GUEST.DAT` is 118,908,480 bytes in 46 chunks, the size of boot 21\'s', 'the time box is 5 s and the label is `M1RUN-CPUS1-RUNG3`',
+                'The film is one video of 25.19 s (59.94 frames a second, 3840 x 2160, not CRC-verified) that the operator stopped about 7 s after the report page appeared; the record asked for 60 s',
+                'what the unit did after the film ended is not on it', '`SHA=A7E159AD6C18832C`', '`STAGE=PIN_OK LABEL=M1RUN-CPUS1-RUNG3 CHUNKS=46`',
+                'q1n1\'s heartbeat reads `UPTIME 18 S` at the end of the film; no black-out and no restart in the 7 s after the page that the film holds',
+                # the page and its limits
+                'its full text is 94 characters (arithmetic, with a 16-digit `C=`), the runner adds the 8-character prefix `SNAPREP `, and 102 columns do not fit the page\'s 100, so the last two hex digits of `C=` are not on the page; '
+                '`REPORT.DAT` is a RAM area that the run does not write back to the stick (row f of 21.3: the staged file on the stick is unchanged), so they cannot be read from the stick either',
+                'The `TICKS HZ` line is partly under a reflection of the panel',
+                'The whole call took 41,593,665 ticks of the 19.2 MHz counter, 2.166 s (arithmetic), against the box of 5 s (96,000,000 ticks): the box was not used up.',
+                '41,593,665 (2.166 s), 2,348,379 ticks (0.122 s) more', '`TRAPS`, `CALLS`, `STEPS` and `DROPPED` are cumulative counts, not rates.', 'why `STEPS` is 989 where boot 21\'s was 925 is UNKNOWN',
+                # the verdict
+                'this is the result, by the letter of the record\'s 5d: `MON STOP GUEST_EXC` is not among the ends that PASSED allows and no other result names it',
+                'but the stop is `GUEST_EXC`, which PASSED does not allow',
+                'not the case: no `panic(cpu` text was read in the frames examined; the host analysis (21.5) INFERS that the kernel had entered its debugger funnel and that the monitor stopped it at the trap, before any text was printed '
+                '| OBSERVED (the absence in the frames examined); INFERRED (why)',
+                'not exercised: nothing mismatched, so no `REFUSED` line, which is no pass', 'held, and proved: `TICKS=41593665` is 2.166 s',
+                'the five 16-digit prefixes on the film are those of the staged files (the coordinator read them against the stage tree)',
+                'held: every file of the staged list passes `shasum -a 256 -c` from the stick\'s root (18 of 18, every line OK, exit 0)',
+                '`REPORT.DAT` still has the digest of the all-zero staged file (the prefix `2AF25E8AC647A885` of the film\'s `PAYLOAD LOADED` line: a run does not write the report back, because `REPORT.DAT` is loaded into RAM, '
+                'so the page is the only record of the run, as after boots 20 and 21)',
+                'and the only changes since the staging at 15:12 are `SP11\\DONE1.TXT` (42 bytes, the Shell\'s marker `AUTORUN M1RUN-CPUS1-RUNG3 STEP 1 STARTED`) and macOS\'s own `.fseventsd` entry; '
+                'the unit\'s own storage was not read back (NOT RUN) | OBSERVED (host check of the stick, read only, about 16:32, one boot) |',
+                'unchanged by git diff between ea59368 (the tree of boot 20) and 3f48b0a (the source of the record) (VERIFIED, host; says nothing about hardware); the byte comparison of the builds was not repeated for this tree (NOT RUN)',
+                '(`0xFFFFFE0008A08000` to `0xFFFFFE000C264000`; VERIFIED, host arithmetic on the local copy, as in 19.3)',
+                'M1\'s own verdict (record, 5a) is the same page\'s: M1 PASSED by the rows a, c, d and e of the page, with row f held by the host check of the stick and row g held on the host.',
+                'Rung 3\'s own verdict is **NOT PASSED, (c), by the letter of 5d**', 'It is not (a): `cpus=1` was honoured. It is not (b): no panic text was seen on the panel. It is not PARTIAL: the CPU-start stop is gone.',
+                'it is neither softened nor upgraded here. The approval is spent (`PAYLOAD CALL 0` is on the film), and gate X4\'s "kernel executes" stays at PARTIAL (one vCPU, 2.17 s, further than boot 21;',
+                # the decode
+                '`MON STOP GUEST_EXC` is the event \'XNU took its own exception\': the monitor records the guest\'s `x30`, `ESR_EL1`, `FAR_EL1` and `ELR_EL1` as the stop line\'s `PC=`, `A=`, `B=` and `C=` '
+                '(`probes/xnuboot/report_layout.c`, line 139, and `probes/xnuboot/trap_dispatch.c`, lines 262 to 340; VERIFIED, read in the sources, not run on the unit)',
+                '`ESR_EL1`: exception class 0 (`unknown reason`), `IL` 1 (a 32-bit instruction), `ISS` 0: an unallocated or undefined instruction taken at EL1', '`FAR_EL1`, stale and not meaningful for class 0',
+                '`ELR_EL1`, the address of the instruction that raised the exception, in `0xFFFFFE000B8C2200` to `0xFFFFFE000B8C22FF`: the same 256 bytes as `x30`',
+                '`ESR` class `0x20` (an instruction abort from a lower exception level), `IFSC` `0x0F` (a permission fault, level 3 by the encoding); `SPSR` is EL1h with D, A, I and F masked and PAN set (the layout from memory)',
+                'An exception of class 0 reaches the `GUEST_EXC` record only when the monitor\'s optional `skip_undef` (step over such an exception and count it) is off (VERIFIED, read in `probes/xnuboot/trap_dispatch.c`, lines 292 to 317), '
+                'so it was off in this run (INFERRED).',
+                'The monitor stops at the vector entry, before XNU\'s own handler runs, so what XNU would have done with the exception, and whether it would have printed anything, is not on the page.',
+                # the host analysis
+                'A read-only analysis on the host after the boot (a file, not a run: the local kernelcache and the public XNU source, tag `xnu-12377.121.6`; the KDK is absent, so no symbolication: NOT RUN)',
+                'hold 64 words and the guest\'s `x30`; a host decode rejects exactly one of them as unallocated (VERIFIED, host; says nothing about hardware): XNU\'s own debugger-trap word, a public constant '
+                '(`TRAP_DEBUGGER` in `osfmk/kern/debug.c` and `GDB_TRAP_INSTR2` in `osfmk/arm/trap_internal.h`)',
+                'The exact `ELR` is therefore INFERRED to be `0xFFFFFE000B8C22A0` (high confidence; not read, because two digits of the page are clipped), 0x18 bytes after the page\'s `PC=`.',
+                'So the stop is the guest kernel\'s own debugger trap and not a CPU feature that the unit lacks (INFERRED, high confidence)',
+                'so hiding a feature in the ID registers does not apply, and emulating an instruction in the monitor is the wrong tool (INFERRED:',
+                'The kernel therefore entered its panic or debugger funnel (INFERRED; a panic is far likelier than a stackshot or a profile-guided-optimisation path), and the panic text, the backtrace and any halt or reboot '
+                'are printed only after that trap, which the monitor stopped on, so the panel shows none.',
+                'Which call entered the funnel, why, and so the cause are UNKNOWN.',
+                'The function that holds the word is INFERRED, by structure against the public source, to be the debugger-trap function of `osfmk/kern/debug.c` (`DebuggerTrapWithState` there); no kernel name was read.',
+                # the panel
+                '54 is 6 x 9 and 1,769,472 is 6 x 294,912 (arithmetic): the same ratio as six CPUs to one.',
+                'So `cpus=1` was honoured by this guest\'s kernel (OBSERVED: the processor lines; INFERRED: that the log queue is sized by the CPU count).',
+                'that is not proof of absence, because the replay changes screens faster than the film samples, so the side-by-side frames are the evidence',
+                'the driver classes matched an `(ANS2)` provider and probed it',
+                'The provider of the probe lines is the `(ANS2)` node of the guest\'s device tree (INFERRED: the M1 bundle carries no ANS model, section 18 of [SP11-STICK-MONITOR.md](SP11-STICK-MONITOR.md), so no model stands behind that node); '
+                'the lines say that the classes matched, and nothing on the panel says that any of them started or finished (UNKNOWN).',
+                'No `panic(cpu` text was read in the frames examined (OBSERVED once; a film is not proof of absence, and 21.5 says why none is expected).', 'a firmware banner and not a panic',
+                # what it settles, what it does not, the options
+                'The kernel ran on one vCPU for 2.17 s under the monitor, further than boot 21\'s 2.04 s',
+                'M1 passed by its own rows (record, 5a; row f held by the host check of the stick, row g on the host); rung 3\'s own verdict is NOT PASSED (c) by the letter of its record (21.3).',
+                'Why the kernel entered its debugger funnel, which call entered it, and so the cause of the panic (UNKNOWN): no register, slot or console tail of the run was kept, and the text is printed only after the trap. '
+                'Whether `cpus=1` has anything to do with it cannot be told from boots 21 and 23 (UNKNOWN).',
+                'The exact `ELR` (INFERRED `0xFFFFFE000B8C22A0`, not read) and the function name (INFERRED, by structure, no KDK).',
+                'That any driver started or finished, that ANS2 works, that the storage path is reachable, or anything about timing beyond `TICKS`.',
+                'Whether the unit stayed up after the film ended (7 s after the page) (UNKNOWN). The stick cannot say: it holds no record of the run beyond the Shell\'s marker, because `REPORT.DAT` is loaded into RAM and not written back '
+                '(row f, 21.3; OBSERVED once, host read), so the clipped digits of `C=` and anything else that the page does not show are not on it.',
+                'This boot does not show that macOS boots, nor stability or performance.',
+                'Let the guest\'s own panic handler run: the monitor already has a `let_panic` diagnostic, a data word of its PARAMS that hands such an exception to the guest\'s own handler (off in this run, INFERRED, since the stop was recorded)',
+                'It is data only: the monitor\'s two programs would stay byte-identical (INFERRED); it needs a record of its own and the operator\'s decision.',
+                'Whether the panic path survives on this stack, and what follows the text (a halt, a reboot, a device reset, a stage-2 fault at a reset register or the watchdog at the box end), are UNKNOWN.',
+                'Stepping over the trap with `skip_undef` is not an option: the kernel would fall silently into its post-trap path (INFERRED).',
+                'The approval was for one boot and is spent. Nothing is authorised by this section.'):
+            if phrase not in flat:
+                problems.append(f'section 21 lost {phrase[:70]!r}')
+        if flat.count('macOS boots') != 1:
+            problems.append('"macOS boots" is not said exactly once, in the sentence that denies it')
+        if re.search(r'\b[0-9a-fA-F]{32,}\b', body) or '749361cf' in text.lower():
+            problems.append('section 21 or the log gives a record digest')
+        for row in body.split('### 21.3', 1)[1].split('### 21.4', 1)[0].splitlines():
+            if row.startswith('| ') and not row.startswith(('| ---', '| Result or row')) and not re.search(r'OBSERVED|VERIFIED|INFERRED|UNKNOWN|NOT RUN', row.rsplit('|', 2)[-2]):
+                problems.append(f'a row of 21.3 has no label: {row[:50]!r}')
+        whole = ' '.join(text.split())
+        for place, needle in (('the top paragraph', 'Boot 23 (2026-11-18, section 21) ran rung 3 of the monitor entry with one CPU asked for (`cpus=1`, plan `M1RUN-CPUS1-RUNG3`): the guest honoured it, the CPU-start stop of boot 21 is gone, '
+                                                    'the kernel ran on one vCPU for 2.17 s, further than boot 21, and the monitor stopped it at an exception that it took at EL1 (`MON STOP GUEST_EXC`), INFERRED to be the kernel\'s own debugger trap '
+                                                    '(OBSERVED, one unit, one boot, on video; the identity of the stop is INFERRED and the cause UNKNOWN); the rung\'s own verdict is NOT PASSED (c) by the letter of its record, and M1\'s is PASSED.'),
+                              ('item 17 of section 1', '17. **Boot 23 (2026-11-18; section 21; on video; OBSERVED, one unit, one boot): M1 rung 3, the console panel with `cpus=1` (plan `M1RUN-CPUS1-RUNG3`): the guest honoured `cpus=1`, '
+                                                       'the CPU-start stop is gone, and the monitor stopped the guest at an exception it took at EL1 (`MON STOP GUEST_EXC`) 2.17 s into the call; the record\'s rung 3 verdict is NOT PASSED (c) by its letter, M1\'s own (5a) PASSED.**'),
+                              ('item 17 of section 1', 'A host analysis after the boot INFERS (high confidence) that the exception is the guest kernel\'s own debugger trap, so that the kernel had entered its panic or debugger funnel; its text is printed only '
+                                                       'after the trap, which the monitor stopped on, so the panel shows none, and the cause is UNKNOWN.'),
+                              ('item 17 of section 1', 'and not that macOS boots. No next step is authorised.'),
+                              ('the evidence summary', 'The third run of the SP11 monitor entry (boot 23, M1 rung 3, plan `M1RUN-CPUS1-RUNG3`, `cpus=1` in the guest\'s command line)'),
+                              ('the evidence summary', 'the cause and anything past the stop are UNKNOWN; rung 3 is NOT PASSED (c) by the letter of its record, M1 PASSED by its own rows | 21 |'),
+                              ('section 20', 'Boot 23 (section 21) was the next run of the monitor entry, rung 3.')):
+            if needle not in whole:
+                problems.append(f'{place} does not count on boot 23')
+        return problems
+
+    def test_section_21_keeps_the_facts_of_boot_23(self):
+        """Section 21 transcribes one page read from one film (the third run of the monitor entry, rung 3, `cpus=1`), decodes its stop, gives the classification of the record by its letter and the host analysis of the stop with
+        the labels of its note, and says what it does not settle; sections 1, 9 and 20 count on it: a drifted value, count or label fails here, and each seeded fault below must be found."""
+        self.assertEqual(self.section_21_problems(self.text), [])
+        body_seeds = (
+            ('SNAPREP MON STOP GUEST_EXC PC=0XFFFFFE000B8C2288', 'SNAPREP MON STOP S2_FAULT PC=0XFFFFFE000B8C2288'), ('ENTERED=1 TICKS=41593665 STACK=10888/262144\nSNAPMON MON REGS', 'ENTERED=1 TICKS=39245286 STACK=10888/262144\nSNAPMON MON REGS'),
+            ('ABORTS=0 STEPS=989', 'ABORTS=3 STEPS=989'), ('TRAPS=135562', 'TRAPS=136424'), ('ESR=0X8200000F FAR=0X0', 'ESR=0X8200000E FAR=0X0'), ('A=0X2000000 B=0XFFFFFEA937FDC000 C=0XFFFFFE000B8C22\n', 'A=0X2000100 B=0XFFFFFEA937FDC000 C=0XFFFFFE000B8C22\n'),
+            ('C=0XFFFFFE000B8C22\nSNAPREP MON EXIT', 'C=0XFFFFFE000B8C22A0\nSNAPREP MON EXIT'), ('SPSR=0X604003C5', 'SPSR=0X604003C4'), ('LINES=29 DROPPED=0\n```\n\nThe 29 `SNAPREP` lines', 'LINES=28 DROPPED=0\n```\n\nThe 29 `SNAPREP` lines'),
+            ('SNAPREP GIC NEW GICD=0X13', 'SNAPREP GIC NEW GICD=0X10'), ('SNAPREP MONITOR RETURNED STAGE=DONE', 'SNAPREP MONITOR RETURNED STAGE=DONE\nSNAPREP MON CON DARWIN KERNEL'),
+            ('PAYLOAD CALL 1 EE86676001D89CF6', 'PAYLOAD CALL 1 EE86676001D89CF7'), ('X0=0XCE7D6000 X1=', 'X0=0XCE7F0000 X1='),
+            ('its full text is 94 characters', 'its full text is 90 characters'), ('so they cannot be read from the stick either', 'so they can be read from the stick'),
+            ('2.166 s (arithmetic), against the box of 5 s', '2.166 s (arithmetic), against the box of 2 s'), ('2,348,379 ticks (0.122 s) more', '2,348,379 ticks (1.22 s) more'),
+            ('this is the result, by the letter of the record\'s 5d', 'this is not the result, by the letter of the record\'s 5d'), ('Rung 3\'s own verdict is **NOT PASSED, (c), by the letter of 5d**', 'Rung 3\'s own verdict is **PASSED, by the letter of 5d**'),
+            ('It is not (a): `cpus=1` was honoured. It is not (b)', 'It is (a): `cpus=1` was not honoured. It is not (b)'), ('M1 PASSED by the rows a, c, d and e of the page', 'M1 FAILED by the rows a, c, d and e of the page'),
+            ('with row f held by the host check of the stick and row g held on the host.', 'with row g held on the host and row f not yet read back.'),
+            ('passes `shasum -a 256 -c` from the stick\'s root (18 of 18, every line OK, exit 0)', 'passes `shasum -a 256 -c` from the stick\'s root (17 of 18, one line FAILED)'),
+            ('a run does not write the report back, because `REPORT.DAT` is loaded into RAM, so the page is the only record of the run', 'a run writes the report back, so the stick holds the record of the run'),
+            ('`REPORT.DAT` still has the digest of the all-zero staged file', '`REPORT.DAT` has a new digest'), ('(42 bytes, the Shell\'s marker `AUTORUN M1RUN-CPUS1-RUNG3 STEP 1 STARTED`)', '(44 bytes, the Shell\'s marker `AUTORUN M1RUN-CPUS1-RUNG3 STEP 1 STARTED`)'),
+            ('the unit\'s own storage was not read back (NOT RUN) | OBSERVED (host check of the stick, read only, about 16:32, one boot) |', 'the unit\'s own storage was read back (PASS) | VERIFIED (the stick) |'),
+            ('(row f, 21.3; OBSERVED once, host read), so the clipped digits', '(row f, 21.3; VERIFIED), so the clipped digits'), ('so the clipped digits of `C=` and anything else that the page does not show are not on it.', 'so the clipped digits of `C=` can be read from it.'),
+            ('(row f of 21.3: the staged file on the stick is unchanged), so they cannot', '(row f of 21.3: the staged file on the stick is unchanged), so they can'),
+            ('(record, 5a; row f held by the host check of the stick, row g on the host)', '(record, 5a; row f not yet read back, row g on the host)'),
+            ('(VERIFIED, host; says nothing about hardware); the byte comparison of the builds was not repeated for this tree (NOT RUN)', '(VERIFIED, host); the byte comparison of the builds was repeated (PASS)'),
+            ('`ISS` 0: an unallocated or undefined instruction taken at EL1', '`ISS` 0: a data abort taken at EL1'), ('`IFSC` `0x0F` (a permission fault, level 3 by the encoding)', '`IFSC` `0x05` (a translation fault, level 1 by the encoding)'),
+            ('so it was off in this run (INFERRED)', 'so it was on in this run (INFERRED)'), ('as unallocated (VERIFIED, host; says nothing about hardware)', 'as unallocated (OBSERVED, on the unit)'),
+            ('The exact `ELR` is therefore INFERRED to be', 'The exact `ELR` is therefore VERIFIED to be'), ('lacks (INFERRED, high confidence)', 'lacks (VERIFIED, high confidence)'),
+            ('and emulating an instruction in the monitor is the wrong tool (INFERRED:', 'and emulating an instruction in the monitor is the right tool (INFERRED:'),
+            ('Which call entered the funnel, why, and so the cause are UNKNOWN.', 'Which call entered the funnel, why, and so the cause are known.'), ('so the panel shows none. Which call', 'so the panel shows the text. Which call'),
+            ('a panic is far likelier than a stackshot', 'a stackshot is far likelier than a panic'), ('no kernel name was read.', 'the name was read from the KDK.'),
+            ('0x18 bytes after the page\'s `PC=`.', '0x18 bytes after the page\'s `PC=`, in the function at 0xFFFFFE000B8C221C.'), ('XNU\'s own debugger-trap word, a public constant', 'XNU\'s own debugger-trap word 0xE7FFDEFF, a public constant'),
+            ('and so the cause are UNKNOWN.', 'and so the cause is an assertion in AppleCotaBTM.'),
+            ('54 is 6 x 9 and 1,769,472 is 6 x 294,912 (arithmetic)', '54 is 6 x 9 and 1,769,472 is 5 x 294,912 (arithmetic)'), ('the driver classes matched an `(ANS2)` provider and probed it', 'the driver classes started and ran the storage path'),
+            ('nothing on the panel says that any of them started or finished (UNKNOWN)', 'every one of them started and finished (OBSERVED)'),
+            ('cannot be told from boots 21 and 23 (UNKNOWN).', 'is the cause (VERIFIED).'), ('This boot does not show that macOS boots, nor stability or performance.', 'This boot shows that macOS boots, and stability.'),
+            ('Stepping over the trap with `skip_undef` is not an option', 'Stepping over the trap with `skip_undef` is the option'), ('(off in this run, INFERRED, since the stop was recorded)', '(on in this run, VERIFIED)'),
+            ('The approval was for one boot and is spent. Nothing is authorised by this section.', 'The approval stands for further boots.'), ('five 16-digit prefixes on the film are those of the staged files', 'five 16-digit prefixes on the film are not those of the staged files'),
+            ('at about 15:05 (this log does not repeat the digest)', 'at about 15:05 (the digest is 749361CF)'), ('| OBSERVED (the absence in the frames examined); INFERRED (why) |', '| OBSERVED (the absence) |'),
+            ('## Appendix A.', 'Digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\n## Appendix A.'))
+        place_seeds = (
+            ('the rung\'s own verdict is NOT PASSED (c) by the letter of its record, and M1\'s is PASSED.', 'the rung PASSED and so did M1.'),
+            ('the record\'s rung 3 verdict is NOT PASSED (c) by its letter, M1\'s own (5a) PASSED.**', 'the record\'s rung 3 verdict is PASSED.**'),
+            ('and not that macOS boots. No next step is authorised.', 'and macOS boots. A next step is authorised.'), ('so the panel shows none, and the cause is UNKNOWN.', 'so the panel shows the text, and the cause is known.'),
+            ('the cause and anything past the stop are UNKNOWN; rung 3 is NOT PASSED (c) by the letter of its record, M1 PASSED by its own rows | 21 |', 'the cause is known; rung 3 PASSED | 21 |'),
+            ('Boot 23 (section 21) was the next run of the monitor entry, rung 3.', 'Boot 23 was a run.'))
+        marker = '## 21. Result of boot 23'
+        head, rest = self.text.split(marker, 1)
+        limit = rest.index('## Appendix A.') + len('## Appendix A.')
+        for old, new in body_seeds:
+            self.assertIn(old, rest[:limit], f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.section_21_problems(head + marker + rest.replace(old, new, 1)), f'a seeded fault went unseen: {old!r} -> {new!r}')
+        for old, new in place_seeds:
+            self.assertIn(old, head, f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.section_21_problems(head.replace(old, new, 1) + marker + rest), f'a seeded fault went unseen: {old!r} -> {new!r}')
+
     @staticmethod
     def status_problems(status, surface):
         """What is wrong with the status text of boots 20 and 21 in STATUS.md and SURFACE-PRO-11.md (whitespace-collapsed texts); an empty list is a pass."""
         problems = []
         for where, text, needles in (
                 ('STATUS.md', status, (
-                    'SP11 monitor entry: ran twice. Boot 20: the stock kernel executed on one vCPU for 5 s and printed its banner, then spun in an early console loop (INFERRED). '
+                    'SP11 monitor entry: ran three times. Boot 20: the stock kernel executed on one vCPU for 5 s and printed its banner, then spun in an early console loop (INFERRED). '
                     'Boot 21, with the panel as its console: it ran on one vCPU for 2.04 s through the I/O Kit start-up and the platform-driver matching and stopped at a stage-2 fault at what is INFERRED, by address, to be its first CPU-start write. '
-                    'Hardware status per gate X4: kernel executes: PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start).',
-                    'the gate passed with it on the unit in boot 20 (OBSERVED, one boot; the SP11 monitor entry row below) and again in boot 21 (OBSERVED, one boot)',
-                    'the monitor\'s own guest regime ran twice, in boots 20 and 21, with the guards passed (`STATUS=0X0`; the SP11 monitor entry row below)',
-                    'the GUEST.DAT files it built ran on the unit, in boots 20 and 21 (the SP11 monitor entry row below), hardware NOT RUN beyond the dry run and those runs.',
-                    'The guest of boot 20 was, INFERRED (high), stuck in a loop of the kernel\'s I/O Kit start-up that a withheld panel makes endless', 'hardware NOT RUN beyond those two runs',
-                    'the monitor entry\'s two runs in the rows below', '| SP11 monitor entry (work item 4b; M1 rungs 1 and 2) |',
-                    'and the first run of the SP11 monitor entry (2026-11-18, boot 20, M1 rung 1:', 'and its second run (2026-11-18, boot 21, M1 rung 2:')),
+                    'Boot 23, with `cpus=1` added to the guest\'s command line: the kernel honoured it (one processor line) and ran on one vCPU for 2.17 s, further than boot 21, without the CPU-start stop, and the monitor stopped it at an exception it took at EL1 '
+                    '(`MON STOP GUEST_EXC`), INFERRED to be the kernel\'s own debugger trap (the cause is UNKNOWN); the rung 3 record\'s own verdict is NOT PASSED (c) by its letter, M1\'s PASSED. '
+                    'Hardware status per gate X4: kernel executes: PARTIAL (one vCPU, 2.17 s, further than boot 21).',
+                    'the gate passed with it on the unit in boot 20 (OBSERVED, one boot; the SP11 monitor entry row below) and again in boot 21 (OBSERVED, one boot) and in boot 23 (OBSERVED, one boot)',
+                    'the monitor\'s own guest regime ran three times, in boots 20, 21 and 23, with the guards passed (`STATUS=0X0`; the SP11 monitor entry row below)',
+                    'the GUEST.DAT files it built ran on the unit, in boots 20, 21 and 23 (the SP11 monitor entry row below), hardware NOT RUN beyond the dry run and those runs.',
+                    'The guest of boot 20 was, INFERRED (high), stuck in a loop of the kernel\'s I/O Kit start-up that a withheld panel makes endless', 'hardware NOT RUN beyond those three runs',
+                    'the monitor entry\'s three runs in the rows below', '| SP11 monitor entry (work item 4b; M1 rungs 1 to 3) |',
+                    'and the first run of the SP11 monitor entry (2026-11-18, boot 20, M1 rung 1:', 'and its second run (2026-11-18, boot 21, M1 rung 2:',
+                    'and the third run of the SP11 monitor entry (2026-11-18, boot 23, M1 rung 3, `cpus=1`: the kernel honoured it and ran on one vCPU for 2.17 s, further than boot 21, '
+                    'and the monitor stopped it at an exception it took at EL1, INFERRED to be the kernel\'s own debugger trap; the monitor entry row below)')),
                 ('SURFACE-PRO-11.md', surface, (
                     'the first run of the SP11 monitor entry (2026-11-18, boot 20, M1 rung 1; E71,', '(gate X4: kernel executes: PARTIAL).', 'The second run (2026-11-18, boot 21, M1 rung 2; E72,',
                     'gate X4, kernel executes: PARTIAL (one vCPU, 5 s, early boot only)', 'it ran 5 s, then spun in an early console loop (INFERRED, high',
@@ -1927,20 +2341,36 @@ class Document(unittest.TestCase):
                     'Gate X4\'s "kernel executes" stands at PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start).',
                     'The X5 exit names guest kernel text on the OLED: this boot is evidence for it (OBSERVED, one boot), and this record changes no gate row.',
                     'Nothing is shown about CPU bring-up, SMP, a root device, storage, userspace, stability or performance, nor that the SPMI and PMU errors are harmless beyond this run (UNKNOWN)',
-                    'the monitor\'s own guest regime ran twice, in boots 20 and 21 (E71, E72), and the conversion to 24 MHz is NOT RUN'))):
+                    'the monitor\'s own guest regime ran three times, in boots 20, 21 and 23 (E71, E72, E74), and the conversion to 24 MHz is NOT RUN',
+                    'The third run (2026-11-18, boot 23, M1 rung 3, `cpus=1`; E74,', 'the monitor entry ran three times, in boots 20, 21 and 23 (2026-11-18, M1 rungs 1 to 3; OBSERVED, one boot each, E71, E72 and E74): '
+                    'gate X4, kernel executes: PARTIAL (one vCPU, 2.17 s, further than boot 21).',
+                    'the kernel honoured it and ran on one vCPU for 2.17 s, further than boot 21 and without the CPU-start stop, and the monitor stopped it itself at an exception it took at EL1 (`MON STOP GUEST_EXC`), '
+                    'INFERRED to be the kernel\'s own debugger trap, the cause UNKNOWN',
+                    '| E74 | The third run of the SP11 monitor entry (work item 11, M1 rung 3, plan `M1RUN-CPUS1-RUNG3`, 2026-11-18, boot 23;',
+                    'the stick was byte-identical afterwards but for the Shell\'s marker and macOS\'s own `.fseventsd` entry, and its `REPORT.DAT` was not written back, so the page is the only record (host check, read only). '
+                    '| OBSERVED (one unit, one boot): the page and the panel above, and the host check of the stick; INFERRED (the decode of the stop;',
+                    'NOT RUN (symbolication, which needs the KDK); VERIFIED (host: the monitor sources unchanged by git diff between `ea59368` and `3f48b0a`;',
+                    'which a host analysis after the boot INFERS (high confidence) to be the guest kernel\'s own debugger trap, so that the kernel had entered its panic or debugger funnel.',
+                    'INFERRED (the decode of the stop; that the exception is the kernel\'s own debugger trap, high confidence; that `cpus=1` sized the log queue); UNKNOWN (why the kernel entered its debugger funnel: the cause of the panic;',
+                    'rung 3 NOT PASSED (c) by the letter of its record, M1 PASSED by its own rows; gate X4, kernel executes: PARTIAL (one vCPU, 2.17 s, further than boot 21)',
+                    '**Boot 23 (2026-11-18; OBSERVED on video, one unit, one boot; E74;',
+                    'its text is printed only after the trap, which the monitor stopped on, so the panel shows none, and the cause is UNKNOWN. The record\'s rung 3 verdict is NOT PASSED (c) by its letter '
+                    '(a stop that none of its results names), M1\'s own verdict PASSED. Gate X4\'s "kernel executes" stands at PARTIAL (one vCPU, 2.17 s, further than boot 21). '
+                    'Nothing is shown about CPU bring-up, SMP, a root device, userspace, stability or performance, nor that any driver started; nothing further is authorised.'))):
             problems += [f'{where} lost {needle[:60]!r}' for needle in needles if needle not in text]
-        row = status.split('| SP11 monitor entry (work item 4b; M1 rungs 1 and 2) |', 1)[-1].split(' | SP11 ', 1)[0]
+        row = status.split('| SP11 monitor entry (work item 4b; M1 rungs 1 to 3) |', 1)[-1].split(' | SP11 ', 1)[0]
         paragraph = surface.split('**Boot 20 (2026-11-18; OBSERVED on video', 1)[-1].split('**Stick payload runner', 1)[0]
-        for where, text in (('the STATUS.md row of the monitor entry', row), ('the SURFACE-PRO-11.md paragraphs of boots 20 and 21', paragraph)):
+        for where, text in (('the STATUS.md row of the monitor entry', row), ('the SURFACE-PRO-11.md paragraphs of boots 20 to 23', paragraph)):
             if re.search(r'desktop|macOS boots|kernel executes: PASS|kernel executes: DONE', text, re.I):
                 problems.append(f'{where} claims more than a partial boot')
         for where, text in (('STATUS.md', status), ('SURFACE-PRO-11.md', surface)):
             if re.search(r'kernel executes: (?!PARTIAL)\w+', text):
                 problems.append(f'{where} gives the kernel executes of gate X4 a status other than PARTIAL')
         if surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 5 s, early boot only)') != 1 or \
-                surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start)') != 2:
-            problems.append('SURFACE-PRO-11.md: E71 must say kernel executes: PARTIAL (one vCPU, 5 s, early boot only), and the X4 row and E72 must say kernel executes: PARTIAL '
-                            '(one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start)')
+                surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start)') != 1 or \
+                surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 2.17 s, further than boot 21)') != 2:
+            problems.append('SURFACE-PRO-11.md: E71 must say kernel executes: PARTIAL (one vCPU, 5 s, early boot only), E72 kernel executes: PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start), '
+                            'and the X4 row and E74 kernel executes: PARTIAL (one vCPU, 2.17 s, further than boot 21)')
         return problems
 
     def test_status_and_the_surface_pro_document_carry_boots_20_and_21_with_the_exact_status_words(self):
@@ -1948,16 +2378,16 @@ class Document(unittest.TestCase):
         stay INFERRED, nothing is said about a desktop or that macOS boots, and each seeded fault below must be found."""
         status, surface = (' '.join((ROOT / 'docs' / name).read_text().split()) for name in ('STATUS.md', 'SURFACE-PRO-11.md'))
         self.assertEqual(self.status_problems(status, surface), [])
-        seeds = (('kernel executes: PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start). The monitor ended each run',
-                  'kernel executes: PASS (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start). The monitor ended each run', 0),
-                 ('then spun in an early console loop (INFERRED). Boot 21', 'then spun in an early console loop (VERIFIED). Boot 21', 0), ('hardware NOT RUN beyond those two runs', 'hardware PASS beyond those two runs', 0),
-                 ('SP11 monitor entry: ran twice.', 'SP11 monitor entry: ran once.', 0), ('the gate passed with it on the unit in boot 20 (OBSERVED, one boot;', 'the gate passed with it on the unit in boot 20 (VERIFIED, one boot;', 0),
+        seeds = (('kernel executes: PARTIAL (one vCPU, 2.17 s, further than boot 21). The monitor ended each run',
+                  'kernel executes: PASS (one vCPU, 2.17 s, further than boot 21). The monitor ended each run', 0),
+                 ('then spun in an early console loop (INFERRED). Boot 21', 'then spun in an early console loop (VERIFIED). Boot 21', 0), ('hardware NOT RUN beyond those three runs', 'hardware PASS beyond those three runs', 0),
+                 ('SP11 monitor entry: ran three times.', 'SP11 monitor entry: ran once.', 0), ('the gate passed with it on the unit in boot 20 (OBSERVED, one boot;', 'the gate passed with it on the unit in boot 20 (VERIFIED, one boot;', 0),
                  ('and again in boot 21 (OBSERVED, one boot)', 'and not in boot 21 (OBSERVED, one boot)', 0),
                  ('stopped at a stage-2 fault at what is INFERRED, by address, to be its first CPU-start write.', 'stopped at a stage-2 fault at what is VERIFIED, by address, to be its first CPU-start write.', 0),
                  ('and the kernel was still in its start-up at the stop', 'and the kernel booted macOS: macOS boots', 0),
-                 ('the monitor\'s own guest regime ran twice, in boots 20 and 21, with the guards passed', 'the monitor\'s own guest regime ran once, in boot 20, with the guards passed', 0),
+                 ('the monitor\'s own guest regime ran three times, in boots 20, 21 and 23, with the guards passed', 'the monitor\'s own guest regime ran once, in boot 20, with the guards passed', 0),
                  ('(gate X4: kernel executes: PARTIAL).', '(gate X4: kernel executes: PASS).', 1),
-                 ('kernel executes: PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start). In boot 20,', 'kernel executes: DONE (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start). In boot 20,', 1),
+                 ('kernel executes: PARTIAL (one vCPU, 2.17 s, further than boot 21). In boot 20,', 'kernel executes: DONE (one vCPU, 2.17 s, further than boot 21). In boot 20,', 1),
                  ('it ran 5 s, then spun in an early console loop (INFERRED, high', 'it ran 5 s, then spun in an early console loop (VERIFIED, high', 1),
                  ('a longer box on the same image only repeats the loop.', 'a longer box on the same image reaches the desktop.', 1),
                  ('stands at PARTIAL (one vCPU, 5 s, early boot only; ran 5 s', 'stands at PASS (one vCPU, 5 s, early boot only; ran 5 s', 1),
@@ -1966,12 +2396,218 @@ class Document(unittest.TestCase):
                  ('which matches the A16\'s first CPU-start write by address only', 'which is the A16\'s first CPU-start write by value', 1),
                  ('this boot is evidence for it (OBSERVED, one boot), and this record changes no gate row.', 'this boot closes it (VERIFIED), and the gate is PASS.', 1),
                  ('Nothing is shown about CPU bring-up, SMP, a root device, storage, userspace, stability or performance, nor that the SPMI', 'Everything is shown about the desktop, nor that the SPMI', 1),
-                 ('the monitor\'s own guest regime ran twice, in boots 20 and 21 (E71, E72), and', 'the monitor\'s own guest regime is NOT RUN (E71, E72), and', 1))
+                 ('the monitor\'s own guest regime ran three times, in boots 20, 21 and 23 (E71, E72, E74), and', 'the monitor\'s own guest regime is NOT RUN (E71, E72, E74), and', 1),
+                 ('the kernel honoured it (one processor line) and ran on one vCPU for 2.17 s, further than boot 21, without the CPU-start stop', 'the kernel ignored it and ran on six vCPUs for 2.17 s, further than boot 21, without the CPU-start stop', 0),
+                 ('INFERRED to be the kernel\'s own debugger trap (the cause is UNKNOWN); the rung 3 record\'s own verdict is NOT PASSED (c) by its letter, M1\'s PASSED.',
+                  'VERIFIED to be the kernel\'s own debugger trap (the cause is UNKNOWN); the rung 3 record\'s own verdict is PASSED by its letter, M1\'s PASSED.', 0),
+                 ('INFERRED (the decode of the stop; that the exception is the kernel\'s own debugger trap, high confidence;', 'VERIFIED (the decode of the stop; that the exception is the kernel\'s own debugger trap, high confidence;', 1),
+                 ('UNKNOWN (why the kernel entered its debugger funnel: the cause of the panic;', 'OBSERVED (why the kernel entered its debugger funnel: the cause of the panic;', 1),
+                 ('rung 3 NOT PASSED (c) by the letter of its record, M1 PASSED by its own rows; gate X4', 'rung 3 PASSED by the letter of its record, M1 PASSED by its own rows; gate X4', 1),
+                 ('and the cause is UNKNOWN. The record\'s rung 3 verdict is NOT PASSED (c) by its letter', 'and the cause is known. The record\'s rung 3 verdict is PASSED by its letter', 1),
+                 ('nor that any driver started; nothing further is authorised.', 'and every driver started; a next run is authorised.', 1),
+                 ('so that the kernel had entered its panic or debugger funnel.', 'so that the kernel had hung.', 1),
+                 ('and its `REPORT.DAT` was not written back, so the page is the only record (host check, read only).', 'and its `REPORT.DAT` was written back, so the stick holds the record (host check, read only).', 1),
+                 ('the page and the panel above, and the host check of the stick; INFERRED', 'the page and the panel above; INFERRED', 1),
+                 ('NOT RUN (symbolication, which needs the KDK); VERIFIED (host:', 'NOT RUN (symbolication, which needs the KDK; the stick\'s read-back); VERIFIED (host:', 1))
         for old, new, which in seeds:
             texts = [status, surface]
             self.assertIn(old, texts[which], f'the seed {old!r} no longer matches the text: fix the seed, not the check')
             texts[which] = texts[which].replace(old, new, 1)
             self.assertTrue(self.status_problems(*texts), f'a seeded fault went unseen: {old!r} -> {new!r}')
+
+    @staticmethod
+    def storage_survey_status_problems(status, surface):
+        """What is wrong with the status text of boot 22 (the S1 storage survey) in STATUS.md and SURFACE-PRO-11.md (whitespace-collapsed texts); an empty list is a pass."""
+        problems = []
+        for where, text, needles in (
+                ('STATUS.md', status, (
+                    'and a read-only survey of the SSD\'s link, controller and admin queues and of the PCIe SMMU\'s page (2026-11-18, boot 22: the SMMU\'s page was unmapped at EL2 and nothing of the SMMU was read; the storage row below)',
+                    'the xHCI No-Op test, the storage survey and the monitor entry\'s three runs in the rows below.',
+                    '| SP11 storage preparation (adoption wiring, descriptor `storage`, offline provisioning, `nvmesnap`, `smmuprobe`) | EXPERIMENTAL; host tests, and one hardware survey: the read-only payloads '
+                    '`nvmesnap` and `smmuprobe` (session 1) ran once, on 2026-11-18 (boot 22; OBSERVED, one unit, one boot, from a film that started late;',
+                    'and found the PCIe SMMU\'s page unmapped at EL2\'s stage 1, so no SMMU register was read. Hardware NOT RUN for everything else: every write and every takeover.',
+                    'The descriptor carries `storage.nvme` (OBSERVED in two boots with its provenance;',
+                    'The SMMU state (D7), the SSD\'s DMA reach after a takeover (D14) and the controller takeover stay UNKNOWN and are not authorised')),
+                ('SURFACE-PRO-11.md', surface, (
+                    '| E73 | The storage survey (session 1 of the storage sessions, plan `nvmesnap-s1`, 2026-11-18, boot 22;', '`VERDICT STREAM=0X60100 MODE=UNKNOWN WHY=SMMU_PAGE_UNMAPPED`',
+                    'the page has no stage-1 mapping at EL2, so it read no SMMU register',
+                    '| OBSERVED (one unit, one boot, from a film that started late): the page above; INFERRED (the decodes of the fields; that the firmware\'s queue has wrapped once; '
+                    'that the SSD\'s DMA reached the firmware\'s queue memory when the firmware ran); UNKNOWN (the SMMU\'s mode, D7;',
+                    'NOT RUN (any write to the controller, the SSD or the SMMU; any read of an SMMU register): no gate changes',
+                    '**Boot 22 (2026-11-18; OBSERVED on video, one unit, one boot, from a film that started late; E73;',
+                    'The SMMU\'s mode (D7), why its page is unmapped, the SSD\'s DMA reach after a takeover (D14) and D11 are UNKNOWN, every write is NOT RUN, and nothing is shown about the Wi-Fi beyond the shared SMMU node; '
+                    'this record changes no gate row and nothing further is authorised.',
+                    'the q1n1 `nvmesnap` and `smmuprobe` payloads (read-only probes of the SSD\'s controller and of the PCIe SMMU; they ran once, in boot 22: E73)',
+                    'and in boot 22 `smmuprobe` found the SMMU\'s page unmapped at EL2 and read nothing: E73)',
+                    'D3, D4, D8 and D15 again on 2026-11-18 (OBSERVED in a second boot, section 7.2 there: E73);',
+                    'D7 stays UNKNOWN: the read-only q1n1 `smmuprobe` payload (session 1) ran in boot 22 and found the SMMU\'s page unmapped at EL2, so nothing was read, and D14 stays UNKNOWN',
+                    '(session 1 ran once, in boot 22; sessions 2 and 3 are not authorised)',
+                    'ran once, in boot 22 (E73): the SMMU\'s page has no stage-1 mapping at EL2, so no SMMU register was read.',
+                    'ran on 2026-11-18 (boot 22, E73) and found that page unmapped at EL2\'s stage 1, so nothing was read: OBSERVED once',
+                    '`M1RUN-CONSOLE-RUNG2` (boot 21), `nvmesnap-s1` (boot 22) and `M1RUN-CPUS1-RUNG3` (boot 23), OBSERVED, one unit, one boot each',
+                    '(EXPERIMENTAL; hardware NOT RUN, except session 1, a read-only survey, which ran once in boot 22: E73).'))):
+            problems += [f'{where} lost {needle[:60]!r}' for needle in needles if needle not in text]
+        for where, text in (('STATUS.md', status), ('SURFACE-PRO-11.md', surface)):
+            if re.search(r'smmuprobe[^|]{0,120}(?:never run|NOT RUN)|session 1, NOT RUN|smmuprobe` is the planned', text):
+                problems.append(f'{where} still says that the smmuprobe payload has not run')
+        paragraph = surface.split('**Boot 22 (2026-11-18; OBSERVED on video', 1)[-1].split('**Boot 23 (2026-11-18; OBSERVED on video', 1)[0].split('**Stick payload runner', 1)[0]
+        if re.search(r'desktop|macOS boots|bypass|protected|kernel executes', paragraph, re.I):
+            problems.append('the SURFACE-PRO-11.md paragraph of boot 22 claims more than a survey')
+        return problems
+
+    def test_status_and_the_surface_pro_document_carry_boot_22_with_the_exact_labels(self):
+        """STATUS.md and SURFACE-PRO-11.md count the S1 storage survey of boot 22: it ran once, read only, found the SMMU's page unmapped at EL2 and changed no gate; the labels are exact, the old
+        sentences that said the `smmuprobe` payload had not run are gone, and each seeded fault below must be found."""
+        status, surface = (' '.join((ROOT / 'docs' / name).read_text().split()) for name in ('STATUS.md', 'SURFACE-PRO-11.md'))
+        self.assertEqual(self.storage_survey_status_problems(status, surface), [])
+        seeds = (('(boot 22; OBSERVED, one unit, one boot, from a film that started late;', '(boot 22; VERIFIED, one unit, one boot, from a film that started late;', 0),
+                 ('and found the PCIe SMMU\'s page unmapped at EL2\'s stage 1, so no SMMU register was read.', 'and found the PCIe SMMU in bypass.', 0),
+                 ('Hardware NOT RUN for everything else: every write and every takeover.', 'Hardware PASS for everything else.', 0),
+                 ('stay UNKNOWN and are not authorised', 'stay UNKNOWN and are authorised', 0), ('(OBSERVED in two boots with its provenance;', '(VERIFIED with its provenance;', 0),
+                 ('the xHCI No-Op test, the storage survey and', 'the xHCI No-Op test and', 0), ('the storage row below)', 'the storage row below; session 1, NOT RUN)', 0),
+                 ('UNKNOWN (the SMMU\'s mode, D7;', 'VERIFIED (the SMMU\'s mode, D7;', 1),
+                 ('NOT RUN (any write to the controller, the SSD or the SMMU; any read of an SMMU register): no gate changes', 'PASS (a write to the controller): a gate closes', 1),
+                 ('they ran once, in boot 22: E73)', 'they have never run)', 1), ('(session 1 ran once, in boot 22; sessions 2 and 3 are not authorised)', '(none authorised, NOT RUN)', 1),
+                 ('ran once, in boot 22 (E73): the SMMU\'s page has no stage-1 mapping at EL2, so no SMMU register was read.', 'exists and has never run.', 1),
+                 ('found that page unmapped at EL2\'s stage 1, so nothing was read: OBSERVED once', 'is the planned way to read it, NOT RUN', 1),
+                 ('and nothing is shown about the Wi-Fi beyond the shared SMMU node;', 'and the Wi-Fi works through the protected SMMU;', 1),
+                 ('E73; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 20).** The first run of the storage sessions', 'E73; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 20).** The desktop of the storage sessions', 1),
+                 ('`M1RUN-CONSOLE-RUNG2` (boot 21), `nvmesnap-s1` (boot 22) and `M1RUN-CPUS1-RUNG3` (boot 23), OBSERVED', '`M1RUN-CONSOLE-RUNG2` (boot 21), `nvmesnap-s1` (boot 22), OBSERVED', 1),
+                 ('(EXPERIMENTAL; hardware NOT RUN, except session 1, a read-only survey, which ran once in boot 22: E73).', '(EXPERIMENTAL; hardware NOT RUN).', 1))
+        for old, new, which in seeds:
+            texts = [status, surface]
+            self.assertIn(old, texts[which], f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            texts[which] = texts[which].replace(old, new, 1)
+            self.assertTrue(self.storage_survey_status_problems(*texts), f'a seeded fault went unseen: {old!r} -> {new!r}')
+
+    @staticmethod
+    def nvme_window_survey_problems(doc):
+        """What is wrong with section 7.2 of docs/SP11-NVME-WINDOW.md (the S1 survey of boot 22) or with the sentences of that document that count on it: the registers it read again must be those of
+        section 7.1, the SMMU and the DMA reach stay UNKNOWN, and nothing is claimed past the page; an empty list is a pass."""
+        problems = []
+        s71 = doc.split('### 7.1 ', 1)[1].split('### 7.2 ', 1)[0]
+        s72 = doc.split('### 7.2 ', 1)[1].split('\n## ', 1)[0]
+        s7 = doc.split('\n## 7. ', 1)[1].split('\n## 8. ', 1)[0]
+        hexes = lambda text: {int(v, 16) for v in re.findall(r'0x([0-9A-Fa-f]+)', text)}        # noqa: E731
+        row = next((line for line in s72.splitlines() if line.startswith('| D8 again |')), '')
+        if hexes(row) != {0x303C0301FF, 0x10400, 0x460001, 0x1, 0x10001, 0xCF3E7000, 0xCF3E8000} or not hexes(row) <= hexes(s71):
+            problems.append('the D8 row of 7.2 does not read CAP, VS, CC, CSTS, AQA, ASQ and ACQ with the values of 7.1')
+        flat = ' '.join(s72.split())
+        for phrase in ('OBSERVED, one unit, one boot; the decodes are INFERRED; what the payload documents say is VERIFIED only as read in them. Nothing was written.',
+                       'each equal to section 7.1\'s | OBSERVED (a second boot: the state repeats) |',
+                       'the root port\'s command word reads `0x0003` (bus master off), where the firmware\'s own view of 2026-11-15 listed `0x0007` (its bearing on the SSD\'s DMA: UNKNOWN)',
+                       'two Identify commands (opcode 6, namespace 1, `CDW10` 0, CIDs `0x12` and `0x11`) with success completions, in boot-services memory | OBSERVED; INFERRED (that the firmware\'s own DMA worked when it ran)',
+                       'a translation fault at level 3, so no stage-1 mapping at EL2 (UNMAPPED, not aborting; why: UNKNOWN) and no SMMU register was read: `VERDICT STREAM=0X60100 MODE=UNKNOWN WHY=SMMU_PAGE_UNMAPPED` '
+                       '| OBSERVED; the SMMU\'s mode and the DMA reach after a takeover UNKNOWN |',
+                       'D7 and D14 stay UNKNOWN: reading the SMMU needs an EL2 stage-1 mapping of its page, which a payload cannot add (a q1n1 or monitor change).',
+                       'The firmware\'s own DMA does not show that the SSD reaches a monitor-owned extent after a takeover (D14), and D11 was not exercised.'):
+            if phrase not in flat:
+                problems.append(f'7.2 lost {phrase[:60]!r}')
+        if re.search(r'VERIFIED(?! only as read)|MODE=(?!UNKNOWN)|bypass|protected', s72):
+            problems.append('7.2 upgrades a label, or gives the SMMU a mode')
+        for question in ('D3', 'D4', 'D8', 'D15'):
+            line = next((line for line in s7.splitlines() if line.startswith(f'| {question} |')), '')
+            if 'OBSERVED in two boots (7.1, 7.2)' not in line.rsplit('|', 2)[-2]:
+                problems.append(f'{question} of section 7 does not say OBSERVED in two boots (7.1, 7.2)')
+        d7 = next((line for line in s7.splitlines() if line.startswith('| D7 |')), '')
+        if not d7.rsplit('|', 2)[-2].strip().startswith('UNKNOWN') or 'S1\'s `smmuprobe` found that page unmapped in EL2\'s stage 1 and read nothing (7.2)' not in d7:
+            problems.append('D7 of section 7 is not UNKNOWN after S1')
+        whole = ' '.join(doc.split())
+        for phrase in ('EXPERIMENTAL; ran once, read only (boot 22, [section 7.2](#72-what-the-s1-survey-read-on-2026-11-18-boot-22))', 'EXPERIMENTAL; image files only; NOT RUN, except session 1 (the row above)',
+                       'D8 and D15 were read on 2026-11-15, section 7.1; D5 to D7 were not, the SMMU read faulted; session 1 (the q1n1 payloads `nvmesnap` and `smmuprobe`, read only) ran on 2026-11-18 '
+                       'and found the SMMU\'s page unmapped at EL2, so D5 to D7 are still unread (section 7.2)'):
+            if phrase not in whole:
+                problems.append(f'the document lost {phrase[:60]!r}')
+        return problems
+
+    def test_section_7_2_of_the_nvme_window_document_repeats_section_7_1_and_leaves_the_smmu_unknown(self):
+        """docs/SP11-NVME-WINDOW.md section 7.2 holds what boot 22 read (section 20 of this log): the same controller registers as section 7.1, the SMMU's page unmapped and its mode UNKNOWN;
+        its test file is at its size limit, so this pin lives with the log's, and each seeded fault below must be found."""
+        doc = (ROOT / 'docs' / 'SP11-NVME-WINDOW.md').read_text(encoding='utf-8')
+        self.assertEqual(self.nvme_window_survey_problems(doc), [])
+        seeds = (('ASQ `0xCF3E7000`, ACQ `0xCF3E8000`; each the same', 'ASQ `0xCF3E7000`, ACQ `0xCF3E8008`; each the same'),            # the 7.1 side
+                 ('CAP `0x303C0301FF` (MQES', 'CAP `0x303C0301FE` (MQES'),
+                 ('`CAP` `0x303C0301FF`, `VS` `0x00010400`', '`CAP` `0x303C0301FE`, `VS` `0x00010400`'), ('ACQ `0xCF3E8000`: each equal', 'ACQ `0xCF3E8008`: each equal'),     # the 7.2 side
+                 ('(a second boot: the state repeats)', '(VERIFIED: the state is constant)'), ('(UNMAPPED, not aborting; why: UNKNOWN)', '(bypass)'),
+                 ('MODE=UNKNOWN WHY=SMMU_PAGE_UNMAPPED', 'MODE=BYPASS WHY=NONE'), ('D7 and D14 stay UNKNOWN:', 'D7 and D14 are settled:'),
+                 ('and D11 was not exercised.', 'and D11 passed.'), ('OBSERVED in two boots (7.1, 7.2): endpoint 01:00.0', 'OBSERVED once (7.1): endpoint 01:00.0'),
+                 ('OBSERVED in two boots (7.1, 7.2): every expected field matched', 'OBSERVED once (7.1): every expected field matched'),
+                 ('S1\'s `smmuprobe` found that page unmapped in EL2\'s stage 1 and read nothing (7.2)', 'S1\'s `smmuprobe` found that page in bypass and read nothing (7.2)'),
+                 ('(its bearing on the SSD\'s DMA: UNKNOWN)', '(it stops the SSD\'s DMA)'), ('| OBSERVED; INFERRED (that the firmware\'s own DMA worked when it ran) |', '| VERIFIED |'),
+                 ('EXPERIMENTAL; ran once, read only (boot 22,', 'EXPERIMENTAL; NOT RUN (boot 22,'), ('NOT RUN, except session 1 (the row above)', 'NOT RUN)'), ('so D5 to D7 are still unread (section 7.2)', 'so D5 to D7 are read (section 7.2)'))
+        for old, new in seeds:
+            self.assertIn(old, doc, f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.nvme_window_survey_problems(doc.replace(old, new, 1)), f'a seeded fault went unseen: {old!r} -> {new!r}')
+
+    @staticmethod
+    def monitor_notes_problems(monitor, real):
+        """What is wrong with the notes that count on boot 23 in docs/SP11-STICK-MONITOR.md (the header of K10 and the paragraph K11) and in docs/SP11-STICK-REAL.md (its status line and the three rows that name
+        the boots of the guests): the page's values keep their labels, rung 3's verdict is the record's letter and M1's own is PASSED, and nothing is claimed past the stop; an empty list is a pass."""
+        problems = []
+        whole = ' '.join(monitor.split())
+        for phrase in ('the record it makes ran once, in boot 23: K11).**',
+                       '**K11, boot 23: rung 3 with `--boot-arg cpus=1` ran once (2026-11-18, plan `M1RUN-CPUS1-RUNG3`; OBSERVED, one unit, one boot; `docs/SP11-STICK-LOG.md` section 21).**',
+                       'The operator approved K10\'s record by its SHA-256 for that one boot.',
+                       'were those of boots 20 and 21 (the same 16-digit prefixes on the page) and `GUEST.DAT` was 118,908,480 bytes in 46 chunks with the one more word.',
+                       'The kernel honoured `cpus=1` (one `processor_init` line where boot 21 had six, and a log queue sized for one CPU: INFERRED), the CPU-start stop of boot 21 did not recur,',
+                       'the run ended 2.17 s into the call as `MON STOP GUEST_EXC` (`A=0X2000000`, `ESR_EL1` class 0; the last two hex digits of `C=` were cut by the page\'s width) on a clean report:',
+                       'M1 PASSED by the rows of its record (5a), and rung 3\'s own verdict is NOT PASSED (c) by the letter of its 5d, because a guest exception is not among the ends that PASSED allows.',
+                       'A host analysis after the boot INFERS (high confidence) that the exception is the guest kernel\'s own debugger trap, so that the kernel had entered its panic or debugger funnel; '
+                       'its text is printed only after the trap, which the monitor stopped on, so the panel shows none, and the cause is UNKNOWN.',
+                       'Still UNKNOWN: why the kernel entered the funnel, whether any driver started, and everything past the stop. The stick was read back afterwards (host check, read only): the 18 staged files unchanged, '
+                       '`REPORT.DAT` not written back (the page is the only record of the run) and only the Shell\'s marker and macOS\'s own `.fseventsd` entry new (row f: held; OBSERVED, host read). '
+                       'One unit, one boot; no claim about stability or performance.'):
+            if phrase not in whole:
+                problems.append(f'STICK-MONITOR lost {phrase[:60]!r}')
+        k11 = monitor.split('**K11, boot 23:', 1)[-1].split('\n\n', 1)[0]
+        if re.search(r'VERIFIED|desktop|macOS boots', k11):
+            problems.append('K11 upgrades a label or claims more than the stop')
+        flat = ' '.join(real.split())
+        for phrase in ('its guests ran in boots 20, 21 and 23 (docs/SP11-STICK-LOG.md sections 18, 19 and 21).',
+                       'and in boot 23 (rung 3, the console guest with `cpus=1`; OBSERVED, one boot: one vCPU, 2.17 s, to an exception at EL1 that the monitor stopped on, INFERRED to be the kernel\'s own debugger trap; section 21) |',
+                       '(the console one ran in boot 21: D9, 2026-11-18, and with `cpus=1` in boot 23).',
+                       'and with `cpus=1` to an exception at EL1 that the monitor stopped on, one vCPU, 2.17 s (boot 23: OBSERVED, one boot; INFERRED to be the kernel\'s own debugger trap); withheld, it was, INFERRED, '
+                       'stuck in a loop (boot 20) | OBSERVED / INFERRED |'):
+            if phrase not in flat:
+                problems.append(f'STICK-REAL lost {phrase[:60]!r}')
+        row = next((line for line in real.splitlines() if line.startswith('| Anything the guest does under the monitor beyond the stops of boots 21 and 23 |')), '')
+        cells = row.split('|')
+        if len(cells) < 4 or cells[2].strip() != 'UNKNOWN':
+            problems.append('the STICK-REAL row about what the guest does under the monitor is missing or is not UNKNOWN')
+        return problems
+
+    def test_the_stick_monitor_and_stick_real_notes_carry_boot_23_with_the_exact_labels(self):
+        """K10 and K11 of docs/SP11-STICK-MONITOR.md and three places of docs/SP11-STICK-REAL.md say what boot 23 showed (section 21 of this log): the values keep their labels, rung 3's verdict stays the record's
+        letter, the stop's identity stays INFERRED and its cause UNKNOWN; each seeded fault below must be found, and each seed must hit exactly one place."""
+        monitor, real = ((ROOT / 'docs' / name).read_text(encoding='utf-8') for name in ('SP11-STICK-MONITOR.md', 'SP11-STICK-REAL.md'))
+        self.assertEqual(self.monitor_notes_problems(monitor, real), [])
+        monitor_seeds = (('the record it makes ran once, in boot 23: K11).**', 'the record it makes has not run: K11).**'),
+                         ('ran once (2026-11-18, plan `M1RUN-CPUS1-RUNG3`;', 'ran once (2026-11-18, plan `M1RUN-CONSOLE-RUNG2`;'),
+                         ('were those of boots 20 and 21 (the same 16-digit prefixes on the page)', 'were new files (other 16-digit prefixes on the page)'),
+                         ('118,908,480 bytes in 46 chunks with the one more word', '118,908,480 bytes in 47 chunks with the one more word'),
+                         ('a log queue sized for one CPU: INFERRED)', 'a log queue sized for one CPU: OBSERVED)'), ('the CPU-start stop of boot 21 did not recur', 'the CPU-start stop of boot 21 recurred'),
+                         ('the run ended 2.17 s into the call as `MON STOP GUEST_EXC`', 'the run ended 2.04 s into the call as `MON STOP S2_FAULT`'),
+                         ('the last two hex digits of `C=` were cut by the page\'s width', 'the last two hex digits of `C=` were read from the stick'),
+                         ('M1 PASSED by the rows of its record (5a)', 'M1 NOT PASSED by the rows of its record (5a)'),
+                         ('is NOT PASSED (c) by the letter of its 5d', 'is PASSED by the letter of its 5d'),
+                         ('INFERS (high confidence) that the exception is the guest kernel\'s own debugger trap', 'shows that the exception is the guest kernel\'s own debugger trap'),
+                         ('so the panel shows none, and the cause is UNKNOWN.', 'so the panel shows the text, and the cause is known.'),
+                         ('the 18 staged files unchanged, `REPORT.DAT` not written back (the page is the only record of the run)', 'the 18 staged files unchanged, `REPORT.DAT` written back (the stick holds the record of the run)'),
+                         ('and only the Shell\'s marker and macOS\'s own `.fseventsd` entry new (row f: held; OBSERVED, host read)', 'and only the Shell\'s marker and macOS\'s own `.fseventsd` entry new (row f: NOT RUN)'),
+                         ('the 18 staged files unchanged,', 'the 17 staged files unchanged,'),
+                         ('(row f: held; OBSERVED, host read). One unit, one boot; no claim about stability or performance.', '(row f: held; OBSERVED, host read). The kernel boots and is stable; macOS boots.'))
+        real_seeds = (('its guests ran in boots 20, 21 and 23 (docs/SP11-STICK-LOG.md sections 18, 19 and 21)', 'its guests ran in boots 20 and 21 (docs/SP11-STICK-LOG.md sections 18 and 19)'),
+                      ('beyond the stops of boots 21 and 23 | UNKNOWN |', 'beyond the stops of boots 21 and 23 | OBSERVED |'),
+                      ('one vCPU, 2.17 s, to an exception at EL1 that the monitor stopped on, INFERRED to be the kernel\'s own debugger trap; section 21) |',
+                       'one vCPU, 2.17 s, to an exception at EL1 that the monitor stopped on, VERIFIED to be the kernel\'s own debugger trap; section 21) |'),
+                      ('and with `cpus=1` in boot 23).', 'and with `cpus=2` in boot 23).'),
+                      ('(boot 23: OBSERVED, one boot; INFERRED to be the kernel\'s own debugger trap)', '(boot 23: OBSERVED, one boot; the kernel\'s own debugger trap)'))
+        for old, new in monitor_seeds:
+            self.assertEqual(monitor.count(old), 1, f'the seed {old!r} must hit exactly one place: fix the seed, not the check')
+            self.assertTrue(self.monitor_notes_problems(monitor.replace(old, new, 1), real), f'a seeded fault went unseen: {old!r} -> {new!r}')
+        for old, new in real_seeds:
+            self.assertEqual(real.count(old), 1, f'the seed {old!r} must hit exactly one place: fix the seed, not the check')
+            self.assertTrue(self.monitor_notes_problems(monitor, real.replace(old, new, 1)), f'a seeded fault went unseen: {old!r} -> {new!r}')
 
     def test_the_sentences_about_usb_1_ss1_not_being_started_carry_the_section_17_caveat(self):
         """Sections 1, 12, 13 and 14.2 say that usb_1_ss1 was never started by firmware, or untouched by it; they were read with the stick in the second
