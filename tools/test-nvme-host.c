@@ -13,7 +13,12 @@
  *  - a lost completion is a bounded timeout that stops the queue, and an error completion is
  *    reported without desynchronising it.
  * M7 failure inventory: docs/GUEST-WRITEBACK-M7-20260926.md. These pre-implementation
- * additions protect write/flush failure handling that a normal hardware boot cannot provoke. */
+ * additions protect write/flush failure handling that a normal hardware boot cannot provoke.
+ *
+ * With -DSNAP_PLATFORM_SP11=1 -DSNAP_NVME_TAKEOVER=1 the same controller model also has registers that follow the NVMe
+ * rules (CC, CSTS, AQA, ASQ, ACQ, CAP), an admin queue, queue creation and fault injection (tools/nvme-takeover-model.h,
+ * included below), and tools/test-nvme-takeover.c (which includes this file with NVMEH_TEST_MODEL_ONLY) drives
+ * compat/nvme-takeover.c against it. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,58 +53,134 @@ static uint8_t *mem(uint64_t pa)
 }
 static uint64_t get64(const uint8_t *b) { uint64_t v; memcpy(&v, b, 8); return v; }
 
-/* The controller: on the I/O SQ tail doorbell, execute every new entry. */
+/* Where the controller finds I/O queue 1, and how it addresses memory: the layout of nvme-host.h and bus == CPU address
+ * until the takeover model moves them (a Create command names the queues; bus_delta models a translating SMMU). */
+static uint64_t io_sq_bus = DMA + NVMEH_IOSQ, io_cq_bus = DMA + NVMEH_IOCQ;
+static unsigned io_entries = NVMEH_IO_ENTRIES;
+static int64_t bus_delta;       /* the CPU address of bus address b is b + bus_delta */
+static uint8_t *dmem(uint64_t bus) { return mem(bus + (uint64_t)bus_delta); }
+
 static unsigned sq_head;
+#if SNAP_NVME_TAKEOVER
+#include "nvme-takeover-model.h"
+#else
+#define DEV_READ(p, n) do { } while (0)
+#define DEV_WRITE(p, n) do { } while (0)
+#endif
+
+/* The controller: on the I/O SQ tail doorbell, execute every new entry. */
 static void controller(unsigned tail)
 {
     while (sq_head != tail) {
-        uint8_t *e = mem(DMA + NVMEH_IOSQ + sq_head * 64);
-        sq_head = (sq_head + 1) % NVMEH_IO_ENTRIES;
+        uint8_t *e = dmem(io_sq_bus + sq_head * 64);
+        DEV_READ(e, 64);
+        sq_head = (sq_head + 1) % io_entries;
         uint32_t cdw0; memcpy(&cdw0, e, 4);
         uint64_t prp1 = get64(e + 24), prp2 = get64(e + 32);
         uint64_t lba = get64(e + 40);
         uint32_t nlb; memcpy(&nlb, e + 48, 4);
         uint32_t n = (nlb & 0xffff) + 1, status = 0;
         unsigned op = cdw0 & 0xff;
-        CHECK(op <= 2);
-        if (op) CHECK(lba >= FIRST && lba + n - 1 <= controller_last);
-        else CHECK(!prp1 && !prp2 && !lba && !nlb);           /* Flush has no data payload */
-        if (op == 1) CHECK(nlb & (1u << 30));               /* every physical write uses FUA */
-        if (drop) { drop--; continue; }                      /* a lost command: no completion */
-        if (fail_nth && !--fail_nth) fail_status = 0x280;
+        int takeover = 0;
+#if SNAP_NVME_TAKEOVER
+        takeover = tk.active && !tk.confine;
+        if (takeover) {
+            tk.io_ops[op]++;
+            tk.last_slba = lba;                                 /* all 64 bits of the SLBA the unit sent */
+            if (op != 2) { tk.bad_opcode++; TK_FAIL("an I/O opcode other than Read reached the controller"); }
+            if (tk_wait_event(TK_WAIT_IO)) continue;            /* this command never completes */
+        }
+#endif
+        if (!takeover) {
+            CHECK(op <= 2);
+            if (op) CHECK(lba >= FIRST && lba + n - 1 <= controller_last);
+            else CHECK(!prp1 && !prp2 && !lba && !nlb);           /* Flush has no data payload */
+            if (op == 1) CHECK(nlb & (1u << 30));               /* every physical write uses FUA */
+            if (drop) { drop--; continue; }                      /* a lost command: no completion */
+            if (fail_nth && !--fail_nth) fail_status = 0x280;
+        }
         if (fail_status) { status = fail_status; fail_status = 0; }
+#if SNAP_NVME_TAKEOVER
+        else if (takeover && (lba >= tk.nsze || n > tk.nsze - lba)) {
+            tk.oob_reads++; TK_FAIL("a read beyond the namespace reached the controller");
+            status = 0x80;                                       /* LBA Out of Range */
+        }
+#endif
         else if (op) {
             uint64_t bytes = n * 512ull, pages = (bytes + 4095) / 4096;
             for (uint64_t pg = 0; pg < pages; pg++) {
-                uint64_t pa = pg == 0 ? prp1 : pages == 2 ? prp2 : get64(mem(prp2) + 8 * (pg - 1));
+                uint8_t *list = pages > 2 && pg ? dmem(prp2) : 0;
+                if (list) DEV_READ(list + 8 * (pg - 1), 8);
+                uint64_t pa = pg == 0 ? prp1 : pages == 2 ? prp2 : list ? get64(list + 8 * (pg - 1)) : 0;
                 uint64_t len = bytes - pg * 4096 < 4096 ? bytes - pg * 4096 : 4096;
-                if (op == 2) memcpy(mem(pa), disk + lba * 512 + pg * 4096, len);
-                else memcpy(disk + lba * 512 + pg * 4096, mem(pa), len);
+                uint8_t *m = dmem(pa);
+                if (!m) {
+#if SNAP_NVME_TAKEOVER
+                    tk.bad_dma++;
+#endif
+                    printf("FAIL a PRP outside the DMA extent: %#llx\n", (unsigned long long)pa); failures++;
+                    break;
+                }
+#if SNAP_NVME_TAKEOVER
+                if (takeover && op == 2 && (tk.spec_fill & 2)) tk_spec_fill(m, len);
+#endif
+                if (op == 2) DEV_WRITE(m, len); else DEV_READ(m, len);
+                /* A namespace larger than the model's disk aliases it, so a read at an LBA above 2^32 lands on real data. */
+                if (op == 2) memcpy(m, disk + (lba % DISK_LBAS) * 512 + pg * 4096, len);
+                else memcpy(disk + (lba % DISK_LBAS) * 512 + pg * 4096, m, len);
             }
         }
-        uint8_t *c = mem(DMA + NVMEH_IOCQ + cq_tail * 16);
-        uint32_t dw3 = ((cdw0 >> 16) ^ wrong_cid) | cq_phase << 16 | status << 17;
-        uint32_t dw2 = sq_head | (wrong_sqid ? 2u : 1u) << 16;
-        memset(c, 0, 16);
-        memcpy(c + 8, &dw2, 4);
-        memcpy(c + 12, &dw3, 4);
-        cq_tail = (cq_tail + 1) % NVMEH_IO_ENTRIES;
-        if (!cq_tail) cq_phase ^= 1;
+        uint32_t cid_xor = wrong_cid, sqid = wrong_sqid ? 2u : 1u, sqhd = 0;
+        unsigned flip = 0, copies = 1;
+#if SNAP_NVME_TAKEOVER
+        if (takeover) {
+            struct tk_fault f = tk_fault_for(1, ++tk.io_seq);
+            cid_xor = f.cid_xor; flip = f.phase_flip; copies = 1 + f.dup;
+            if (f.status) status = f.status;
+            if (f.sqid) sqid = f.sqid;
+            sqhd = f.sqhd;
+        }
+#endif
+        for (unsigned copy = 0; copy < copies; copy++) {
+            uint8_t *c = dmem(io_cq_bus + cq_tail * 16);
+            DEV_WRITE(c, 16);
+            uint32_t dw3 = ((cdw0 >> 16) ^ cid_xor) | (cq_phase ^ flip) << 16 | status << 17;
+            uint32_t dw2 = (sqhd ? sqhd : sq_head) | sqid << 16;
+            memset(c, 0, 16);
+            memcpy(c + 8, &dw2, 4);
+            memcpy(c + 12, &dw3, 4);
+            if (flip) break;                                     /* an entry of the wrong phase is not posted: the slot stays */
+            cq_tail = (cq_tail + 1) % io_entries;
+            if (!cq_tail) cq_phase ^= 1;
+        }
     }
 }
 
 static uint32_t rd(void *ctx, uint64_t pa)
 {
     (void)ctx;
-    if (pa >= BAR && pa < BAR + sizeof regs) return regs[(pa - BAR) / 4];
+    if (pa >= BAR && pa < BAR + sizeof regs) {
+#if SNAP_NVME_TAKEOVER
+        uint32_t v;
+        if (tk.active && tk_rd(pa - BAR, &v)) return v;
+#endif
+        return regs[(pa - BAR) / 4];
+    }
     uint8_t *m = mem(pa);
     if (!m) { printf("FAIL read of unmapped %#llx\n", (unsigned long long)pa); failures++; return 0; }
+#if SNAP_NVME_TAKEOVER
+    if (tk.active) tk_pending_flush();
+    if (tk.active && tk.cache) return cache_rd(pa);
+#endif
     uint32_t v; memcpy(&v, m, 4); return v;
 }
 static void wr(void *ctx, uint64_t pa, uint32_t v)
 {
     (void)ctx;
     if (pa >= BAR && pa < BAR + sizeof regs) {
+#if SNAP_NVME_TAKEOVER
+        if (tk.active) { tk_wr(pa - BAR, v); return; }
+#endif
         regs[(pa - BAR) / 4] = v;
 #if SNAP_ANS_ASYNC
         if (pa == BAR + 0x1008 && defer) { doorbells++; latched = v; return; }
@@ -109,9 +190,18 @@ static void wr(void *ctx, uint64_t pa, uint32_t v)
     }
     uint8_t *m = mem(pa);
     if (!m) { printf("FAIL write to unmapped %#llx\n", (unsigned long long)pa); failures++; return; }
+#if SNAP_NVME_TAKEOVER
+    if (tk.active && tk.cache) { cache_wr(pa, v); return; }
+#endif
     memcpy(m, &v, 4);
 }
-static void clean(void *ctx, uint64_t pa, uint64_t size) { (void)ctx; (void)pa; (void)size; }
+static void clean(void *ctx, uint64_t pa, uint64_t size)
+{
+    (void)ctx; (void)pa; (void)size;
+#if SNAP_NVME_TAKEOVER
+    if (tk.active && tk.cache) cache_clean(pa, size);
+#endif
+}
 static uint64_t now(void *ctx) { (void)ctx; return clock_now += 10; }
 
 static const struct nvmeh_ops ops = {0, rd, wr, clean, now};
@@ -133,6 +223,10 @@ static void controller_ready(void)
     regs[0x28 / 4] = (uint32_t)(DMA + NVMEH_ASQ); regs[0x2c / 4] = (uint32_t)((DMA + NVMEH_ASQ) >> 32);
     regs[0x30 / 4] = (uint32_t)(DMA + NVMEH_ACQ); regs[0x34 / 4] = (uint32_t)((DMA + NVMEH_ACQ) >> 32);
     sq_head = 3; cq_tail = 3; cq_phase = 1; doorbells = 0;
+    io_sq_bus = DMA + NVMEH_IOSQ; io_cq_bus = DMA + NVMEH_IOCQ; io_entries = NVMEH_IO_ENTRIES; bus_delta = 0;
+#if SNAP_NVME_TAKEOVER
+    tk.active = 0;
+#endif
 }
 
 static int data_is(uint64_t lba, uint32_t count, uint32_t at)
@@ -404,6 +498,7 @@ static void async_suite(void)
 }
 #endif
 
+#ifndef NVMEH_TEST_MODEL_ONLY
 int main(void)
 {
     for (size_t i = 0; i < sizeof disk; i++) disk[i] = (uint8_t)(i * 2654435761u >> 13);
@@ -511,3 +606,4 @@ int main(void)
     printf("%s: %llu reads, %d failures\n", failures ? "FAIL" : "ok", (unsigned long long)s.reads, failures);
     return failures != 0;
 }
+#endif

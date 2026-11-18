@@ -24,6 +24,7 @@ pinned public source; never "ran on a Surface"), OBSERVED, INFERRED, UNKNOWN, EX
 | q1n1 takes the controller over after ExitBootServices (shutdown, reset, its own admin queue, Identify, I/O queue 1, GPT read, window arm) and leaves it running | q1n1 `tools/nvme_m3.py` (Mac host over the proxy; A16 only) | A16 VERIFIED (q1n1 `docs/A16-NVME-M3.md`); SP11 UNIMPLEMENTED |
 | The monitor adopts the running controller, re-proves its registers, and serves the window through I/O queue 1 | `compat/nvme-host.{c,h}`, `compat/ans-window.{c,h}` | A16 qualified; unchanged by this work |
 | SP11 takeover contract: descriptor and record cross-checks, window geometry, endpoint re-proof, admin and I/O allow-lists | `compat/nvme-host.{c,h}`, only under `-DSNAP_PLATFORM_SP11=1` | EXPERIMENTAL; called by the monitor's adoption entry with host-placed blocks; an all-zero pair refuses with `NVMEH_SP11_STATUS_UNWIRED` (-145), see section 2 |
+| The host-less takeover core, read only (the rest is in `compat/nvme-takeover.h`), behind `SNAP_NVME_TAKEOVER` (default 0) | `compat/nvme-takeover.{c,h}`, `tools/test-nvme-takeover.{c,py}`, `tools/nvme-takeover-model.h` | EXPERIMENTAL; host-tested only; NOT RUN, needs its own named authorisation; D11 open |
 | Host model, GPT layout schema and loader, fixtures, differential tests | `tools/fixtures/sp11/`, `tools/test-nvme-window-hamoa.{py,c}` | EXPERIMENTAL |
 | The descriptor's `storage.nvme` section: segment, ECAM window, root port, endpoint, SMMU, stream window | `config/boards/sp11.json`, `tools/board_descriptor.py`, `tools/test-board-descriptor-storage.py` | EXPERIMENTAL; the values are OBSERVED once on one unit ([section 7.1](#71-what-the-x2-test-image-read-on-2026-11-15)) or in its IORT |
 | The host producer of the target block and the placement of both blocks in the window reservation | `probes/nvmesp11.py`, `tools/test-nvme-sp11-wiring.py` | EXPERIMENTAL; the producer of the record (a takeover's output) is UNIMPLEMENTED |
@@ -57,10 +58,9 @@ the params (`ANS_WINDOW_NVMEH`), the target (`ANS_WINDOW_NVMEH_TARGET`, +0x1000 
 target from the descriptor's `storage.nvme` section and the per-run pins (the namespace EUI64 and the run generation, which are never
 descriptor values): a group the descriptor or the run does not state has its `known` bit clear and refuses by name (`UNKNOWN_BDF`,
 `UNKNOWN_STREAM`, ...). The record is what a takeover recorded and is untrusted input; its producer is UNIMPLEMENTED on the SP11
-(`pack_record` only lays out the fields a producer will hand it). The adoption clears `state.status` first, because the state lives in the
-reservation and an ADOPTED word from an earlier launch would otherwise outlive a refusal and still reach the doorbells (a stale state
-word with zero blocks, and with a stale generation, are held by `tools/test-nvme-sp11-wiring.py`). A refusal is also stored in
-`state.prepare`, the state is then "not adopted", and a later read, write or flush returns `NVMEH_E_DEAD` before any doorbell. If both blocks are all zero (the host
+(`pack_record` only lays out the fields a producer will hand it). The adoption clears `state.status` first and stores a refusal in
+`state.prepare` (the table above); a stale state word with zero blocks, and one with a stale generation, are held by
+`tools/test-nvme-sp11-wiring.py`. If both blocks are all zero (the host
 placed neither) the status is `NVMEH_SP11_STATUS_UNWIRED` (-145): a named refusal, where an all-zero record would otherwise be
 refused as an ABI mismatch. The A16 side of that function is unchanged ([section 8](#8-validation-and-what-it-does-not-show): the
 A16 monitor images are byte for byte the ones before). Host decoding: `probes/run.py` reserves -96 to -145 for this contract, names
@@ -371,8 +371,7 @@ This work does not show: that an SP11 SSD, SMMU or firmware behaves as modelled;
 ECAM page, BAR0 and DMA window (the A16 relies on q1n1's identity map, `compat/nvme-host.c:6`; X4); that a Windows boot
 survives a controller reset; that the call of `nvmeh_sp11_adopt` in the monitor's adoption entry works on the unit (it is wired and
 host-tested, and the producer of the record is UNIMPLEMENTED, section 2); or that the host-placed blocks are fresh (section 2.3).
-`python3 tools/test-nvme-sp11-wiring.py` (the placement, the target, the C structs against the host layout, each refusal reaching the
-launch's status) and `python3 tools/test-board-descriptor-storage.py` hold the host side of the wiring.
+`python3 tools/test-nvme-sp11-wiring.py` and `python3 tools/test-board-descriptor-storage.py` hold the host side of the wiring (section 2).
 
 The contract also trusts what the host places. The protected extents, the write-authorisation and DMA-proven flags and `smmu_mode` of
 the record are checked for consistency with the descriptor and the prepared run, not for truth; `nvmeh_sp11_prove_endpoint` has no vendor
