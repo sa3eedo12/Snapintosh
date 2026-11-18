@@ -8,7 +8,8 @@ GIC writes only to this CPU's frame and only of classes G, R and C (since pass 5
 stored to. H6: the stop timer's interrupts as the monitor takes them (probes/xnuboot/async.c, transcribed in the harness) against the GIC state the
 arm half leaves, with the firmware's own state as the unit showed it once (OBSERVED, one unit). Phase C (section 13): the GIC record that the reporter
 reads after a failed put-back, the filler below the stack, an unwritable record slot, the tick of the call, and the dirty lines of the harness's model
-of a cache. The seeded-bad stages: each test define breaks the check that matches its fault and the real stage passes that check.
+of a cache. The time box's cap (class BoxCap): the wrapper's, the builder's and the harness's number are one, a box of 120 s is called and its TICKS above 2**31 is on the page whole,
+and 121, 2**32 - 1, 2**32 + 5 and 2**64 - 1 are refused. The seeded-bad stages: each test define breaks the check that matches its fault and the real stage passes that check.
 
     python3 tools/test-sp11-stick-monitor.py
     Q1N1_SP11_TREE=/nonexistent python3 tools/test-sp11-stick-monitor.py      (the harness tests SKIP)
@@ -19,12 +20,14 @@ bounds, checks and report against the model; it proves nothing about the monitor
 reads its disassembly) or the unit. No hardware, nothing under /Volumes, no network; everything is written below build/. A SKIP is never a PASS.
 EXPERIMENTAL; hardware NOT RUN."""
 import concurrent.futures
+import re
 import shutil
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import sp11_stick_bundle_m1 as m1  # noqa: E402
 import sp11_stick_gic_testlib as G  # noqa: E402
 import sp11_stick_monitor_testlib as M  # noqa: E402
 import sp11_stick_wrapper_testlib as T  # noqa: E402
@@ -34,6 +37,8 @@ from sp11_stick_wrapper_testlib import E, sb  # noqa: E402
 STAGE = sb.STAGE
 FIX, RUNS = {}, {}
 PIN = {n: o for n, o, _, _ in sb.PIN_LAYOUT}
+HZ = 19200000                           # the facts' cntfrq_hz: the model's counter runs at the unit's rate
+AT_CAP = f'ticks={M.BOX_MAX * HZ + HZ // 2}'        # a call that takes the whole time box and half a second more, in counter ticks: 2.3e9, above 2**31
 # The GIC as the unit showed it once, in the read phase of the dry run (OBSERVED, one unit, from a photograph; docs/SP11-STICK-MONITOR.md section 8).
 OBSERVED_GIC = ['CTLR 0x10', 'TYPER 0xF87F051E', 'IIDR 0x401043B', 'ISENABLER0 0x4E800001', 'PRIO 0xA0', 'CFG1 0', 'WAKER 0', 'IGROUPR0 0']
 WRAPPER_WRITES = {'GICD_CTLR', 'GICR_IGROUPR0', 'GICR_IPRIORITYR', 'GICR_ICFGR1', 'GICR_ISENABLER0', 'GICR_ICENABLER0', 'GICR_ICPENDR0', 'ICC_PMR_EL1',
@@ -77,7 +82,13 @@ CASES = {
     'refuse-params-early': dict(extra=lambda w: [params_patch(w, M.PARAMS_EARLY, 8)]),
     'refuse-params-gpu': dict(extra=lambda w: [params_patch(w, M.PARAMS_GPU, 1)]),
     'refuse-params-box0': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, 0)]),
-    'refuse-params-box9': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, 9)]),
+    'refuse-params-box-over': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, M.BOX_MAX + 1)]),
+    'refuse-params-box-u32max': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, 2 ** 32 - 1)]),
+    'refuse-params-box-wide': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, 2 ** 32 + 5)]),     # its low 32 bits are a box the cap allows
+    'refuse-params-box-negative': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, 2 ** 64 - 1)]),
+    'happy-box-max': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, M.BOX_MAX)], cfg=AT_CAP, runs=('snapmon', 'snaprep')),
+    'box-max-widest': dict(extra=lambda w: [params_patch(w, M.PARAMS_WATCHDOG, M.BOX_MAX)], runs=('snapmon', 'snaprep'),
+                           cfg=f'ret=0x51554E01 status=0xFFFFFFFFFFFFFFA6 stack=0x3FFF8 {AT_CAP}'),
     'refuse-image-digest': dict(world=lambda b: dict(images={0: M.FAKE_FILE[:-1] + b'\x5a'})),
     'refuse-image-size': dict(world=lambda b: dict(sizes={0: len(M.FAKE_FILE) + 4096, 1: 0x6000})),
     'refuse-pin-not-m1': dict(world=lambda b: dict(pin=b.pin)),       # the reviewer's mix: the PIN.DAT of a --gic-stop bundle with the monitor's file
@@ -105,7 +116,10 @@ SEED_CASES = {'no-params-check': ('refuse-params-early',), 'no-digest': ('refuse
               'refuse-after': ('leave-hcr',), 'no-gic-finish': ('not-restored', 'refuse-not-restored'),
               'no-filler-scan': ('overflow-4', 'overflow-skip-lowest'), 'no-filler-precheck': ('refuse-filler-dirty',), 'no-filler-clean': ('overflow-4',),
               'flush-unwritable': ('refuse-record-ro',), 'ticks-early': ('happy',), 'no-window-clean': ('happy',), 'no-record-clean': ('happy',),
-              'no-label-check': ('refuse-pin-not-m1', 'refuse-pin-label-late', 'refuse-pin-label-nodash')}
+              'no-label-check': ('refuse-pin-not-m1', 'refuse-pin-label-late', 'refuse-pin-label-nodash'),
+              'box-plus-one': ('refuse-params-box-over',), 'box-minus-one': ('happy-box-max',),
+              'box-narrow': ('refuse-params-box-u32max', 'refuse-params-box-wide'), 'box-signed': ('refuse-params-box-negative',),
+              'ticks-int32': ('happy-box-max',)}
 
 
 class Run:
@@ -290,6 +304,16 @@ class Held:
         return found + ([] if calling.ticks_call < final.ticks_call else [f'the CALLING record holds {calling.ticks_call}, the final one {final.ticks_call}: not a later read'])
 
     @staticmethod
+    def lines_are_the_record(run, which=('IMAGE', 'RET')):
+        """The page lines `which` are the record's words, rendered independently of the C (M.render), whole: not cut at the runner's width and no tick count narrowed."""
+        rec, texts, found = run.rec, run.mon.texts(), []
+        for w in which:
+            line = next((t for t in texts if t.startswith(f'SNAPMON MON {w}')), None)
+            if line != f'SNAPMON {M.render(rec, w)}':
+                found.append(f'{w}: the page says {line!r}, the record {M.render(rec, w)!r}')
+        return found
+
+    @staticmethod
     def clean(run):
         """What a restart reads is what the stage stored, in the model's cache: at the CALL mark the head and both records are clean, at a refusal the
         record, and at the FINAL mark nothing of REPORT.DAT is dirty (the window after the call, the records after every store, the stack and any filler
@@ -432,6 +456,69 @@ class Timing(Base):
         self.holds(Held.ticks_at_call(RUNS['happy']))
 
 
+class BoxCap(Base):
+    """The time box's cap of 120 s (SP11_STICK_MONITOR_BOX_MAX_S; 5 s in the first run's wrapper): one number in the wrapper, the builder and this harness; a box at the cap is
+    called, and its TICKS, above 2**31, is on the page whole and within the width the runner allows; a box above it, or one that only looks allowed narrowed or as a signed
+    word, is refused."""
+
+    @staticmethod
+    def spellings(header, source, builder, harness):
+        """The ways the cap can be spelled apart: the macro must be a plain unsigned literal (a compile-time constant), the static assert's ceiling the same number, the stage
+        must compare the word with the macro, and the builder's and the harness's numbers are the macro's."""
+        macro = re.search(r'#define SP11_STICK_MONITOR_BOX_MAX_S (\d+)u\b', header)
+        ceiling = re.search(r'SP11_STICK_MONITOR_BOX_MAX_S >= 1 && SP11_STICK_MONITOR_BOX_MAX_S <= (\d+),', header)
+        if not macro or not ceiling or 'r->box_s > SP11_STICK_MONITOR_BOX_MAX_S ? SM_OUT_PARAMS_BOX : 0;' not in source:
+            return ['the macro, its static assert or the stage\'s comparison is not in the form these tests read']
+        cap = int(macro.group(1))
+        return [f'{what} is {number}, the wrapper\'s cap is {cap}' for what, number in
+                (('the static assert\'s ceiling', int(ceiling.group(1))), ('the builder\'s BOX_MAX_S', builder), ('the harness\'s BOX_MAX', harness)) if number != cap]
+
+    def test_the_wrapper_the_builder_and_the_harness_spell_one_cap(self):
+        header, source = ((T.ROOT / 'probes' / name).read_text() for name in ('sp11-stick-monitor.h', 'sp11-stick-monitor.c'))
+        self.assertEqual(self.spellings(header, source, m1.BOX_MAX_S, M.BOX_MAX), [])
+
+    def test_the_agreement_check_can_fail(self):
+        header, source = ((T.ROOT / 'probes' / name).read_text() for name in ('sp11-stick-monitor.h', 'sp11-stick-monitor.c'))
+        for name, h, s, builder, harness in (
+                ('a macro above the builder\'s', header.replace('MAX_S 120u', 'MAX_S 121u'), source, m1.BOX_MAX_S, M.BOX_MAX),
+                ('a macro that is not a literal', header.replace('MAX_S 120u', 'MAX_S (120u)'), source, m1.BOX_MAX_S, M.BOX_MAX),
+                ('a ceiling above the cap', header.replace('MAX_S <= 120,', 'MAX_S <= 121,'), source, m1.BOX_MAX_S, M.BOX_MAX),
+                ('a literal in the stage', header, source.replace('r->box_s > SP11_STICK_MONITOR_BOX_MAX_S ?', 'r->box_s > 120 ?'), m1.BOX_MAX_S, M.BOX_MAX),
+                ('a builder that kept 5', header, source, 5, M.BOX_MAX), ('a harness that kept 5', header, source, m1.BOX_MAX_S, 5)):
+            with self.subTest(name):
+                self.assertTrue(h != header or s != source or builder != m1.BOX_MAX_S or harness != M.BOX_MAX, 'the mutant is the original')
+                self.assertNotEqual(self.spellings(h, s, builder, harness), [])
+
+    def test_the_builders_help_names_the_cap(self):
+        text = (T.ROOT / 'tools/sp11_stick_bundle_build.py').read_text()
+        want = f'a time box of 1 to {m1.BOX_MAX_S} s'
+        self.assertIn(want, text)
+        self.assertNotIn(want, text.replace(want, 'a time box of 1 to 5 s'), 'the pin can fail')
+
+    def test_a_box_at_the_cap_is_called_and_the_page_says_its_ticks_whole(self):
+        for name in ('happy-box-max', 'box-max-widest'):
+            with self.subTest(name):
+                r = RUNS[name]
+                self.holds(Held.common(r) + Held.order(r) + Held.args(r))
+                rec = r.rec
+                ticks = rec.ticks_return - rec.ticks_call
+                self.assertEqual(rec.box_s, M.BOX_MAX)
+                self.assertGreater(ticks, 2 ** 31, 'a signed 32-bit tick count would have wrapped')
+                self.assertGreaterEqual(ticks, M.BOX_MAX * HZ)
+                self.holds(Held.lines_are_the_record(r))
+                for which in ('IMAGE', 'RET'):
+                    line = next(t for t in r.rep.texts() if t.startswith(f'SNAPREP MON {which}'))
+                    self.assertEqual(line, f'SNAPREP {M.render(rec, which)}', 'the reporter prints the record whole as well')
+                    self.assertLessEqual(len(line), 100)
+                self.assertIn(f'BOX_S={M.BOX_MAX} ', next(t for t in r.mon.texts() if t.startswith('SNAPMON MON IMAGE')))
+
+    def test_the_widest_line_at_the_cap_still_fits(self):
+        """RET and STATUS at their longest, TICKS of ten digits and a full stack: 99 of the runner's 100 columns, so a wider field would cut the line."""
+        line = next(t for t in RUNS['box-max-widest'].mon.texts() if t.startswith('SNAPMON MON RET'))
+        self.assertGreaterEqual(len(line), 97, 'the case is no longer the widest')
+        self.assertLessEqual(len(line), 100)
+
+
 class Cache(Base):
     """Finding 6a of the review: the harness models a cache with a dirty flag per 64-byte line, and the stage cleans what it stores. What a restart reads
     is DRAM's. This is the model's cache, not the Oryon's: it shows that the stage cleans, and nothing about when a real line is evicted."""
@@ -460,7 +547,8 @@ class Checks(Base):
 
     def test_refusals(self):
         for name, code in (('refuse-params-early', M.OUT.PARAMS_EARLY_STOP), ('refuse-params-gpu', M.OUT.PARAMS_GPU), ('refuse-params-box0', M.OUT.PARAMS_BOX),
-                           ('refuse-params-box9', M.OUT.PARAMS_BOX), ('refuse-image-digest', M.OUT.IMAGE_DIGEST), ('refuse-image-size', M.OUT.IMAGE_SIZE),
+                           ('refuse-params-box-over', M.OUT.PARAMS_BOX), ('refuse-params-box-u32max', M.OUT.PARAMS_BOX), ('refuse-params-box-wide', M.OUT.PARAMS_BOX),
+                           ('refuse-params-box-negative', M.OUT.PARAMS_BOX), ('refuse-image-digest', M.OUT.IMAGE_DIGEST), ('refuse-image-size', M.OUT.IMAGE_SIZE),
                            ('refuse-window-dirty', M.OUT.WINDOW_DIRTY), ('refuse-filler-dirty', M.OUT.WINDOW_DIRTY),
                            ('refuse-pin-not-m1', M.OUT.PIN_LABEL), ('refuse-pin-label-late', M.OUT.PIN_LABEL), ('refuse-pin-label-nodash', M.OUT.PIN_LABEL),
                            ('refuse-report-ro', M.OUT.REPORT_UNWRITABLE), ('refuse-record-ro', M.OUT.REPORT_UNWRITABLE)):
@@ -604,7 +692,10 @@ class Seeded(Base):
                   'no-filler-scan': Held.overflow_seen, 'no-filler-precheck': lambda r: Held.refused_before_call(r, M.OUT.WINDOW_DIRTY),
                   'no-filler-clean': Held.clean, 'flush-unwritable': Held.record_untouched, 'ticks-early': Held.ticks_at_call,
                   'no-window-clean': Held.clean, 'no-record-clean': Held.clean,
-                  'no-label-check': lambda r: Held.refused_before_call(r, M.OUT.PIN_LABEL)}
+                  'no-label-check': lambda r: Held.refused_before_call(r, M.OUT.PIN_LABEL),
+                  'box-plus-one': lambda r: Held.refused_before_call(r, M.OUT.PARAMS_BOX), 'box-narrow': lambda r: Held.refused_before_call(r, M.OUT.PARAMS_BOX),
+                  'box-signed': lambda r: Held.refused_before_call(r, M.OUT.PARAMS_BOX), 'box-minus-one': lambda r: Held.order(r) + Held.args(r),
+                  'ticks-int32': Held.lines_are_the_record}
         for seed, check in checks.items():
             with self.subTest(seed):
                 for name in SEED_CASES[seed]:

@@ -804,4 +804,15 @@ static uint64_t framebuffer_hash(const struct params *p)
         hash = (hash ^ *(volatile uint64_t *)(p->fb_pa + i)) * 0x100000001b3UL;
     return hash;
 }
+#if SNAP_SP11_CPU_START_ACK
+/* The state of the CPU-start acknowledge (compat/cpu-start-ack.h) is not a member of struct context: it sits in the slack of the context's last page, which belongs to
+ * no one (xnuboot_setup starts the table arena on the next page), so that no offset of the context and no size of it moves with the gate. xnuboot_setup zeroes it. */
+static inline struct cpu_start_ack *cpu_start_ack_of(struct context *c)
+{
+    return (struct cpu_start_ack *)((uintptr_t)c + sizeof(struct context));
+}
+/* A context that ends on a page boundary has no slack: the next page is the arena's. */
+_Static_assert(sizeof(struct context) % 4096 != 0 && 4096 - sizeof(struct context) % 4096 >= sizeof(struct cpu_start_ack),
+               "the CPU-start acknowledge state must fit in the last page of the context (the table arena must not move)");
+#endif
 

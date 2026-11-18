@@ -514,7 +514,7 @@ class Provenance(unittest.TestCase):
         self.assertIn(f'NV2 header   sha256 {facts["nv2"]["header_sha256"]}', text_of(facts))
 
     def test_the_approved_text_fits_the_builders_cap_and_a_longer_file_is_refused(self):
-        self.assertEqual(bb.AUTHORISATION_CAP, 1 << 17, 'raised from 64 KiB on purpose; docs/SP11-STICK-MONITOR.md section 19 says why')
+        self.assertEqual(bb.AUTHORISATION_CAP, 9 << 14, 'raised from 64 KiB to 128 KiB and from 128 KiB to 144 KiB on purpose (K13); docs/SP11-STICK-MONITOR.md section 19 and K13 say why')
         size = len(text_of().encode())
         self.assertGreater(size, 1 << 16, 'the record outgrew the old cap: that is why it was raised')
         self.assertLess(size, bb.AUTHORISATION_CAP)

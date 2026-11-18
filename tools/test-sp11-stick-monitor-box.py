@@ -24,14 +24,44 @@ spec = importlib.util.spec_from_file_location('sp11_monitor_text_tests', TOOLS /
 TEXT = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(TEXT)
 text_of, flat, sha = TEXT.text_of, TEXT.flat, TEXT.sha
-# SHA-256 of the text of the fabricated real build for a box of 30 s and one of 120 s, the builder's cap at 120 s: a changed byte of either is another record.
-BOX_GOLDEN = {30: 'cb792f08cee47edc68c9ba2442fc06467d688aac3c02b7c038193b0594b67128', 120: 'de7293035d2c1f706b035d1b39cb3bca6a62788d8660d7070f0fc9db0678a5dc'}
+# SHA-256 of the whole text of the fabricated real build for a box of 30 s and one of 120 s, the builder's cap at 120 s: a changed byte of either is another record. Each is the text of the
+# decided box plus the sentences that a longer box adds (LONG_BOX_PINS) and nothing else; the sentence on the 512 events ends with ", INFERRED", the label of what is read from the sources: without
+# that clause the two texts hash to b9427b98... and 94ea3cee..., the pins before the clause was added (three re-wrapped lines of 5b).
+BOX_GOLDEN = {30: 'ac8a652eb88a582b25191b4cf1cfc7c8c3743e3e11a839eb3a0b836c1771351d', 120: '86b6f24bbee259ac7016154c225f5664ed43cceee2b8e58858f584c72a84fb6c'}
 # The places where the box matters: a sentence of a record that is not the same in a record of another box must hold one of these.
 BOX_ANCHORS = ('LONGER THAN THE 5 s THAT D5 AND D8 DECIDED', 'The rest of D5 and D8 holds', 'D8 the thermal exception', 'D5 the time box is 5 s at most', 'one CPU only, for up to',
                'No thermal guard exists on this path', 'does without them for up to', 'Time box: ', 'the known parts, low sum', 'The plan\'s budget is a run well under 20 s',
                'RELAXES THE 20 s PRECAUTION OF D5 (the time box of', 'D8 was decided on 2026-11-17', 'If the stop timer never fires', 'No page change for',
                'operator-safe wait and not a measurement', 'after the STAGE=DONE line: a lit page that has stopped there', 'the stop came inside the time box',
-               'TICKS= counts the whole call', 'does not change for', 'MON IMAGE OFF=', 'MON CALL X0=', 'Film 30 frames a second or more', 'time of one CPU, about')
+               'TICKS= counts the whole call', 'does not change for', 'MON IMAGE OFF=', 'MON CALL X0=', 'Film 30 frames a second or more', 'time of one CPU, about',
+               # what a box longer than the decided one adds (LONG_BOX_PINS)
+               'What the extra seconds buy is limited', 'whether the Surface restarts is UNTESTED', 'D8 accepted the exposure of one CPU for a box of 5 s only',
+               'may only idle (UNKNOWN)', 'That control ran no guest', 'does not reach it', 'is not logged longer', 'Boot 20\'s page already read EVENTS=512',
+               'Only the counts (MON COUNTS)')
+# SHA-256 of the text of the decided box of 5 s in this fabricated real build, under the builder's cap as it is (120 s): a box longer than 5 s adds sentences (LONG_BOX_PINS), and the text of
+# 5 s has none of them, which the long-box test below proves sentence by sentence and the regeneration of the approved 5 s records at a cap of 5 proves byte by byte.
+D5_FIVE_S_TEXT = 'fa8ff6986fb26a90f98f3d73b9eec11b65a38e614774b97510906f7cc71233cc'
+# The sentences that a box longer than the decided one adds (what the log keeps, the kernel without its timer
+# interrupts, the restart risk, and D8 beside the exposure numbers): `{box}` is this record's box. A text of a longer box has every one of them, a text of a box up to the
+# decided one has none, and a text that lacks one (or has one it should not) is rejected.
+LONG_BOX_PINS = {
+    'section 0 says what the extra seconds buy': 'What the extra seconds buy is limited: the log keeps the first 512 events whatever the box (section 5b), the kernel may only '
+                                                 'idle without its timer interrupts (section 0b), and whether the Surface restarts inside a box of {box} s is UNKNOWN (section 4).',
+    '0b the restart risk is untested': 'Inside a box of {box} s with the stock kernel running, whether the Surface restarts is UNTESTED: UNKNOWN (section 4).',
+    '0b D8 beside the exposure': '(D8, section 4). D8 accepted the exposure of one CPU for a box of 5 s only: for this box of {box} s it is the operator\'s decision, and '
+                                 'approving this text makes it (section 0). AC power is REQUIRED.',
+    '0b the kernel may only idle': 'A kernel without those timer interrupts may only idle (UNKNOWN), so the seconds of a box beyond the first 5 may add nothing.',
+    '4 D8 beside the sums': 'which agrees with that scaling. D8 accepted the exposure of one CPU for a box of 5 s only: for this box of {box} s it is the operator\'s decision, and '
+                            'approving this text makes it (section 0).',
+    '4 the restart control ran no guest': 'That control ran no guest; the one run with the stock kernel (boot 20) went through its 5 s and to the report page without a restart '
+                                          '(OBSERVED once). A stock kernel running inside a box of {box} s is UNTESTED: whether the Surface restarts there is UNKNOWN, and the '
+                                          'argument above does not reach it.',
+    '5b the log is not longer': 'A box longer than 5 s is not logged longer: the monitor keeps at most the first 512 events (EVENT_MAX) and the first 1 KiB of the guest\'s '
+                                'console buffer (CONSOLE_MAX) whatever the box, and the page prints five events and six console lines of them, so most of a box of {box} s is '
+                                'not logged (read from probes/xnuboot/report_layout.c, telemetry.c and probes/sp11-stick-reporter.c, INFERRED).',
+    '5b the log was full in boot 20': 'Boot 20\'s page already read EVENTS=512 DROPPED=834 inside its 5 s (OBSERVED once): the log was full, so a longer box adds no events to '
+                                      'the page.',
+    '5b what the whole box reaches': 'Only the counts (MON COUNTS) and the end of the run (MON STOP, MON EXIT) reflect the whole box.'}
 
 
 def sentences(text):
@@ -87,10 +117,37 @@ def budget_problems(text):
         ('the relaxation of the precaution of D5 is not said', 'APPROVING THIS TEXT RELAXES THE 20 s PRECAUTION OF D5 (the time box of 5 s is kept;' in f)) if not ok]
 
 
+def long_box_problems(text, box):
+    """The keys of LONG_BOX_PINS whose sentence is wrong for `box`: absent from the text of a box longer than the decided one, or present in the text of any other."""
+    f = flat(text)
+    return [key for key, phrase in LONG_BOX_PINS.items() if (phrase.format(box=box) in f) != (box > TEXT.m1g.D5_BOX_S)]
+
+
 class Boxes(unittest.TestCase):
     def texts(self, *boxes, cap=120):
         with mock.patch.object(m1, 'BOX_MAX_S', cap):
             return {box: text_of(time_box_s=box) for box in boxes}
+
+    def test_a_box_longer_than_the_decided_one_says_what_its_extra_seconds_buy_and_a_text_without_one_of_the_sentences_is_rejected(self):
+        texts = self.texts(1, 4, 5, 6, 30, 120)
+        phrases = [p.format(box=30) for p in LONG_BOX_PINS.values()]
+        self.assertFalse([a for a in phrases for b in phrases if a != b and a in b], 'no pin is a part of another: a deletion mutant fails its own pin only')
+        for box, text in texts.items():
+            with self.subTest(box):
+                self.assertEqual(long_box_problems(text, box), [])
+            for key, phrase in LONG_BOX_PINS.items():
+                with self.subTest(box=box, pin=key):
+                    f = flat(text)
+                    if box > TEXT.m1g.D5_BOX_S:
+                        self.assertEqual(f.count(phrase.format(box=box)), 1, 'each sentence is said once where it belongs')
+                        self.assertEqual(long_box_problems(f.replace(phrase.format(box=box), '', 1), box), [key], 'a text without the sentence is rejected')
+                    else:
+                        self.assertEqual(long_box_problems(f + ' ' + phrase.format(box=box), box), [key], 'a box up to the decided one has none of them')
+
+    def test_the_text_of_the_decided_box_is_pinned_and_a_changed_byte_is_another_text(self):
+        text = text_of()
+        self.assertEqual(sha(text.encode()), D5_FIVE_S_TEXT)
+        self.assertNotEqual(sha(text.replace('FORCE OFF', 'power cycle', 1).encode()), D5_FIVE_S_TEXT, 'a changed byte is another text')
 
     def test_every_number_that_depends_on_the_box_comes_from_it_for_any_box_from_1_to_120_s(self):
         for box, text in self.texts(1, 2, 4, 5, 6, 30, 59, 60, 61, 119, 120).items():
@@ -141,7 +198,9 @@ class Boxes(unittest.TestCase):
             with self.subTest(name):
                 self.assertIn(old, f)
                 self.assertTrue(box_problems(f.replace(old, new), 30, 120), 'rejected')
-        self.assertTrue(box_problems(flat(text_of()), 5, 120), 'the cap is the builder\'s: a text that says 5 under a cap of 120 is rejected')
+        with mock.patch.object(m1, 'BOX_MAX_S', 5):         # the text of a builder whose cap is still the 5 s of D5, whatever the cap of this tree is
+            kept = flat(text_of())
+        self.assertTrue(box_problems(kept, 5, 120), 'the cap is the builder\'s: a text that says 5 under a cap of 120 is rejected')
 
     def test_a_longer_box_changes_the_text_only_where_the_box_matters_and_each_number_is_pinned(self):
         texts = self.texts(5, 30, 120)

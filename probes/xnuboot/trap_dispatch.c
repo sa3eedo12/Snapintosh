@@ -443,6 +443,25 @@ static int xnuboot_trap_locked(uint64_t *frame, uint64_t esr, uint64_t *elr)
 #endif
                     secondary_release,&request)) { *elr+=4;return 0; }
             }
+#if SNAP_SP11_CPU_START_ACK
+            /* EXPERIMENTAL diagnostic, not a model of the hardware (compat/cpu-start-ack.h): a 32-bit store to the PMGR CPU-start block is taken and
+             * ignored, and NO CPU IS STARTED. Only with no secondary configured (x4 = 0, the SP11 M1 profile): when host_cpus is set the release above
+             * owns the block, whatever it answered, and this never runs. Everything else (a read, another width, another offset, another fault) falls
+             * through to the stop below. */
+            if (!c->host_cpus) {
+                struct dc_access a=dc_decode(esr);
+                unsigned register_at;
+                if (cpu_start_ack_match(esr,ipa,hpfar,&a,&register_at)) {
+                    struct cpu_start_ack *taken=cpu_start_ack_of(c);
+                    uint64_t value=dc_narrow(&a,a.reg==31 ? 0 : frame[a.reg]);
+                    cpu_start_ack_note(taken,*elr,register_at,value);
+                    if (taken->total<=CPU_START_ACK_FIRST)
+                        record(c,EV_CPU_START_ACK,*elr,register_at,value,taken->total);
+                    *elr+=4;
+                    return 0;
+                }
+            }
+#endif
             int window = dc_window(p->device_pa, p->device_span,
                                    p->device_count, ipa, &off);
             if (window >= 0)

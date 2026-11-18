@@ -786,3 +786,16 @@ _Static_assert(OUT_GUEST_NET+2+GUEST_NET_LINK_WORDS+GUEST_NET_VIEW_WORDS<=OUT_VI
 _Static_assert(OUT_VIEW_RECLAIM+2+VIEW_RECLAIM_WORDS==OUT_IB_ASYNC,"the view reclaim record ends at the IB async slot");
 #endif
 #endif
+#if SNAP_SP11_CPU_START_ACK
+/* The opt-in CPU-start acknowledge (compat/cpu-start-ack.h). Its event: a 32-bit store to the PMGR CPU-start block was taken and ignored, no CPU started: a = the register's
+ * offset (4, 8 or 12), b = the 32-bit value written, c = this store's number (1 is the first); pc = the guest store. Only the first CPU_START_ACK_FIRST are logged. */
+#define EV_CPU_START_ACK 61
+/* Its record: "CPUACK01", a word of struct size << 32 | version, then the struct's 22 words, in the otherwise unused words after the thermal report where the DVFS record
+ * would sit. Written by xnuboot_report at its normal return, zero acknowledged stores included, so that the magic tells "built with the acknowledge, nothing taken" from
+ * "built without it" (the window is zero before the call). Not written by its two early returns (ownership quarantine, GPU terminal): the window is partial then. */
+#if SNAP_CPU_DVFS || SNAP_GPU_DVFS
+#error "the CPU-start acknowledge record takes the report words after the thermal report, which the DVFS record uses"
+#endif
+#define OUT_CPU_START_ACK (OUT_THERMAL + A16_THERMAL_REPORT_WORDS)
+_Static_assert(OUT_CPU_START_ACK + CPU_START_ACK_REPORT_WORDS <= (0x10000-16)/8, "the CPU-start acknowledge record must fit the report reservation");
+#endif

@@ -325,7 +325,7 @@ class Text(unittest.TestCase):
     def test_the_duration_the_bound_and_what_the_wrapper_cannot_bound_are_said(self):
         flat = ' '.join(self.text.split())
         for needle in ('It is on from Q\'s write until the put-back\'s last write, which comes after the monitor has returned: the whole call',
-                       'What bounds it is the monitor\'s own stop, the interrupt of its timer (CNTHP, PPI 26) at the time box on CNTPCT_EL0, at most 5 s',
+                       'What bounds it is the monitor\'s own stop, the interrupt of its timer (CNTHP, PPI 26) at the time box on CNTPCT_EL0, at most 120 s',
                        'Nothing in the wrapper bounds the call', 'ends only by the operator\'s FORCE OFF (section 5c), and this stage\'s put-back does not run then',
                        'On a refusal of the arm half the quarantine lasts only as long as the put-back that follows at once, except in the both-gates case, in which that put-back does not lift it'):
             self.assertIn(needle, flat)

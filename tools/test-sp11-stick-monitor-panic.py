@@ -561,7 +561,8 @@ class Words(unittest.TestCase):
         self.assertLessEqual(cited - mine, {(p, a, b) for p, a, b, _ in pn.CITES}, 'cited, and no table holds the fragments of it')
         self.assertEqual(mine - cited, set(), 'every entry of the table is cited')
         for path, first, last, fragments in rp.CITES:
-            held = '\n'.join((ROOT / path).read_text().splitlines()[first - 1:last])
+            shift = pn.r5.CITE_DRIFT.get((path, first), 0)
+            held = '\n'.join((ROOT / path).read_text().splitlines()[first - 1 + shift:last + shift])
             for fragment in fragments:
                 with self.subTest(f'{path}:{first}-{last} {fragment}'):
                     self.assertIn(fragment, held)

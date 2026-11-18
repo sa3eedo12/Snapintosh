@@ -589,6 +589,20 @@ _Static_assert(SNAP_FAST_VCPU_TRAPS && SNAP_ROOT_CACHE_WIDE,
 #if SNAP_BOOT_RELOCATE
 #include "../compat/boot-relocate.h"
 #endif
+/* The SP11 M1 profile's opt-in CPU-start acknowledge (compat/cpu-start-ack.h, docs/SP11-MONITOR-PROFILE.md section 10): a 32-bit store to the PMGR CPU-start
+ * block is taken and ignored when no secondary is configured. EXPERIMENTAL diagnostic, not a model of the hardware. Off, the code is absent. */
+#ifndef SNAP_SP11_CPU_START_ACK
+#define SNAP_SP11_CPU_START_ACK 0
+#endif
+#if SNAP_SP11_CPU_START_ACK
+#if !SNAP_PLATFORM_SP11
+#error "SNAP_SP11_CPU_START_ACK is a diagnostic of the Surface Pro 11 M1 profile: build with SNAP_PLATFORM_SP11"
+#endif
+#if SNAP_BOOT_RELOCATE
+#error "SNAP_SP11_CPU_START_ACK and SNAP_BOOT_RELOCATE both want the PMGR CPU-start block: the release path owns it when a secondary can run"
+#endif
+#include "../compat/cpu-start-ack.h"
+#endif
 /* ADRENO_GUEST_UNMAP also subtracts the leaves it clears from XNU's IOMMU
  * table count, as t8110dart_unmap would (compat/dart-wiredcnt.h): the kext's
  * unwire/rewire otherwise overflows it (installed-fresh-20261017-v29). */

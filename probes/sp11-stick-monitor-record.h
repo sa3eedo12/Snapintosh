@@ -20,6 +20,11 @@
 #if SNAP_SP11_STICK_MONITOR
 #include "sp11-stick-gic-record.h"
 
+/* SNAPREP-M1.BIN compiles this header without sp11-stick-monitor.h, whose list of seeded faults cannot see the seed used below there. */
+#if defined(SP11_STICK_MONITOR_SEED_TICKS_INT32) && !defined(SP11_STICK_HOST_TEST)
+#error "the seeded faults are part of the host test build only"
+#endif
+
 #define SM_REC_AT (SG_REC_AT + SG_REC_SLOT)     /* REPORT.DAT + 0x12000 */
 #define SM_REC_BYTES 512u
 #define SM_REC_VERSION 1u
@@ -204,7 +209,11 @@ SC_INLINE int sm_line(const struct q1n1_payload_args *a, struct pl_line *l, unsi
         sc_key_hex(a, l, "MON RET=", SM_U64(b, ret));
         sc_key_hex(a, l, " STATUS=", SM_U64(b, status));
         sc_key_dec(l, " ENTERED=", SM_U64(b, entered));
+#ifdef SP11_STICK_MONITOR_SEED_TICKS_INT32
+        sc_key_dec(l, " TICKS=", (uint64_t)(int32_t)(SM_U64(b, ticks_return) - SM_U64(b, ticks_call)));
+#else
         sc_key_dec(l, " TICKS=", SM_U64(b, ticks_return) - SM_U64(b, ticks_call));
+#endif
         sc_key_dec(l, " STACK=", SM_U64(b, stack_used));
         sc_key_dec(l, "/", SM_U64(b, stack_bytes));
         return 1;

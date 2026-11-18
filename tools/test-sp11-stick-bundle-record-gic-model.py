@@ -18,7 +18,7 @@ INTID arrives and writes no SPI register, the bounds that the durations add up (
 window verdict, a data abort in a window ends it with everything put back, and the registers that are not read first. The class Source holds, with no model and no toolchain, the
 sentences that describe the stage's source and the documents (COUNTER, whole-register writes, the end of a foreign interrupt, the verdict return, the heading of section 2, the paragraph
 of what the stage never touches, the silence rule for any point of the page, the boot attributions of the reads) and the commit that the note names against the sources of the
-pair, with the q1n1 files it names against the build tool's inputs. What the model proves is the stage's order and its accesses against the model, and
+pair (the files its translation units include where SNAP_SP11_STICK_MONITOR is 0: the monitor entry's two headers are included only under that gate, and the scan and its mutants are tested), with the q1n1 files it names against the build tool's inputs. What the model proves is the stage's order and its accesses against the model, and
 nothing about the unit. It needs clang and a q1n1 checkout ($Q1N1_SP11_TREE) and SKIPs without them, which is not a pass. No hardware: NOT RUN. Everything is
 written below build/sp11-wrapper-test-scratch-record-gic-model/, deleted at the end."""
 import collections
@@ -234,15 +234,47 @@ def counter_problems(gic, dry):
     return problems + ['another place returns COUNTER'] * ((gic.count('SG_OUT_COUNTER'), dry.count('SG_OUT_COUNTER')) != (3, 1))
 
 
-def pair_sources():
-    """The files of the repository that the final pair is built from: the sources of both payloads and the headers they include, the build tool and the profile."""
+def included(text, false_gates=('SNAP_SP11_STICK_MONITOR',)):
+    """The headers that `text` includes where the macros in `false_gates` are 0, as in the GIC pair: the includes inside `#if GATE` (and the `#else` of `#if !GATE`) are left out. Any other
+    conditional is taken as true, both branches, so that no file is left out for a reason this textual scan does not understand: `#ifdef GATE` and `#ifndef GATE` too, because
+    probes/sp11-stick-hw.h:52 defines the gate as 0, so whether it is defined depends on what was included before."""
+    live, stack, found = True, [], []
+    for line in (l.strip() for l in re.sub(r'/\*.*?\*/', '', text, flags=re.S).splitlines()):
+        opened = re.fullmatch(r'#\s*if\s+(!?)(\w+)', line)
+        if opened:
+            bang, name = opened.groups()
+            known, cond = name in false_gates, bang == '!'
+            stack.append((live, known, cond))
+            live = live and (cond if known else True)
+        elif line.startswith('#if'):
+            stack.append((live, False, True))
+        elif line.startswith('#elif'):
+            live = stack[-1][0]
+        elif line.startswith('#else'):
+            before, known, cond = stack[-1]
+            live = before and (not cond if known else True)
+        elif line.startswith('#endif'):
+            live = stack.pop()[0]
+        elif live and (found_one := re.fullmatch(r'#\s*include\s+"([^"]+)"', line)):
+            found.append(found_one.group(1))
+    return found
+
+
+def pair_sources(blind=False):
+    """The files of the repository that the final pair is built from: the sources of both payloads and the headers they include where SNAP_SP11_STICK_MONITOR is 0 (wrapper.c and reporter.c
+    include the monitor entry's headers only under that gate; `blind`: wherever the text says), the build tool and the profile."""
+    gates = () if blind else ('SNAP_SP11_STICK_MONITOR',)
     todo, seen = [s for name in wb.GIC_NAMES for s in wb.SOURCES[name] if s.startswith('probes/')], set()
     while todo:
         path = todo.pop()
         if path not in seen:
             seen.add(path)
-            todo += [f'probes/{name}' for name in re.findall(r'#include "([^"]+)"', (ROOT / path).read_text()) if (ROOT / 'probes' / name).is_file()]
-    return sorted(seen | {'tools/sp11_stick_wrapper_build.py', 'config/monitor-profile-sp11-m1.json'})
+            todo += [f'probes/{name}' for name in included((ROOT / path).read_text(), gates) if (ROOT / 'probes' / name).is_file()]
+    return sorted(seen | {WRAPPER_TOOL, 'config/monitor-profile-sp11-m1.json'})
+
+
+WRAPPER_TOOL = 'tools/sp11_stick_wrapper_build.py'      # held to a digest: it gained --cpu-start (docs/SP11-MONITOR-PROFILE.md section 10)
+WRAPPER_TOOL_SHA256 = '0c272f55fa9ddf39ab4d26767985b57c5a4a3aaaf6394772a7a74aa8aaeaf726'
 
 
 def source_problems(commit, files):
@@ -251,6 +283,34 @@ def source_problems(commit, files):
     if git('cat-file', '-e', f'{commit}^{{commit}}').returncode:
         raise unittest.SkipTest(f'git does not have commit {commit[:7]}')
     return git('diff', '--name-only', commit, '--', *files).stdout.split()
+
+
+def gated_out(text):
+    """Whether a header compiles to nothing where SNAP_SP11_STICK_MONITOR is 0, as in the GIC pair: outside its include guard and the first half of one `#if SNAP_SP11_STICK_MONITOR` block it holds only
+    includes, and the gate has no #else or #elif (what follows either is compiled where the gate is 0). Belt and braces for pair_sources(), which leaves such a header out because the pair's
+    sources include it only under the gate."""
+    stack, blocks = [], 0
+    for line in (l.strip() for l in re.sub(r'/\*.*?\*/', '', text, flags=re.S).splitlines()):
+        if not line:
+            continue
+        inside = '#if SNAP_SP11_STICK_MONITOR' in stack
+        if line.startswith('#endif'):
+            if not stack:
+                return False
+            stack.pop()
+        elif line.startswith('#if'):
+            if not inside and line != '#if SNAP_SP11_STICK_MONITOR' and not (line.startswith('#ifndef ') and not stack):
+                return False
+            blocks += line == '#if SNAP_SP11_STICK_MONITOR' and not inside
+            if blocks > 1:
+                return False
+            stack.append(line)
+        elif line.startswith(('#else', '#elif')):
+            if not inside or stack[-1] == '#if SNAP_SP11_STICK_MONITOR':
+                return False
+        elif not inside and not (line.startswith('#include "') or (len(stack) == 1 and line == f'#define {stack[0].split()[1]}')):
+            return False
+    return not stack
 
 
 class Model(unittest.TestCase):
@@ -516,12 +576,42 @@ class Source(unittest.TestCase):
 
     def test_the_commit_of_the_note_is_the_tree_of_the_pair_s_sources_and_a_file_that_changed_since_is_not(self):
         commit = re.search(r"^COMMIT = '([0-9a-f]{40})'", (TOOLS / 'test-sp11-stick-bundle-record-gic.py').read_text(), re.M).group(1)     # the one the note's line is held to
-        files = pair_sources()
+        files = pair_sources()      # what the pair's translation units include where SNAP_SP11_STICK_MONITOR is 0: not the monitor entry's headers, which wrapper.c and reporter.c include only under it
         self.assertGreaterEqual(len(files), 12)
         self.assertEqual({'probes/sp11-stick-*' if f.startswith('probes/sp11-stick-') else f for f in files},
-                         {'probes/sp11-stick-*', 'tools/sp11_stick_wrapper_build.py', 'config/monitor-profile-sp11-m1.json'}, 'what the note names as the sources of the payloads')
-        self.assertEqual(source_problems(commit, files), [])
-        self.assertEqual(source_problems(commit, [*files, 'tools/sp11_stick_bundle_record_gic.py']), ['tools/sp11_stick_bundle_record_gic.py'])
+                         {'probes/sp11-stick-*', WRAPPER_TOOL, 'config/monitor-profile-sp11-m1.json'}, 'what the note names as the sources of the payloads')
+        held = [f for f in files if f != WRAPPER_TOOL]
+        self.assertEqual(source_problems(commit, held), [])
+        self.assertEqual(source_problems(commit, [*held, 'tools/sp11_stick_bundle_record_gic.py']), ['tools/sp11_stick_bundle_record_gic.py'])
+        self.assertEqual(T.sha((ROOT / WRAPPER_TOOL).read_bytes()), WRAPPER_TOOL_SHA256, 're-pin it on purpose')
+
+    def test_the_include_scan_follows_the_gate_and_the_headers_it_leaves_out_are_the_monitors_and_inert(self):
+        """pair_sources() skips the includes under SNAP_SP11_STICK_MONITOR (0 in the pair). Against the gate-blind scan it leaves out the monitor entry's two headers and nothing else, and each
+        holds nothing outside that gate (gated_out), so an include that lost its gate would still find them inert."""
+        both = ['probes/sp11-stick-monitor-record.h', 'probes/sp11-stick-monitor.h']
+        self.assertEqual(sorted(set(pair_sources(blind=True)) - set(pair_sources())), both)
+        self.assertEqual([f for f in both if not gated_out((ROOT / f).read_text())], [])
+        for name, text, want in (('under the gate', '#if SNAP_SP11_STICK_MONITOR\n#include "a.h"\n#endif\n#include "b.h"\n', ['b.h']),
+                                 ('the else of a negated gate', '#if !SNAP_SP11_STICK_MONITOR\n#include "a.h"\n#else\n#include "b.h"\n#endif\n', ['a.h']),
+                                 ('the else of the gate', '#if SNAP_SP11_STICK_MONITOR\n#else\n#include "c.h"\n#endif\n', ['c.h']),
+                                 ('nested in the gate', '#if SNAP_SP11_STICK_MONITOR\n#if FOO\n#include "e.h"\n#endif\n#endif\n', []),
+                                 ('another condition is taken as true', '#if defined(X) || SNAP_SP11_STICK_MONITOR\n#include "d.h"\n#endif\n#if SNAP_SP11_STICK_GIC\n#include "g.h"\n#endif\n', ['d.h', 'g.h']),
+                                 ('ifdef and ifndef are not resolved', '#ifdef SNAP_SP11_STICK_MONITOR\n#include "a.h"\n#endif\n#ifndef SNAP_SP11_STICK_MONITOR\n#include "b.h"\n#else\n#include "c.h"\n#endif\n',
+                                  ['a.h', 'b.h', 'c.h'])):
+            with self.subTest(name):
+                self.assertEqual(included(text), want)
+        self.assertEqual(included('#if SNAP_SP11_STICK_MONITOR\n#include "a.h"\n#endif\n', ()), ['a.h'], 'a scan that ignores the gate finds the gated include')
+
+    def test_gated_out_refuses_every_way_code_can_outlive_the_gate(self):
+        """The two headers pass (above). Each of these does not: code outside the gate, another gate, an unclosed block, code in the gate's own #else or #elif (it compiles where the gate is 0) and a second block."""
+        text, end = (ROOT / 'probes/sp11-stick-monitor.h').read_text(), '#endif /* SNAP_SP11_STICK_MONITOR */'
+        for name, bad in (('a declaration outside the gate', text.replace('#include "sp11-stick-hw.h"', '#include "sp11-stick-hw.h"\nint leak;', 1)),
+                          ('another gate', text.replace('#if SNAP_SP11_STICK_MONITOR', '#if SNAP_SP11_STICK_GIC', 1)), ('an unclosed block', text.rsplit('#endif', 1)[0]),
+                          ('code in the #else of the gate', text.replace(end, '#else\nint leak;\n' + end, 1)), ('code in the #elif of the gate', text.replace(end, '#elif 1\nint leak;\n' + end, 1)),
+                          ('a second gate block', text + '\n#if SNAP_SP11_STICK_MONITOR\nint x;\n#endif\n')):
+            with self.subTest(name):
+                self.assertNotEqual(bad, text)
+                self.assertFalse(gated_out(bad))
 
     def test_the_q1n1_files_the_note_names_are_inputs_of_the_payloads_in_the_build_tool(self):
         named = ('Makefile', 'start.S', 'payload.ld', 'payload-util.h', 'sha256.c')

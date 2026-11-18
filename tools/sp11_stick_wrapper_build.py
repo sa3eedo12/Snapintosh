@@ -19,6 +19,12 @@ What that proof cannot show: an address dependence that is not a relocation, an 
 examined, and profile-build.json is self-attesting: the tool holds its flags to the profile's rules and its digests to the files beside it,
 and nothing proves that the objects were compiled with those flags.
 
+With --cpu-start ack the monitor entry variant is the EXPERIMENTAL one whose monitor takes the guest's 32-bit stores to the PMGR CPU-start block and
+starts no CPU (docs/SP11-MONITOR-PROFILE.md section 10): the profile build named by --monitor-build must be an `ack` build (python3
+tools/sp11_m1_profile.py build --cpu-start ack ...), the output is SNAPMON-M1-ACK.BIN and SNAPREP-M1-ACK.BIN, and both are compiled with
+-DSNAP_SP11_CPU_START_ACK=1 so that a payload can say which monitor it was built for. The default, --cpu-start stop, refuses an `ack`
+profile build and `ack` refuses any other: CPU_START_MISMATCH, whichever way round. A `stop` build is what it was before the option existed.
+
 The recipe is q1n1's and is read from its Makefile, not copied: PAYLOAD_CFLAGS and PAYLOAD_LDFLAGS (the flags, --emit-relocs among
 them), payloads/start.S first, payloads/payload.ld, then llvm-objcopy -O binary, then q1n1's tools/sp11_payload_elfcheck.py on each ELF.
 A change of that recipe changes the bytes, and therefore the digest an authorisation names; the tool prints the digest of every q1n1 file
@@ -55,8 +61,16 @@ SOURCES = {'SNAPMON.BIN': ('probes/sp11-stick-wrapper.c', 'probes/sp11-stick-loa
            # no CNTHP, VBAR_EL2 or HCR_EL2 write is in it), and the monitor stage in place of the dry run's.
            'SNAPMON-M1.BIN': ('probes/sp11-stick-wrapper.c', 'probes/sp11-stick-load.c', 'probes/sp11-stick-report.c', 'probes/sp11-stick-gic.c',
                               'probes/sp11-stick-monitor.c', 'platform/uefi/sha256.c'),
-           'SNAPREP-M1.BIN': ('probes/sp11-stick-reporter.c',)}
+           'SNAPREP-M1.BIN': ('probes/sp11-stick-reporter.c',),
+           # The opt-in CPU-start acknowledge variant of the monitor entry (docs/SP11-MONITOR-PROFILE.md section 10): the same sources, the same stage, another monitor.
+           'SNAPMON-M1-ACK.BIN': ('probes/sp11-stick-wrapper.c', 'probes/sp11-stick-load.c', 'probes/sp11-stick-report.c', 'probes/sp11-stick-gic.c',
+                                  'probes/sp11-stick-monitor.c', 'platform/uefi/sha256.c'),
+           'SNAPREP-M1-ACK.BIN': ('probes/sp11-stick-reporter.c',)}
 MONITOR_NAMES = ('SNAPMON-M1.BIN', 'SNAPREP-M1.BIN')
+ACK_NAMES = ('SNAPMON-M1-ACK.BIN', 'SNAPREP-M1-ACK.BIN')
+M1_NAMES = MONITOR_NAMES + ACK_NAMES
+CPU_STARTS = ('stop', 'ack')
+ACK_DEFINE = '-DSNAP_SP11_CPU_START_ACK=1'     # tools/sp11_m1_profile.py CPU_START_DEFINES['ack'], the monitor's compile-time gate
 MONITOR_OFFSET = 0x20000                # where the monitor starts in SNAPMON-M1.BIN: a multiple of 4 KiB, so its vectors (at +0x800) are 2 KiB aligned
 MONITOR_MAX = 8 * 1024 * 1024           # a sanity bound on the appended image; the runner's own cap is far higher
 MONITOR_CALL = 'sp11_monitor'           # the symbol the wrapper calls, defined by --defsym
@@ -69,7 +83,8 @@ REPORTER_MAX = 64 * 1024
 REFUSALS = ('Q1N1_TREE_ABSENT', 'PROFILE_BAD', 'RECIPE_CHANGED', 'TOOL_MISSING', 'OUT_DIR_REFUSED', 'OUT_NOT_EMPTY', 'BUILD_FAILED',
             'ELF_REFUSED', 'UNDEFINED_SYMBOL', 'REPORTER_TOO_BIG')
 # The refusals of the monitor entry variant (docs/SP11-STICK-MONITOR.md section 7), apart from the older ones that docs/SP11-STICK-WRAPPER.md lists.
-MONITOR_REFUSALS = ('MONITOR_BUILD_BAD', 'MONITOR_MISMATCH', 'MONITOR_LAYOUT', 'MONITOR_NOT_PIC', 'GIC_MACROS_DIFFER', 'WRAPPER_TOO_BIG', 'IMAGE_TOO_BIG')
+MONITOR_REFUSALS = ('MONITOR_BUILD_BAD', 'MONITOR_MISMATCH', 'MONITOR_LAYOUT', 'MONITOR_NOT_PIC', 'GIC_MACROS_DIFFER', 'WRAPPER_TOO_BIG', 'IMAGE_TOO_BIG',
+                    'CPU_START_MISMATCH')
 LLVM_DIRS = ('/opt/homebrew/opt/llvm/bin', '/opt/homebrew/opt/lld/bin')
 
 
@@ -186,9 +201,10 @@ def build_one(name, tree, cflags, ldflags, defines, out, extra=(), extra_ld=()):
     obj = out / 'obj' / stem
     obj.mkdir(parents=True)
     flags = [*cflags, f'-I{tree / "payloads"}', '-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1',
-             *(['-DSNAP_SP11_STICK_GIC=1'] if name in GIC_NAMES + MONITOR_NAMES else []),
-             *(['-DSNAP_SP11_STICK_MONITOR=1'] if name in MONITOR_NAMES else []),
-             *(defines if name in ('SNAPMON.BIN', 'SNAPMON-GIC.BIN', 'SNAPMON-M1.BIN') else []), *extra]
+             *(['-DSNAP_SP11_STICK_GIC=1'] if name in GIC_NAMES + M1_NAMES else []),
+             *(['-DSNAP_SP11_STICK_MONITOR=1'] if name in M1_NAMES else []),
+             *([ACK_DEFINE] if name in ACK_NAMES else []),
+             *(defines if name in ('SNAPMON.BIN', 'SNAPMON-GIC.BIN', 'SNAPMON-M1.BIN', 'SNAPMON-M1-ACK.BIN') else []), *extra]
     objects = []
     for source in ('payloads/start.S', *SOURCES[name]):
         base = tree if source.startswith(('payloads/', 'platform/')) else ROOT
@@ -275,11 +291,25 @@ def flag_problems(flags):
     return problems
 
 
-def read_monitor(monitor_arg, record_arg):
+def cpu_start_problems(record, cpu_start):
+    """[what] that makes `record` (a profile-build.json already read) the record of another CPU-start choice than `cpu_start`: its own "cpu_start" key (absent in a `stop`
+    build, which is what such a record was before the choice existed), and the gate's define among its flags: for `ack` -DSNAP_SP11_CPU_START_ACK=1 exactly once and no
+    other spelling of the name, for `stop` no spelling of it at all, so that a record whose key and flags disagree is refused for either."""
+    says = record.get('cpu_start', 'stop')
+    spellings = [flag for flag in record['flags'] if re.fullmatch(r'-DSNAP_SP11_CPU_START_ACK(=.*)?', flag)]
+    problems = [] if says == cpu_start else [f'the record says cpu_start {says!r}']
+    if cpu_start == 'ack' and spellings != [ACK_DEFINE]:
+        problems.append(f'its flags must carry {ACK_DEFINE} once and no other spelling of the gate, and carry {spellings}')
+    if cpu_start == 'stop' and spellings:
+        problems.append(f'its flags carry the acknowledge gate {spellings}')
+    return problems
+
+
+def read_monitor(monitor_arg, record_arg, cpu_start='stop'):
     """(the monitor's bytes, the build record, its directory): the monitor must be the output of the profile build that `record_arg` (its
     profile-build.json) describes: the record's own digests, and the ELF and objects beside it, say so. The record is a file the profile tool wrote
     and nothing authenticates it (self-attesting): its digests tie the files together and its flags are held to the profile's rules, but nothing
-    proves that the objects were compiled with those flags."""
+    proves that the objects were compiled with those flags. It must also be the record of the CPU-start choice this build is for (CPU_START_MISMATCH)."""
     try:
         record = json.loads(Path(record_arg).read_text())
         built = record['monitor']
@@ -289,6 +319,8 @@ def read_monitor(monitor_arg, record_arg):
         assert all(isinstance(flag, str) for flag in record['flags'])
     except (OSError, ValueError, KeyError, TypeError, AssertionError) as error:
         raise Refused('MONITOR_BUILD_BAD', f'{record_arg} is not the record of an sp11-m1 profile build ({error!r})') from None
+    if problems := cpu_start_problems(record, cpu_start):
+        raise Refused('CPU_START_MISMATCH', f'{record_arg} is not the record of a --cpu-start {cpu_start} build: {"; ".join(problems)}')
     if problems := flag_problems(record['flags']):
         raise Refused('MONITOR_BUILD_BAD', f'{record_arg}: the flags of the build break the rules of the sp11-m1 profile: {"; ".join(problems[:3])}')
     directory = Path(record_arg).resolve().parent
@@ -356,14 +388,19 @@ def monitor_defines(monitor, offset):
             *[f'-DSP11_MONITOR_SHA{i}={int.from_bytes(digest[8 * i:8 * i + 8], "little"):#x}ULL' for i in range(4)]]
 
 
-def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset=MONITOR_OFFSET):
+def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset=MONITOR_OFFSET, cpu_start='stop'):
     """Build SNAPMON-M1.BIN (the wrapper padded to `offset`, then the monitor) and SNAPREP-M1.BIN below `out_arg`; returns the report dict,
-    which is also written as build-report.json."""
+    which is also written as build-report.json. With cpu_start 'ack' they are SNAPMON-M1-ACK.BIN and SNAPREP-M1-ACK.BIN, built for (and only for) a profile
+    build of the acknowledging monitor, and the report says so; a 'stop' build and its report are what they were before the choice existed."""
+    if cpu_start not in CPU_STARTS:
+        raise Refused('CPU_START_MISMATCH', f'--cpu-start is one of {", ".join(CPU_STARTS)}, not {cpu_start!r}')
+    ack = cpu_start == 'ack'
+    image_name, reporter_name = ACK_NAMES if ack else MONITOR_NAMES
     tree = q1n1_tree()
     out = check_out(out_arg, force)
     cflags, ldflags = recipe_flags(tree)
     defines = gic_defines(profile)
-    monitor, record, directory = read_monitor(monitor_arg, record_arg)
+    monitor, record, directory = read_monitor(monitor_arg, record_arg, cpu_start)
     if macros_of(defines) != macros_of(record['flags']):
         raise Refused('GIC_MACROS_DIFFER', f'the profile {profile} and the monitor build disagree about {sorted(GIC_MACROS)}')
     if offset <= 0 or offset % 4096:
@@ -375,13 +412,13 @@ def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset
     check_layout(out / 'monitor-pic' / 'xnuboot-relocs.elf')       # the ELF that was proved to flatten to these bytes, not only the record's
     pinned = monitor_defines(monitor, offset)
     extra = [*pinned, '-DSW_GIC_DRY_REGS=0']
-    wrapper = build_one('SNAPMON-M1.BIN', tree, cflags, ldflags, defines, out, extra, [f'--defsym={MONITOR_CALL}={offset:#x}'])
+    wrapper = build_one(image_name, tree, cflags, ldflags, defines, out, extra, [f'--defsym={MONITOR_CALL}={offset:#x}'])
     if len(wrapper) > offset:
         raise Refused('WRAPPER_TOO_BIG', f'the wrapper is {len(wrapper)} bytes; the monitor starts at {offset:#x}')
-    (out / 'wrapper-m1.bin').write_bytes(wrapper)
+    (out / ('wrapper-m1-ack.bin' if ack else 'wrapper-m1.bin')).write_bytes(wrapper)
     image = wrapper + bytes(offset - len(wrapper)) + monitor
-    (out / 'SNAPMON-M1.BIN').write_bytes(image)
-    files = {'SNAPMON-M1.BIN': image, 'SNAPREP-M1.BIN': build_one('SNAPREP-M1.BIN', tree, cflags, ldflags, defines, out)}
+    (out / image_name).write_bytes(image)
+    files = {image_name: image, reporter_name: build_one(reporter_name, tree, cflags, ldflags, defines, out)}
     report = {'files': {n: {'bytes': len(d), 'sha256': sha(d)} for n, d in files.items()},
               'wrapper': {'bytes': len(wrapper), 'sha256': sha(wrapper), 'padding': offset - len(wrapper)},
               'monitor': {'offset': offset, 'bytes': len(monitor), 'sha256': sha(monitor), 'elf_sha256': record['monitor']['elf_sha256'],
@@ -389,9 +426,14 @@ def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset
                           'relocations': pic, 'call': f'bl {MONITOR_CALL} (R_AARCH64_CALL26, --defsym)'},
               'q1n1_inputs': {rel: sha((tree / rel).read_bytes()) for rel in Q1N1_INPUTS}, 'cflags': [f.replace(str(tree), '<q1n1>') for f in cflags],
               'ldflags': ldflags, 'gic_macros': defines, 'hardware': 'NOT RUN', 'profile': record['profile'],
-              'added': ['-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1', '-DSNAP_SP11_STICK_GIC=1', '-DSNAP_SP11_STICK_MONITOR=1', '-DSW_GIC_DRY_REGS=0', *pinned],
+              'added': ['-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1', '-DSNAP_SP11_STICK_GIC=1', '-DSNAP_SP11_STICK_MONITOR=1',
+                        *([ACK_DEFINE] if ack else []), '-DSW_GIC_DRY_REGS=0', *pinned],
               'variant': 'm1: the wrapper arms the GIC (the quarantine of this CPU\'s other enabled interrupts, classes G, R and C, the check of ICC_HPPIR1_EL1), calls the '
                          'appended monitor and puts the GIC back (docs/SP11-STICK-MONITOR.md)'}
+    if ack:
+        report['cpu_start'] = 'ack'
+        report['variant'] += ('; the monitor is the EXPERIMENTAL CPU-start acknowledge build: it takes the guest\'s 32-bit stores to the PMGR CPU-start block and starts '
+                              'no CPU, which is a diagnostic and not a model of the hardware (docs/SP11-MONITOR-PROFILE.md section 10)')
     (out / REPORT_NAME).write_text(json.dumps(report, indent=1, sort_keys=True) + '\n')
     return report
 
@@ -405,17 +447,22 @@ def main(argv=None):
     parser.add_argument('--monitor', help='build the monitor entry variant (SNAPMON-M1.BIN, SNAPREP-M1.BIN): the profile build\'s xnuboot.bin to append')
     parser.add_argument('--monitor-build', help='the profile-build.json that the monitor given with --monitor was built by')
     parser.add_argument('--monitor-offset', type=lambda text: int(text, 0), default=MONITOR_OFFSET, help='where the monitor starts in SNAPMON-M1.BIN (default %(default)#x)')
+    parser.add_argument('--cpu-start', choices=CPU_STARTS, default='stop',
+                        help='with --monitor: stop (the default: the profile build must be a `stop` one) or ack (EXPERIMENTAL: the profile build must be a '
+                             'tools/sp11_m1_profile.py --cpu-start ack one; the output is SNAPMON-M1-ACK.BIN and SNAPREP-M1-ACK.BIN)')
     args = parser.parse_args(argv)
     if bool(args.monitor) != bool(args.monitor_build) or (args.monitor and args.gic):
         parser.error('--monitor and --monitor-build go together, and replace --gic')
+    if args.cpu_start != 'stop' and not args.monitor:
+        parser.error('--cpu-start belongs to the monitor entry variant: give --monitor and --monitor-build')
     try:
-        report = build_monitor(args.out, args.profile, args.monitor, args.monitor_build, args.force, args.monitor_offset) if args.monitor \
+        report = build_monitor(args.out, args.profile, args.monitor, args.monitor_build, args.force, args.monitor_offset, args.cpu_start) if args.monitor \
             else build(args.out, args.profile, args.force, args.gic)
     except Refused as error:
         print(error.detail, file=sys.stderr)
         print(f'REFUSED={error.name}')
         return 1
-    for name in MONITOR_NAMES if args.monitor else GIC_NAMES if args.gic else NAMES:
+    for name in (ACK_NAMES if args.cpu_start == 'ack' else MONITOR_NAMES) if args.monitor else GIC_NAMES if args.gic else NAMES:
         print(f'{name} {report["files"][name]["bytes"]} bytes sha256 {report["files"][name]["sha256"]}')
     if args.monitor:
         print(f'WRAPPER {report["wrapper"]["bytes"]} bytes sha256 {report["wrapper"]["sha256"]} (then {report["wrapper"]["padding"]} zero bytes)')

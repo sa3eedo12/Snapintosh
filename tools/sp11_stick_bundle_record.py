@@ -192,15 +192,15 @@ M1_STOP_RULES = (
 SILENCE_RULE = '   - No page change for twice the time box after ENTER: note the last line and power cycle.'
 
 
-def m1_silence_rule(box_s):
-    """The bullet of section 5 for the wait after the MON CALL line and, in its second part, after the STAGE=DONE line (where the box does not enter)."""
+def m1_silence_rule(box_s, tail=''):
+    """The bullet of section 5 for the wait after the MON CALL line and, in its second part, after the STAGE=DONE line (where the box does not enter); `tail` is a kind's own words there."""
     wait, after = m1g.silence_s(box_s), m1g.SILENCE_AFTER_PAGE_S
     why = f'The {wait} s is an operator-safe wait' if box_s <= m1g.D5_BOX_S else f'The {wait} s is the time box of {box_s} s plus {m1g.SILENCE_MARGIN_S} s, an operator-safe wait'
     done = f'The same {after} s holds' if box_s <= m1g.D5_BOX_S else f'The wait is {after} s'
+    done = tail or done + ' after the STAGE=DONE line: a lit page that has stopped there, with or without the SNAPREP page, is FORCE OFF too (section 5c)'
     return m1t.wrap(f'- No page change for {wait} seconds after the MON CALL line: note the last line and FORCE OFF (section 5c). {why} and not a measurement: the monitor '
                     f'prints nothing while it runs, and its prepare and clean are known from one run only (about {m1t.PREPARE_AND_CLEAN_S} s together: section 4), so the rule of the other kinds, '
-                    f'twice the time box after ENTER, could end a legitimate run. {done} after the STAGE=DONE line: a lit page that has stopped there, with or without the '
-                    'SNAPREP page, is FORCE OFF too (section 5c); without the SNAPREP page it is no result (section 5a).', first=3, rest=5)
+                    f'twice the time box after ENTER, could end a legitimate run. {done}; without the SNAPREP page it is no result (section 5a).', first=3, rest=5)
 
 
 M1_SILENCE_RULE = m1_silence_rule(m1g.D5_BOX_S)       # the rule for the decided box: the text that the auth suite pins
@@ -231,7 +231,8 @@ def m1_lines(m1):
     the profile's build record holds the NV2 header's absolute path, so its digest is not printed (the approved SHA-256 must not depend on where the
     monitor was built); the NV2 record's own digest and the header's, which is a function of the record, identify the input."""
     w, m, n, image, reporter, efi = m1['wrapper'], m1['monitor'], m1['nv2'], m1['image'], m1['reporter'], m1['efi']
-    lines = ['1b. The monitor entry run (docs/SP11-STICK-MONITOR.md): payload 0 is SNAPMON-M1.BIN, the wrapper plus the monitor',
+    mon_name, rep_name = m1t.FILE_NAMES[m1.get('cpu_start', 'stop')]
+    lines = [f'1b. The monitor entry run (docs/SP11-STICK-MONITOR.md): payload 0 is {mon_name}, the wrapper plus the monitor',
              '   EFI files    the two that run at EL2 before the wrapper, named by SHA-256 as the builder was given them:',
              *(f'                {name:<23} sha256 {digest}' for name, digest in efi.items()),
              *m1t.wrap('No check at boot compares them with this record, and the operator cannot on the unit: the wrapper sees PIN.DAT and the data, the runner checks the '
@@ -241,7 +242,7 @@ def m1_lines(m1):
              '                requires: a PIN.DAT of another kind, whose record says that no monitor is called, is refused before',
              '                the call (docs/SP11-STICK-MONITOR.md section 14). The reverse, this PIN.DAT with another wrapper, is',
              '                not refused: those wrappers do not know the marker',
-             f'   file         SNAPMON-M1.BIN  {image["bytes"]} bytes  sha256 {image["sha256"]}',
+             f'   file         {mon_name}  {image["bytes"]} bytes  sha256 {image["sha256"]}',
              '                (payload 0 above: the stick names it SNAPMON.BIN)',
              f'   wrapper      {w["bytes"]} bytes  sha256 {w["sha256"]}',
              f'                then {w["padding"]} zero bytes up to the monitor',
@@ -277,7 +278,7 @@ def m1_lines(m1):
                   '                embeds.']
     else:
         lines += m1_regime_lines()
-    lines += [f'   reporter     SNAPREP-M1.BIN  {reporter["bytes"]} bytes  sha256 {reporter["sha256"]}',
+    lines += [f'   reporter     {rep_name}  {reporter["bytes"]} bytes  sha256 {reporter["sha256"]}',
               '                (payload 1: reads REPORT.DAT, prints, stores to its stack only)']
     return lines
 
@@ -341,6 +342,7 @@ def m1_time_lines(box_s, place, guest_bytes, panel=None):
         f'      {"the known parts, high sum":<41}at most {high} s ({high_wrapper} + {t["arm_wait_s"]} + {box_s} + {clean_s}), plus the prepare',
         *(pn.TIME_SUM_NOTE if panel else ()),
         *m1t.wrap(size, first=3, rest=3),
+        *(m1t.wrap(m1g.d8_exposure_words(box_s), first=3, rest=3) if box_s > m1g.D5_BOX_S else ()),
         *m1t.wrap('The plan\'s budget is a run well under 20 s of UPTIME, a precaution of low weight (docs/SP11-MONITOR-PORT.md section 10, D5); this run does not meet it, '
                   f'whatever the box: the known parts alone are about {low} to {high} s, and the runner\'s own load comes before them (UPTIME, below). APPROVING THIS TEXT '
                   f'RELAXES THE 20 s PRECAUTION OF D5 ({kept}; the 8 s '
@@ -351,7 +353,7 @@ def m1_time_lines(box_s, place, guest_bytes, panel=None):
                   'about UPTIME 17 s '
                   '(INFERRED: one boot, in a run that started secondary CPUs; the plan, section 10): every run of this kind is past it by construction, and boot 20 was. On restarts: '
                   'a PSCI-only control was alive at UPTIME 224 s and 268 s (OBSERVED, two boots); the restarts seen went with CPU_ON and CPU_OFF (INFERRED) and this '
-                  'run starts no secondary (x4 = 0).', first=3, rest=3),
+                  'run starts no secondary (x4 = 0).' + (f' {m1g.restart_control_words(box_s)}' if box_s > m1g.D5_BOX_S else ''), first=3, rest=3),
         '   Thermal (D8): no thermal guard exists on this path. The monitor\'s own (compat/a16-thermal.c) only loads, from the',
         '   A16\'s sensor addresses: SROT at 0x0c222000 + n * 0x1000, which compat/hamoa-thermal.c gives as this machine\'s TSENS',
         '   SROT (INFERRED there), and TM at 0x0c22c000 + n * 0x1000, where this machine\'s is UNKNOWN. It is closed by',
@@ -458,14 +460,14 @@ def record_text(r):
         f'work_base {p["work_base"]:#x}  work_size {p["work_size"] // MIB} MiB',
         f'   place_base {p["place_base"]:#x}  place_end {p["place_base"] + p["place_size"]:#x}  (limit 2^36)', *((pn.placement_line(panel),) if panel else ()), '',
         f'3. Store classes authorised (PIN.DAT authorised_stores = {r["stores"]})']
-    m1_touches = {**M1_TOUCHES, 'gic': m1t.gic_lines()} if m1 else None
+    m1_touches = {**M1_TOUCHES, 'gic': m1t.gic_lines(cap=m1t.bm.box_cap(m1['image']['sha256']))} if m1 else None
     touches = (pn.touches(m1_touches, panel) if panel else m1_touches) if m1 else (
         gq.TOUCHES if r.get('gic_quarantine') else GIC_STOP_TOUCHES) if r.get('gic_stop') else TOUCHES
     if r.get('gic_stop'):
         lines.append('   Record of the GIC and stop dry run (docs/SP11-STICK-GIC.md): payload 0 is SNAPMON-GIC.BIN; no monitor is called.')
         lines += gq.HEAD_LINES if r.get('gic_quarantine') else ()
     if m1:
-        lines.append('   Record of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10): payload 0 is SNAPMON-M1.BIN.')
+        lines.append(f'   Record of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10): payload 0 is {m1t.FILE_NAMES[m1.get("cpu_start", "stop")][0]}.')
         lines.append('   Approving this text decides D4 for exactly these three classes, ram, el2_sysreg and gic, and no other (section 0).')
         lines += pn.kind_lines(panel) if panel else ()
     for name in STORES:
@@ -481,7 +483,7 @@ def record_text(r):
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
               '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',
               *(m1g.PRE_CALL_SILENCE if m1 else ()),
-              *(m1_silence_rule(r['time_box_s']) if m1 else gq.silence_lines() if r.get('gic_quarantine') else (SILENCE_RULE,)),
+              *(m1_silence_rule(r['time_box_s'], *filter(None, [m1g.said(r.get('real'), 'silence_tail')])) if m1 else gq.silence_lines() if r.get('gic_quarantine') else (SILENCE_RULE,)),
               *(m1g.RESTART_AND_STAGE2_RULES if m1 else ('   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',)),
               *(m1g.HARDWARE_RULES if m1 else gq.HARDWARE_LINES if r.get('gic_quarantine') else (
                   '   - One hardware client; AC power or at least 50% battery; the operator present and filming. A spinning guest is ended by the',

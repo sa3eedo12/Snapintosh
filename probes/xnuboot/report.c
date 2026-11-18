@@ -478,6 +478,12 @@ uint64_t xnuboot_report(uint64_t *out)
         out[OUT_GUEST_SYSREGS + 3] = vcpu_of(c)->guest_mair;
         out[OUT_GUEST_SYSREGS + 4] = vcpu_of(c)->guest_sctlr;
     }
+#if SNAP_SP11_CPU_START_ACK
+    out[OUT_CPU_START_ACK] = CPU_START_ACK_MAGIC;
+    out[OUT_CPU_START_ACK + 1] = (uint64_t)sizeof(struct cpu_start_ack) << 32 | CPU_START_ACK_VERSION;
+    for (unsigned n = 0; n < sizeof(struct cpu_start_ack) / 8; n++)
+        out[OUT_CPU_START_ACK + 2 + n] = ((const uint64_t *)cpu_start_ack_of(c))[n];
+#endif
 
     xnuboot_restore_host(c, 1);
     return XNUBOOT_TERMINAL_OK;

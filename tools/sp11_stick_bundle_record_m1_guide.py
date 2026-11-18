@@ -69,11 +69,58 @@ def d5_words(box_s):
 
 
 def longer_box_lines(box_s):
-    """A box longer than the decided one is decided by approving this text, and the paragraph says so in capitals; for a box up to it there is nothing to say."""
+    """A box longer than the decided one is decided by approving this text, and the paragraph says so in capitals, and what the extra seconds buy (the three
+    omissions that the review of the box cap found: the log, the kernel without its timers, the restart risk); for a box up to it there is nothing to say."""
     if box_s <= D5_BOX_S:
         return ()
     return wrap(f'THIS RECORD\'S TIME BOX IS {box_s} s, LONGER THAN THE {D5_BOX_S} s THAT D5 AND D8 DECIDED: approving this text decides this box and the exposure that '
-                f'section 4 gives, which D8 accepted for a box of {D5_BOX_S} s only. The rest of D5 and D8 holds: one CPU, AC power REQUIRED.')
+                f'section 4 gives, which D8 accepted for a box of {D5_BOX_S} s only. The rest of D5 and D8 holds: one CPU, AC power REQUIRED. What the extra seconds buy is '
+                'limited: the log keeps the first 512 events whatever the box (section 5b), the kernel may only idle without its timer interrupts (section 0b), and whether '
+                f'the Surface restarts inside a box of {box_s} s is UNKNOWN (section 4).')
+
+
+def d8_exposure_words(box_s):
+    """Beside the exposure numbers of a box longer than the decided one (0b and section 4): D8 accepted that exposure for the decided box only, so for this one the
+    operator's approval of this text is the decision. Nothing for a box up to it."""
+    if box_s <= D5_BOX_S:
+        return ''
+    return (f'D8 accepted the exposure of one CPU for a box of {D5_BOX_S} s only: for this box of {box_s} s it is the operator\'s decision, and approving this text '
+            'makes it (section 0).')
+
+
+def restart_risk_words(box_s):
+    """0b, after the restart risk: with the stock kernel running for longer than the decided box, the risk is untested."""
+    if box_s <= D5_BOX_S:
+        return ''
+    return f'Inside a box of {box_s} s with the stock kernel running, whether the Surface restarts is UNTESTED: UNKNOWN (section 4).'
+
+
+def restart_control_words(box_s):
+    """Section 4, after the argument from the PSCI-only control (docs/SP11-STICK-LOG.md section 14): that control ran no guest, and the one run with the stock kernel was
+    the decided box."""
+    if box_s <= D5_BOX_S:
+        return ''
+    return ('That control ran no guest; the one run with the stock kernel (boot 20) went through its 5 s and to the report page without a restart (OBSERVED once). '
+            f'A stock kernel running inside a box of {box_s} s is UNTESTED: whether the Surface restarts there is UNKNOWN, and the argument above does not reach it.')
+
+
+def long_gic_words(box_s):
+    """0b, after the GIC bullet: the quarantine keeps the guest's timer interrupts off for the whole call, whatever the box, so a kernel that needs them may only idle."""
+    if box_s <= D5_BOX_S:
+        return ''
+    return f'A kernel without those timer interrupts may only idle (UNKNOWN), so the seconds of a box beyond the first {D5_BOX_S} may add nothing.'
+
+
+def long_log_lines(box_s):
+    """5b, after MON CON: the log does not grow with the box. The limits are read from the sources (probes/xnuboot/report_layout.c EVENT_MAX and CONSOLE_MAX,
+    telemetry.c, and the reporter's RP_EVENTS and RP_CONSOLE_LINES); boot 20's page shows the event log full inside the decided box."""
+    if box_s <= D5_BOX_S:
+        return ()
+    return wrap(f'- A box longer than {D5_BOX_S} s is not logged longer: the monitor keeps at most the first 512 events (EVENT_MAX) and the first 1 KiB of the guest\'s console '
+                f'buffer (CONSOLE_MAX) whatever the box, and the page prints five events and six console lines of them, so most of a box of {box_s} s is not logged (read from '
+                'probes/xnuboot/report_layout.c, telemetry.c and probes/sp11-stick-reporter.c, INFERRED). Boot 20\'s page already read EVENTS=512 DROPPED=834 inside its 5 s (OBSERVED '
+                'once): the log was full, so a longer box adds no events to the page. Only the counts (MON COUNTS) and the end of the run (MON STOP, MON EXIT) reflect the '
+                'whole box.', first=3, rest=5)
 
 # What depends on the panel and the kernel (D9). 'withheld' with a stock kernel is the run of boot 20; the key of another panel is added with its own words, and until
 # then asking for it fails.
@@ -229,14 +276,15 @@ def hazard_lines(real, box_s, low, high):
               f'{MARKER}, made before the step starts (section 5c).', first=3, rest=5),
         *wrap('- The Surface may restart by itself, during the run or after it (cause UNKNOWN; the earliest datum is about UPTIME 17 s, and boot 20 showed none to the end of '
               'its film at 45 s: section 4). A restart before '
-              'the report is NOT a result (section 5a).', first=3, rest=5),
+              'the report is NOT a result (section 5a).' + (f' {restart_risk_words(box_s)}' if box_s > D5_BOX_S else ''), first=3, rest=5),
         *wrap(f'- No thermal guard exists on this path: one CPU is loaded for about {low} to {high} s plus the monitor\'s prepare, {box_s} s of it by the guest (D8, '
-              'section 4). AC power is REQUIRED. If the stop timer never fires (the plan\'s second most likely failure) ' + runaway_words(box_s, real),
-              first=3, rest=5),
+              'section 4).' + (f' {d8_exposure_words(box_s)}' if box_s > D5_BOX_S else '') + ' AC power is REQUIRED. If the stop timer never fires (the plan\'s second '
+              'most likely failure) ' + runaway_words(box_s, real),              first=3, rest=5),
         *wrap('- The GIC: from the first GIC store until after the monitor returns, this CPU\'s SGI 0 and PPIs 23, 25, 27 and 30, the guest\'s own timers (INTID 27, 30) '
               'among them, are switched off and put back afterwards; if the call never returns they stay off until the restart (INFERRED: the firmware sets the GIC up '
               'again). If both group 1 put-backs fail after the return they stay off as well, and the page says GIC RESTORE CLEAN=NO (host model only; never run). '
-              f'What the stock kernel does without them for up to {box_s} s is UNKNOWN (section 3, class gic).', first=3, rest=5),
+              f'What the stock kernel does without them for up to {box_s} s is UNKNOWN (section 3, class gic).' + (f' {long_gic_words(box_s)}' if box_s > D5_BOX_S else ''),
+              first=3, rest=5),
         *wrap('- The two EFI files that run at EL2 before the wrapper (section 1b) are not checked at boot against this record, and the operator cannot check them on the '
               'unit: the control is the coordinator\'s, before the boot (section 5c).', first=3, rest=5),
         *wrap('- The monitor reads a few words of PARAMS again while the guest runs, in RAM that the guest can write (section 3b, the LIVE gates; INFERRED): a guest '
@@ -356,6 +404,7 @@ def page_lines(m1, box_s, real=None):
         *wrap('- MON CON <text>: up to six lines of the first 1 KiB of the guest\'s console buffer, in the panel\'s font (capitals and digits; ":" prints as "!" (OBSERVED once: '
               'boot 20) and anything else that is not in the font as "?").',
               first=3, rest=5),
+        *long_log_lines(box_s),
         *wrap('- MON NO RECORD: THE STAGE DID NOT RUN, MON RECORD DAMAGED CODE=n, REPORT UNREADABLE and REPORT EMPTY: THE WRAPPER WROTE NOTHING: SNAPREP found no usable '
               'record of the wrapper. None is a result of the guest; the live page and the film say how far the wrapper got.', first=3, rest=5),
         *wrap('Then the five GIC lines again. A restart takes the whole page with it, which is why the film is the record.'))

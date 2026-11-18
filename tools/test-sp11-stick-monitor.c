@@ -20,6 +20,7 @@
  *                                   a register marked NOHOLD from that phase stops holding for the put-back, on the refusal path too
  *   below=n                         n words stored below the stack area, at stack_lo - 8 * i: an overflow into REPORT.DAT's filler; with stack=0x3FFF8
  *                                   the area's lowest word is the one word left alone
+ *   ticks=n                         the counter ticks the call takes (default 1000000): the time box's length at the unit's 19.2 MHz is 19200000 per second
  * Output, besides the base harness's and the GIC model's: MONMARK (IC, CALL and RET: where each came in the GIC log and the event log, the
  * counter, the arguments), MONREPLAY (one line per interrupt of the replay), MONSTATE (the model's registers at the return), MONREC and
  * MONDIRTY (the stage's observation points: the monitor record as REPORT.DAT holds it, and how many 64-byte lines of REPORT.DAT are still
@@ -131,7 +132,7 @@ void sp11hw_ic_ialluis(void)
 /* ---- what a scenario makes the fake monitor do ---- */
 #define MON_LEAVES 8
 struct mon_cfg {
-    uint64_t ret, status, entered, stack, overrun, below;
+    uint64_t ret, status, entered, stack, overrun, below, ticks;
     int stackfull, has_overrun, replay, nleave, bumpphase, ns_ppi, has_ns_ppi, putphase;
     struct {
         char reg[12];
@@ -147,6 +148,7 @@ static void cfg_load(struct mon_cfg *k)
     memset(k, 0, sizeof *k);
     k->entered = 1;
     k->stack = 0x400;
+    k->ticks = 1000000;
     if (!path || !(f = fopen(path, "r"))) return;
     while (fgets(line, sizeof line, f)) {
         char *tok, *save, *p = line;
@@ -169,6 +171,7 @@ static void cfg_load(struct mon_cfg *k)
             else if (!strncmp(tok, "bumpphase=", 10)) k->bumpphase = atoi(tok + 10);
             else if (!strncmp(tok, "putphase=", 9)) k->putphase = atoi(tok + 9);
             else if (!strncmp(tok, "below=", 6)) k->below = strtoull(tok + 6, NULL, 0);
+            else if (!strncmp(tok, "ticks=", 6)) k->ticks = strtoull(tok + 6, NULL, 0);
             else if (!strncmp(tok, "ns_ppi=", 7)) k->ns_ppi = atoi(tok + 7), k->has_ns_ppi = 1;
             else if (!strncmp(tok, "leave=", 6)) {
                 char *colon = strchr(tok + 6, ':');
@@ -322,7 +325,7 @@ uint64_t sw_monitor_call(uint64_t out, uint64_t work, uint64_t size, uint64_t pa
     if (k.replay) replay_ticks();
     for (i = 0; i < (uint64_t)k.nleave; i++) leave_register(k.leave[i].reg, k.leave[i].value);
     if (k.bumpphase) G.phase++;                                     /* the model's phase counter: writes marked NOHOLD stop holding from here */
-    W.tick += 1000000;                                              /* the monitor's run time, in counter ticks */
+    W.tick += k.ticks;                                              /* the monitor's run time, in counter ticks */
     mark("RET", k.ret, 0, 0, 0, 0, 0);
     printf("MONSTATE hcr=%llx vbar=%llx tpidr=%llx daif=%llx ic=%u\n", (unsigned long long)G.hcr, (unsigned long long)G.vbar,
            (unsigned long long)M.tpidr, (unsigned long long)((G.daif & ~(uint64_t)0x80) | (G.i_masked ? 0x80 : 0)), M.n_ic);

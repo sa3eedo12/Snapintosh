@@ -5,7 +5,8 @@ H5: the record the wrapper stores (decoded here independently of the C, from the
 from it (rendered here independently), a reporter fed REPORT.DAT files built in Python (a guest that ran, a prepare failure, an EL2 fault, a
 quarantine, a damaged record, no record) against the lines the document says it prints, the width and the font of every line, the 40-line budget and
 the read-only property; and the drift tests that tie the reporter's offsets and names to the monitor's own sources (the offsets of its report window and
-of PARAMS compiled against its translation unit, its prepare-failure names against probes/run.py).
+of PARAMS compiled against its translation unit, its prepare-failure names against probes/run.py, and the 64-bit width of every word the time box passes through, compiled and read as
+source forms: Drift and BoxSources, for the cap of 120 s).
 
     python3 tools/test-sp11-stick-monitor-record.py
 
@@ -372,6 +373,20 @@ class Drift(unittest.TestCase):
                                 f'_Static_assert(offsetof(struct params, early_stop) + offsetof(struct early_stop_params, flags) == '
                                 f'{c["SM_PARAMS_EARLY_STOP_FLAGS"]:#x}, "early stop");']), 'params')
 
+    def test_the_watchdog_is_64_bit_from_params_to_the_deadline(self):
+        """The time box's cap is 120 s: 2.3e9 ticks at the unit's 19.2 MHz, above INT32_MAX from 112 s on. The words the box passes through in the monitor's translation unit are
+        unsigned 64-bit ones: the PARAMS word, the arming function's argument and the vCPU's deadline and live flag."""
+        def u64(expr):
+            return f'__builtin_types_compatible_p(__typeof__({expr}), uint64_t)'
+        self.compile('\n'.join([f'_Static_assert({u64("((struct params *)0)->watchdog_seconds")}, "PARAMS word");',
+                                f'_Static_assert({u64("((struct vcpu *)0)->watchdog_deadline")} && {u64("((struct vcpu *)0)->watchdog_live")}, "deadline");',
+                                '_Static_assert(__builtin_types_compatible_p(__typeof__(xnuboot_watchdog), void (uint64_t)), "arming function");']), 'watchdog-width')
+
+    def test_the_width_check_can_fail(self):
+        for expr in ('((struct params *)0)->watchdog_seconds', '((struct vcpu *)0)->watchdog_deadline'):
+            with self.subTest(expr), self.assertRaises(AssertionError):
+                self.compile(f'_Static_assert(__builtin_types_compatible_p(__typeof__({expr}), uint32_t), "narrow");', 'watchdog-narrow')
+
     def test_the_event_names_are_the_monitors(self):
         text = (ROOT / 'probes/sp11-stick-reporter.c').read_text()
         names = {int(n): name for n, name in re.findall(r'case (\d+): return "([A-Z0-9_]+)";', text.split('rp_event_name')[1].split('rp_status_name')[0])}
@@ -393,6 +408,53 @@ class Drift(unittest.TestCase):
                 self.assertEqual(named.get(code), name, f'status {code}')
         for code in named:
             self.assertIn(code, table, f'the reporter names status {code} and probes/run.py does not know it')
+
+
+class BoxSources(unittest.TestCase):
+    """The arithmetic that the time box passes through, as read for the cap of 120 s (probes/sp11-stick-monitor.h; VERIFIED by reading, hardware NOT RUN): at the unit's 19.2 MHz the box
+    is 2.3e9 ticks, above INT32_MAX from 112 s on, so every step is a 64-bit one and the EL2 timer is set through CNTHP_CVAL_EL2, never the signed 32-bit TVAL. These are the forms that
+    reading found. A rewrite of one fails here and is read again, instead of overflowing in a run nobody repeats. No toolchain needed."""
+    FORMS = {
+        'probes/xnuboot.S': (r'ldr x0, \[x21, #192\]\s+/\* params\.watchdog_seconds \*/\n\s+bl xnuboot_watchdog',),
+        'probes/xnuboot/clock_timer.c': (
+            r'void xnuboot_watchdog\(uint64_t seconds\)\n\{.*?uint64_t freq, now;.*?watchdog_deadline = now \+ freq \* seconds;',
+            r'uint64_t budget = \(int64_t\)\(end - physical\) > 0 \? end - physical : 0;\n\s+uint64_t delay = budget;',
+            r'uint64_t next = physical \+ delay;\n\s+__asm__ volatile\("msr cnthp_cval_el2, %0" :: "r"\(next\)\);'),
+        'probes/xnuboot/async.c': (r'\(int64_t\)\(vcpu_of\(c\)->watchdog_deadline - physical\) <= 0',),
+        'compat/early-stop.c': (r'return \(int64_t\)\(deadline - budget\) < 0 \? deadline : budget;',
+                                r'if \(\(int64_t\)\(now - deadline\) < 0 \|\| \(int64_t\)\(deadline - budget\) >= 0\) return 0;'),
+        'compat/clock.c': (r'uint64_t clock_rate_wait\(const struct clock_rate \*rate, uint64_t host_now,\n\s+uint64_t guest_deadline, uint64_t host_budget\)\n\{\n'
+                           r'\s+uint64_t delta = guest_deadline - clock_rate_sample\(rate, host_now\);\n\s+if \(\(int64_t\)delta <= 0\) return 0;',
+                           r'if \(q > host_budget / rate->host_hz\) return host_budget;')}
+    SOURCES = ('probes/xnuboot/*.c', 'probes/xnuboot.c', 'probes/xnuboot.S', 'compat/*.c', 'compat/*.h', 'compat/*.S', 'shadow/*.c', 'shadow/*.h', 'shadow/*.S')
+
+    @classmethod
+    def texts(cls):
+        return {str(p.relative_to(ROOT)): p.read_text() for pattern in cls.SOURCES for p in sorted(ROOT.glob(pattern))}
+
+    @classmethod
+    def problems(cls, texts):
+        """The forms that are not exactly once in their file, and the monitor sources that write the EL2 timer's 32-bit value."""
+        found = [f'{path}: {pattern[:48]} is not there once' for path, patterns in cls.FORMS.items() for pattern in patterns
+                 if len(re.findall(pattern, texts[path], re.S)) != 1]
+        return found + [f'{path} names CNTHP_TVAL' for path, text in texts.items() if re.search(r'cnthp_tval', text, re.I)]
+
+    def test_the_boxs_arithmetic_is_64_bit_and_the_timer_is_set_through_cval(self):
+        self.assertEqual(self.problems(self.texts()), [])
+
+    def test_each_form_can_fail(self):
+        texts = self.texts()
+        for path, old, new in (('probes/xnuboot.S', 'ldr x0, [x21, #192]', 'ldr w0, [x21, #192]'),
+                               ('probes/xnuboot/clock_timer.c', 'void xnuboot_watchdog(uint64_t seconds)\n{', 'void xnuboot_watchdog(unsigned seconds)\n{'),
+                               ('probes/xnuboot/clock_timer.c', 'uint64_t freq, now;', 'uint32_t freq, now;'),
+                               ('probes/xnuboot/clock_timer.c', 'uint64_t budget = (int64_t)(end - physical)', 'uint64_t budget = (int32_t)(end - physical)'),
+                               ('probes/xnuboot/clock_timer.c', 'msr cnthp_cval_el2, %0" :: "r"(next)', 'msr cnthp_tval_el2, %0" :: "r"(next)'),
+                               ('probes/xnuboot/async.c', '(int64_t)(vcpu_of(c)->watchdog_deadline - physical) <= 0', '(int32_t)(vcpu_of(c)->watchdog_deadline - physical) <= 0'),
+                               ('compat/early-stop.c', 'return (int64_t)(deadline - budget) < 0 ? deadline : budget;', 'return (int32_t)(deadline - budget) < 0 ? deadline : budget;'),
+                               ('compat/clock.c', 'uint64_t delta = guest_deadline', 'uint32_t delta = guest_deadline')):
+            with self.subTest(path=path, old=old):
+                self.assertIn(old, texts[path])
+                self.assertNotEqual(self.problems({**texts, path: texts[path].replace(old, new, 1)}), [])
 
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@
 """Tests of the binaries, the build tool and the gate of the monitor entry (docs/SP11-STICK-MONITOR.md sections 6 to 8), monitor port work item 4b,
 Phase A: H3 the build (SNAPMON-M1.BIN is the wrapper, zero padding and the profile build's monitor byte for byte, called by one direct `bl`, with the
 position-independence proof and every refusal of the tool, each shown to fail on a seeded input), H4 the gate off (the binaries that ran on the unit
-rebuild byte for byte, and the GIC variant is not changed by the edits of this work item), the census of the wrapper binary (the system registers it
+rebuild byte for byte, the GIC pair too (pinned beside them), and neither changes with the edits of this work item, the monitor entry's own files in both snapshots), the seeded faults refused outside the host build (SeedGuard), the census of the wrapper binary (the system registers it
 writes and reads, the system instructions, no SMC, HVC, TLBI or WFI, no GIC store of its own), H7 the call-graph census of the monitor's stack and, from
 Phase C, the execution of the trampoline's real bytes at EL2 under QEMU (class Trampoline; SKIP without qemu-system-aarch64).
 
@@ -40,6 +40,10 @@ STATE = {}
 # The dry-run wrapper and reporter that ran on the unit (docs/SP11-MONITOR-PORT.md D7); the gate off must rebuild them byte for byte.
 UNIT_RUN = {'SNAPMON.BIN': (35164, '6137984fbc61a48845e1ca7283911c6a87a4955802eebdb58ef941660bed2d15'),
             'SNAPREP.BIN': (21076, '940c774f1377980f378929400571ed223f00c5fb87a054fbcd2a092f3c0b9aab')}
+# The final pair of the GIC and stop dry run (the same digests as FINAL in tools/test-sp11-stick-bundle-record-gic.py), pinned beside it: the gate at 0 and the GIC gate alone must rebuild it
+# byte for byte too, with or without the monitor entry's files.
+GIC_RUN = {'SNAPMON-GIC.BIN': (98236, 'ebac8675a246dfdbe1f0707e66b04b24e6d0b6fbdec383fdfebfee9eb6a960c2'),
+           'SNAPREP-GIC.BIN': (62000, '89b8fab1f6dadd72b39bdd07016b6436864af40551a2665074fbb2de2600b6d9')}
 OWN = ('probes/sp11-stick-monitor.c', 'probes/sp11-stick-monitor.h', 'probes/sp11-stick-monitor-record.h', 'tools/test-sp11-stick-monitor.c',
        'tools/test-sp11-stick-monitor.py', 'tools/test-sp11-stick-monitor-build.py', 'tools/test-sp11-stick-monitor-record.py',
        'tools/test-sp11-stick-monitor-call.S', 'tools/sp11_stick_monitor_testlib.py', 'docs/SP11-STICK-MONITOR.md')
@@ -315,13 +319,15 @@ class GateOff(Base):
     """H4: the gate at 0 is the build that ran on the unit, and this work item's edits of the earlier files change nothing."""
 
     def test_the_binaries_that_ran_on_the_unit_rebuild_byte_for_byte(self):
-        for name, (size, digest) in UNIT_RUN.items():
-            with self.subTest(name):
-                self.assertEqual(STATE['plain']['files'][name], {'bytes': size, 'sha256': digest})
+        for pair, run in (('plain', UNIT_RUN), ('gic', GIC_RUN)):
+            for name, (size, digest) in run.items():
+                with self.subTest(name):
+                    self.assertEqual(STATE[pair]['files'][name], {'bytes': size, 'sha256': digest})
 
     def snapshot(self, name, from_head):
         """A scratch copy of what the wrapper build reads (the tool, the profile, the stick sources), taken in one go, with the three earlier files
-        that carry this item's gated hooks either as the working tree has them or as committed. The other agents' files are the same copy in both."""
+        that carry this item's gated hooks either as the working tree has them or as committed, and the monitor entry's own files (not read at gate 0, so they must change nothing) the same
+        way. The other agents' files are the same copy in both."""
         root = SCRATCH / name
         for rel in ('tools/sp11_stick_wrapper_build.py', 'config/monitor-profile-sp11-m1.json', *SHARED):
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -335,14 +341,23 @@ class GateOff(Base):
                 (root / rel).write_bytes(text)
             else:
                 shutil.copy(ROOT / rel, root / rel)
+        for path in sorted((ROOT / 'probes').glob('sp11-stick-monitor*')):
+            rel = f'probes/{path.name}'
+            if not from_head:
+                shutil.copy(path, root / rel)
+                continue
+            shown = subprocess.run(['git', '-C', str(ROOT), 'show', f'HEAD:{rel}'], capture_output=True)
+            if not shown.returncode:          # a file that HEAD does not have (an older tree) is simply not there to compare
+                (root / rel).write_bytes(shown.stdout)
         return root
 
     def test_the_gic_variant_is_not_changed_by_this_work_item(self):
-        """Both pairs of binaries are built twice from snapshots of one moment: with the three earlier files as committed, and as the working tree
-        has them. They must be equal byte for byte: whatever else changed in the GIC sources since (another work item's), it is in both."""
+        """Both pairs of binaries are built twice from snapshots of one moment: with the earlier files and the monitor entry's own as committed, and as the working tree
+        has them. They must be equal byte for byte: whatever else changed in the GIC sources since (another work item's), it is in both. The GIC pair is also the unit's (GIC_RUN)."""
         if shutil.which('git') is None:
             self.skipTest('no git')
         roots = {tag: self.snapshot(tag, tag == 'head') for tag in ('head', 'work')}
+        self.assertTrue((roots['work'] / 'probes/sp11-stick-monitor.h').is_file(), 'the working snapshot holds the monitor entry\'s files')
         for path in (ROOT / 'probes').glob('sp11-stick-*'):
             if f'probes/{path.name}' not in SHARED and 'monitor' not in path.name:
                 for root in roots.values():
@@ -357,6 +372,7 @@ class GateOff(Base):
         self.assertEqual(built['head'][0], built['work'][0], 'the dry-run pair')
         self.assertEqual(built['head'][1], built['work'][1], 'the GIC pair')
         self.assertEqual(built['work'][0], STATE['plain']['files'])
+        self.assertEqual(built['work'][1], {name: {'bytes': size, 'sha256': digest} for name, (size, digest) in GIC_RUN.items()})
 
     def test_the_identity_check_can_fail(self):
         """The same comparison with one un-gated change in the working copy (a letter of a panel line): the digest must differ."""
@@ -374,6 +390,52 @@ class GateOff(Base):
         built = module.build(str(root / 'build/plain'), str(root / 'config/monitor-profile-sp11-m1.json'))['files']
         self.assertNotEqual(built['SNAPMON.BIN']['sha256'], UNIT_RUN['SNAPMON.BIN'][1])
         self.assertEqual(built['SNAPMON.BIN']['bytes'], UNIT_RUN['SNAPMON.BIN'][0], 'the same size: only the digest sees it')
+
+
+class SeedGuard(Base):
+    """The seeded faults of the monitor entry are a host test option: compiled into a unit build each is an #error, in the wrapper's translation unit (the list in sp11-stick-monitor.h) and in the
+    reporter's, which compiles sp11-stick-monitor-record.h without that header and so needs a guard of its own for the one seed that lives there."""
+    SEEDS = ('BOX_PLUS_ONE', 'BOX_MINUS_ONE', 'BOX_NARROW', 'BOX_SIGNED', 'TICKS_INT32')
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        tree, report = STATE['tree'], STATE['m1']
+        cflags, _ = wb.recipe_flags(tree)
+        head = [T.find_tool('clang'), *cflags, f'-I{tree / "payloads"}']
+        cls.wrapper = [*head, *report['added'], *report['gic_macros']]                  # as SNAPMON-M1.BIN's wrapper is compiled
+        cls.reporter = [*head, '-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1', '-DSNAP_SP11_STICK_GIC=1', '-DSNAP_SP11_STICK_MONITOR=1']      # as SNAPREP-M1.BIN is
+
+    def cc(self, source, flags, seed=None, probes=ROOT / 'probes'):
+        """(exit status, standard error) of compiling `source` of the `probes` directory with these flags and, when given, the define of the seed."""
+        out = SCRATCH / 'seed' / f'{T.sha(repr((str(probes), source, flags, seed)).encode())[:16]}.o'
+        out.parent.mkdir(exist_ok=True)
+        done = subprocess.run([*flags, *([f'-DSP11_STICK_MONITOR_SEED_{seed}'] if seed else []), '-c', str(probes / source), '-o', str(out)], capture_output=True, text=True)
+        return done.returncode, done.stderr
+
+    def test_a_seed_is_refused_where_a_unit_build_would_compile_it_and_the_control_compiles(self):
+        for source, flags, seeds in (('sp11-stick-monitor.c', self.wrapper, self.SEEDS), ('sp11-stick-reporter.c', self.reporter, ('TICKS_INT32',))):
+            code, err = self.cc(source, flags)
+            self.assertEqual(code, 0, f'{source}, the control without a seed: {err[-400:]}')
+            for seed in seeds:
+                with self.subTest(source=source, seed=seed):
+                    code, err = self.cc(source, flags, seed)
+                    self.assertEqual(code, 1)
+                    self.assertIn('host test build only', err)
+
+    def test_the_reporters_guard_can_fail(self):
+        """The same compile of a copy of the probes with the guard of sp11-stick-monitor-record.h cut out builds silently: that guard, and no other, refuses the seed in the reporter."""
+        probes = SCRATCH / 'noguard' / 'probes'
+        probes.mkdir(parents=True)
+        for path in (ROOT / 'probes').glob('sp11-stick-*'):
+            shutil.copy(path, probes / path.name)
+        header = probes / 'sp11-stick-monitor-record.h'
+        text = header.read_text()
+        guard = '#error "the seeded faults are part of the host test build only"\n'
+        self.assertIn(guard, text)
+        header.write_text(text.replace(guard, ''))
+        code, err = self.cc('sp11-stick-reporter.c', self.reporter, 'TICKS_INT32', probes)
+        self.assertEqual(code, 0, err[-400:])
 
 
 class Census(Base):
@@ -611,7 +673,7 @@ class Hygiene(unittest.TestCase):
                     self.assertLess(len(data), 50 * 1024)
                     self.assertLess(data.count(b'\n'), 1500)
                 else:
-                    self.assertLessEqual(len(data), 132000)      # raised from 94,000 on purpose for the panel handed and as the console (section 20, rung 2 after boot 20: K7; 114,000 before the second-camera and public-source words of A2, 116,000 before K8 of A3, 118,000 before K8 (h) of A4, 120,000 before K9 of boot 21 and K10 of rung 3, 126,000 before K12 of rung 4 and its row H18, on top of K11 of boot 23), on top of the text of the record, draft 5 (section 19) (91,000 before draft 5, 88,000 before draft 3, 84,300 before draft 2, 78,100 before E part 4, 75,500 before E part 3, 70,000 before E part 2, 60,000 before E, 46,000 before D, 36,000 before C); nothing was cut
+                    self.assertLessEqual(len(data), 142000)      # raised from 94,000 on purpose for the panel handed and as the console (section 20, rung 2 after boot 20: K7; 114,000 before the second-camera and public-source words of A2, 116,000 before K8 of A3, 118,000 before K8 (h) of A4, 120,000 before K9 of boot 21 and K10 of rung 3, 126,000 before K12 of rung 4 and its row H18, on top of K11 of boot 23, 132,000 before boxcap v2, the acknowledge, draft 6 and K13 of rung 5 with its row H19; the note is 141.3 KB), on top of the text of the record, draft 5 (section 19) (91,000 before draft 5, 88,000 before draft 3, 84,300 before draft 2, 78,100 before E part 4, 75,500 before E part 3, 70,000 before E part 2, 60,000 before E, 46,000 before D, 36,000 before C); nothing was cut
                 for needle in (b'/Us' + b'ers/', b'/Vol' + b'umes/', b'/t' + b'mp/', b'/var/fol' + b'ders'):
                     self.assertNotIn(needle, data)
 

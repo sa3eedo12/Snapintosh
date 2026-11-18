@@ -22,9 +22,10 @@ establish it. Test outcomes are not recorded in this note: they belong to the ru
 | The builder: `show`, `flags`, `build`; refuses without a valid NV2 record | `tools/sp11_m1_profile.py` | EXPERIMENTAL |
 | The two guards: decision, register sequence, statuses -147 and -148 | `compat/sp11-timer-guard.h` | EXPERIMENTAL |
 | Their call site, last in `vcpu_arch_prepare`, under `#if SNAP_PLATFORM_SP11` | `probes/xnuboot/prepare.c` | EXPERIMENTAL |
+| The opt-in CPU-start acknowledge variant (section 10): a compile-time gate, a builder option, a pair of its own | `compat/cpu-start-ack.h`, `probes/xnuboot/trap_dispatch.c`, `tools/sp11_m1_profile.py` and `tools/sp11_stick_wrapper_build.py` `--cpu-start` | EXPERIMENTAL, a diagnostic, not a model of the hardware |
 | The names of the statuses and the band table | `PREPARE_FAILURES` in `probes/run.py` | EXPERIMENTAL |
 | Where q1n1's `sha256.c` and `sha256.h` come from, when `../q1n1` is absent | `$Q1N1_SP11_TREE`, `tools/monitor_build_offline.py` | EXPERIMENTAL |
-| Host tests | `tools/test-sp11-m1-profile.py`, `tools/test-sp11-timer-guard.py` and `.c`, `StatusBands` in `tools/test-sp11-integration.py` | EXPERIMENTAL |
+| Host tests | `tools/test-sp11-m1-profile.py`, `tools/test-sp11-timer-guard.py` and `.c`, `StatusBands` in `tools/test-sp11-integration.py`, and for section 10 `tools/test-cpu-start-ack.py` and `.c` and `tools/test-sp11-m1-ack.py` | EXPERIMENTAL |
 | The wrapper, the loader, the bundle builder and the reporter (WI 3 and 4) | [SP11-STICK-WRAPPER.md](SP11-STICK-WRAPPER.md), [SP11-STICK-BUILD.md](SP11-STICK-BUILD.md) | EXPERIMENTAL (the dry run ran once on the unit) |
 
 ## 3. The flag set
@@ -90,7 +91,7 @@ refused, never replaced by the sibling). The output directory must be new. It ho
 SHA-256, whose `flags` key rebuilds the identical monitor with `tools/monitor_build_offline.py`. It is a local record under `build/`: never
 commit it, or the header. The builder removes the binary and ELF and exits 1 when the monitor does not carry the
 record's 96 bytes exactly once, or is larger than the 464 KiB code window of `probes/run.py` (`OUT_AT - CODE_AT`). The SHA-256 is what a named
-authorisation of the monitor payload (audit section 12, WI 6) refers to.
+authorisation of the monitor payload (audit section 12, WI 6) refers to. `--cpu-start ack` builds the EXPERIMENTAL variant of section 10; the default is `stop`, the profile as it always was.
 
 ## 6. The two timer guards
 
@@ -138,7 +139,8 @@ and `StatusBands` in `tools/test-sp11-integration.py` now name them; neither col
 
 The header preprocesses to nothing without `SNAP_PLATFORM_SP11`, its include and the call site sit inside `#if SNAP_PLATFORM_SP11`, and the
 A16 object has no access to `CNTVOFF_EL2` at all. The byte-level proof is `tools/monitor_baseline.py` (`capture` before and after, `compare`;
-[BUILDING.md](BUILDING.md#reproducing-the-a16-monitor-baseline)); it needs the q1n1 checkout, which `Q1N1_SP11_TREE` can name.
+[BUILDING.md](BUILDING.md#reproducing-the-a16-monitor-baseline)); it needs the q1n1 checkout, which `Q1N1_SP11_TREE` can name. The same holds for the
+CPU-start acknowledge of section 10: every piece of it is inside `#if SNAP_SP11_CPU_START_ACK`, which is off in every build that does not ask for it.
 
 ## 8. Tests
 
@@ -148,6 +150,8 @@ A16 object has no access to `CNTVOFF_EL2` at all. The byte-level proof is `tools
 | `python3 tools/test-sp11-m1-profile.py` | the pinned flag set, a damaged profile refused, every refusal of the record input, the build (record exactly once, code window, reproducible from `profile-build.json`) | that the monitor runs; which record to use |
 | `python3 tools/test-sp11-integration.py` | the status bands including -147 and -148, the SP11 builds with `Q1N1_SP11_TREE` | anything about hardware |
 | `python3 tools/test-monitor-baseline.py` | the baseline tool and the q1n1 override | the monitor itself |
+| `python3 tools/test-cpu-start-ack.py` | section 10, monitor side: the acknowledge's conditions against an independent oracle over every syndrome field and the neighbouring addresses, 18 seeded faults of the header that must fail, the branch behind the gate after the A16 release and starting nothing, the gate-off translation unit equal to the commit's, the window block, the event number, the context (the state sits in the slack of its last page: its size is the default's, the arena starts at the next page, the wrapper holds the work base to a page, `xnuboot_setup` zeroes the whole state), each with a faulty case | that the guest reaches the store, or what the silicon does |
+| `python3 tools/test-sp11-m1-ack.py` | section 10, tool side: `--cpu-start` in the profile tool, the wrapper tool and the bundle builder, the pair of each choice, `CPU_START_MISMATCH` and `M1_REPORT_MISMATCH` whichever way round and for every record whose key and flags disagree, no record for `ack` without its text | the words of the record for `ack`, which are K13's and H19's (`tools/test-sp11-stick-monitor-rung5.py`) |
 
 A test that lacks clang, `llvm-objdump` or a q1n1 checkout prints SKIP with the reason, and a SKIP is not a pass.
 
@@ -159,3 +163,46 @@ A test that lacks clang, `llvm-objdump` or a q1n1 checkout prints SKIP with the 
 - Which NV2 record to embed: DECIDED 2026-11-17 (D6: the first-image record, INFERRED E2H = 1). Whether a record measured at E2H = 1 describes the E2H = 0 regime the monitor runs in: UNKNOWN.
 - Whether the NV2 gate passes on the unit's boot CPU, which needs a record that equals its live MIDR, REVIDR and ID registers: UNKNOWN.
 - Whether M1 starts: the audit's expected first failures still stand. Hardware: NOT RUN.
+
+## 10. The opt-in CPU-start acknowledge variant (`--cpu-start ack`)
+
+**EXPERIMENTAL, hardware NOT RUN, and not a model of the hardware.** Boot 21 (M1 rung 2; OBSERVED once, one unit, one boot) ran the stock kernel for 2.04 s and stopped on a 32-bit store to IPA
+0x300734004: `MON STOP S2_FAULT PC=0XFFFFFE00097A352C A=0X300734004 B=0X93970045` (the decode is INFERRED from the architecture: EC 0x24, ISV 1, SAS word, SRT 23, WnR 1, DFSC 0x05, a translation fault of level 1).
+That is the first CPU-start write the A16 route documents (`compat/boot-relocate.h`: ApplePMGR's register-write helper, PMGR register block 24 + 0x4000, the global core mask, value 0x2 for CPU 1), and the profile
+starts the guest with x4 = 0, so `compat/cpu-release.c` is never reached. The experiments after boot 21 that took guest input only (`cpus=1`: rung 3, boot 23, and rung 4 with `--let-panic`, boot 24) ended in the kernel's panic in the PMGR driver (XNU's one-cluster topology, INFERRED); this variant, with the guest's six CPUs, is rung 5 (`docs/SP11-STICK-MONITOR.md` section 20, K13).
+
+**What it does.** Built with `-DSNAP_SP11_CPU_START_ACK=1`, and only when no secondary is configured (x4 = 0), the monitor takes a 32-bit store to +4, +8 or +12 of that block, reported as a stage-2 translation fault
+with a valid syndrome, ignores the value and resumes the guest after the store. **No CPU is started.** What follows is the guest's own wait (a panic after its CPU-start timeout, or the next device): on the silicon the
+write starts a core and the kernel waits for it to announce itself (INFERRED from the public xnu source, not read in the 26A428 kernelcache), and nothing here answers "started". Everything else keeps today's stop: a
+read, another width, another offset or address, another kind of fault, a syndrome that does not describe the access, a fault of the stage-1 walk, an HPFAR_EL2 that names another page (`compat/cpu-start-ack.h` says why each).
+When `host_cpus` is set the A16 release owns the block and the acknowledge never runs; the release's text and `compat/cpu-release.c` are pinned by the tests and not edited.
+
+**The gate and the default.** `SNAP_SP11_CPU_START_ACK` is 0 unless a build asks (`probes/xnuboot.c`); it needs `SNAP_PLATFORM_SP11` and refuses `SNAP_BOOT_RELOCATE` and the DVFS records (an `#error` each). Every piece is
+inside `#if SNAP_SP11_CPU_START_ACK`: the header, the branch after the A16 release in `trap_dispatch.c`, the event `EV_CPU_START_ACK` (61), the state (176 bytes: in the slack of the context's last page, not a member of
+`struct context`, so no offset or size of the context moves, asserted; zeroed by `xnuboot_setup`) and the report block. With the gate off the monitor's translation unit preprocesses to the same text as before (tested), so the default pair is byte for byte what it was without the gate (VERIFIED on the host against fork tip eb6ba3b, whose pair is
+SNAPMON-M1.BIN 1d32f507..., SNAPREP-M1.BIN ee866760..., build-report.json 7d187aeb..., xnuboot.bin ad4ebaa2... and whose rung-2 console record is 1ad122b3...; a tree with another time box cap is compared against its own pair: the gate and the cap are independent) and so is the A16 monitor (`tools/monitor_baseline.py`: bare, base, control and fast IDENTICAL).
+
+**Building and binding.**
+
+```sh
+python3 tools/sp11_m1_profile.py build --nv2-record-header build/nv2-record/record.h --cpu-start ack build/sp11-m1-ack
+python3 tools/sp11_stick_wrapper_build.py --out build/sp11-m1-ack-wrap --monitor build/sp11-m1-ack/xnuboot.bin --monitor-build build/sp11-m1-ack/profile-build.json --cpu-start ack
+```
+
+`--cpu-start` is `stop` by default in both tools and in `tools/sp11_stick_bundle_build.py`, and it is independent of the wrapper's time box cap (`SP11_STICK_MONITOR_BOX_MAX_S` in `probes/sp11-stick-monitor.h`, a compile-time constant of the wrapper): neither is read by the other's code. An `ack` profile build adds the define before the NV2 header define (which stays last) and `"cpu_start": "ack"` to
+`profile-build.json`; a `stop` build has neither. The pair is `SNAPMON-M1-ACK.BIN` (the wrapper with the acknowledging monitor appended and pinned by digest, so the wrapper refuses any other monitor) and
+`SNAPREP-M1-ACK.BIN` (compiled with the gate defined; while no reporter source reads it, the same bytes as `SNAPREP-M1.BIN`); `build-report.json` says `cpu_start: ack`. A profile build of the other choice is
+`CPU_START_MISMATCH` in the wrapper tool, a report of the other choice is `M1_REPORT_MISMATCH` in the bundle builder, and so is a record whose key and flags disagree. The bundle builder writes a record for `ack` only if
+`sp11_stick_bundle_record_m1.CPU_START_TEXTS` lists it, so that a record that names the digest and says nothing of what the monitor does is never approved: it lists `ack` since `docs/SP11-STICK-MONITOR.md` section 20, K13, whose record (`--cpu-start ack` with `--let-panic` and `--boot-arg cpu_boot_timeout_secs=120`, a box of at most 60 s) is the only one that has the text.
+
+**What the page can show.** The report window (REPORT.DAT + 0x1000) holds, at word `OUT_CPU_START_ACK` = 8000 (window byte 0xFA10, REPORT.DAT + 0x10A10), 24 words written by every report that reaches the normal return of `xnuboot_report` (not by its two early returns, the ownership quarantine and the GPU terminal, where the window is partial and the reporter decodes none of it): "CPUACK01"
+(0x31304B4341555043), the struct size << 32 | 1, the total of stores taken, the counts at +4, +8 and +12, the last PC, the last offset << 32 | value, then the first eight as (PC, offset << 32 | value) pairs. The plain
+monitor leaves them zero, so the magic tells "built with it, nothing taken" from "not built with it". Event 61 (a = offset, b = value, c = ordinal, pc = the store) is logged for the first eight when the 512-event log has
+room, which on the unit it had not (boot 21: 512 events, 96,475 dropped before the stop): the window is the evidence. No reporter prints it yet.
+
+**What the record for it must say** (the text is the record generator's, `docs/SP11-STICK-MONITOR.md` section 20, K13, and its sentences are pinned by H19): the digests of the pair and that it differs from the plain pair by the monitor; EXPERIMENTAL and not a model of the hardware; that the
+stop at the CPU-start window is no longer the expected stop (the next `A=` names the next device, a guest panic about a CPU that did not start is an expected observation and not a monitor failure); that no store class is
+new (the acknowledge stores to the monitor's own RAM only) and the census rows are those of the plain monitor; that the guest's CPU-start timeout is guest input and the longer exposure of the one CPU is D8's.
+
+**Not established.** What the stock kernel does after the three stores (UNKNOWN: the public source says its wait ends in a panic after a timeout of 1 s by default, INFERRED for 26A428); whether HPFAR_EL2 reads valid on this
+unit for this fault (UNKNOWN, a zero is accepted); whether the kernel reads the block back (the first read stops the run, by design). Hardware: NOT RUN.

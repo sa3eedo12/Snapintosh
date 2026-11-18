@@ -114,6 +114,10 @@ int xnuboot_setup(uint64_t work, uint64_t size, uint64_t params, uint64_t out,
     for(unsigned i=0;i<SPTM_ROOT_CACHE;i++) {
         UOWNERS(c)[i].context=c;UOWNERS(c)[i].owner=i+1;
     }
+#if SNAP_SP11_CPU_START_ACK
+    /* Not part of struct context, so not zeroed above: the work area is not cleared by the host and an earlier run's counts must not be this run's. */
+    for (unsigned n = 0; n < sizeof(struct cpu_start_ack) / 8; n++) ((volatile uint64_t *)cpu_start_ack_of(c))[n] = 0;
+#endif
     return 0;
 }
 

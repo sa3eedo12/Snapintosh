@@ -34,6 +34,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sp11_stick_bundle_m1 as bm  # noqa: E402
 
 WIDTH = 118
+# The files of each CPU-start choice of the monitor (the builder's table), and the choices that this text can say what they are: `ack`, the acknowledging monitor, is said by rung 5's record
+# (tools/sp11_stick_bundle_panel_rung5.py), the one that carries it: the builder refuses --cpu-start ack without that record's word and --let-panic (check_boot_arg, check_let_panic).
+FILE_NAMES = bm.CPU_START_FILES
+CPU_START_TEXTS = ('stop', 'ack')
 PREPARE_AND_CLEAN_S = 0.04      # OBSERVED once, in boot 20 (the first run of the monitor entry): the call's TICKS less the time box, the prepare and the stop's clean together
 # What boot 20 measured of the same step as the dry run's 2.923 s, the wrapper's checks, copy and verify of its own GUEST.DAT: the TICKS HASHED of its page is a stamp counted from the
 # wrapper's entry (probes/sp11-stick-wrapper.c, c.head.r.ticks_hashed - c.ticks_enter), ticks of 19.2 MHz, and not the hash alone (that is HASHED less COPIED). Section 4 says it beside
@@ -142,8 +146,10 @@ PASS6_LINES = wrap(
     'call alike. EXPERIMENTAL: host model only, never run on the unit.', first=8, rest=8, width=GIC_WIDTH)
 
 
-def gic_lines(pass6=PASS6_LINES):
-    """The lines of the gic class of the M1 record: the first goes after `   gic: `, the others are indented six spaces by the record module."""
+def gic_lines(pass6=PASS6_LINES, cap=None):
+    """The lines of the gic class of the M1 record: the first goes after `   gic: `, the others are indented six spaces by the record module. `cap` is the wrapper's cap on the time box
+    for the pair of the record (sp11_stick_bundle_m1.box_cap); None is the builder's own, BOX_MAX_S."""
+    cap = bm.BOX_MAX_S if cap is None else cap
     return (
         *prose('memory-mapped GIC registers in the pinned frames (PIN.DAT gicd_base, gicr_first, gicr_stride, gicr_count) and the CPU interface, written by the '
                'arm half of the GIC stage (probes/sp11-stick-gic.c; docs/SP11-STICK-GIC.md sections 4 and 7) as pass 6 left it, before the call, and by its '
@@ -218,7 +224,7 @@ def gic_lines(pass6=PASS6_LINES):
         *prose('How long the quarantine lasts. It is on from Q\'s write until the put-back\'s last write, which comes after the monitor has returned: the whole '
                'call, so the monitor\'s prepare, its guest and its stop are inside it, and so is what the wrapper does after the return. In the both-gates case '
                'above there is no such write, and the quarantine is still on when the run ends. What bounds it is the '
-               f'monitor\'s own stop, the interrupt of its timer (CNTHP, PPI 26) at the time box on CNTPCT_EL0, at most {bm.BOX_MAX_S} s (the wrapper\'s PARAMS check), once the '
+               f'monitor\'s own stop, the interrupt of its timer (CNTHP, PPI 26) at the time box on CNTPCT_EL0, at most {cap} s (the wrapper\'s PARAMS check), once the '
                'monitor has armed the timer. Before that comes the monitor\'s prepare; after it the stop\'s cache clean, the wrapper\'s scans and cleans of REPORT.DAT '
                f'and the put-back\'s polls (each at most 50 ms). The prepare and the clean took about {PREPARE_AND_CLEAN_S} s together in boot 20 (OBSERVED once), the clean '
                'is bounded in section 4 (INFERRED), and the prepare alone is UNKNOWN. '

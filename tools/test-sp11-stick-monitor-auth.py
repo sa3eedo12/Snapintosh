@@ -51,7 +51,7 @@ sha = lambda data: hashlib.sha256(data).hexdigest()     # noqa: E731
 LLVM = ('clang', 'ld.lld', 'llvm-objcopy', 'llvm-readelf', 'llvm-nm', 'llvm-objdump')
 OWN = ('tools/sp11_stick_bundle_m1.py', 'tools/sp11_monitor_census.py', 'tools/test-sp11-stick-monitor-auth.py', 'tools/test-sp11-stick-monitor-interlock.py',
        'docs/SP11-STICK-MONITOR.md')
-DOC_CAP = 132000        # raised from 94,000 on purpose, to 114,000 for section 20 (K7), by 2,000 more for its second-camera and public-source words (A2: the margin for the notes that come with the record), by 2,000 more for K8 (A3), by 2,000 more for K8 (h) (A4), by 6,000 more for K9 (boot 21: docs batch 7) and K10 (rung 3), and by 6,000 more for K12 (rung 4: about 4.4 KB) and the row H18 (about 0.9 KB) on top of K11 (boot 23: docs batch 8; the note was 125,801 B before them); the note is about 131 KB; 91,000 before draft 5, 88,000 before draft 3; nothing was cut to make room
+DOC_CAP = 142000        # raised from 94,000 on purpose, to 114,000 for section 20 (K7), by 2,000 more for its second-camera and public-source words (A2: the margin for the notes that come with the record), by 2,000 more for K8 (A3), by 2,000 more for K8 (h) (A4), by 6,000 more for K9 (boot 21: docs batch 7) and K10 (rung 3), by 6,000 more for K12 (rung 4: about 4.4 KB) and the row H18 (about 0.9 KB) on top of K11 (boot 23: docs batch 8; the note was 125,801 B before them; 131,878 B with the boot 24 result of K12, b53a058), and by 10,000 more for boxcap v2, the acknowledge and draft 6 (3,418 bytes) and K13 (rung 5) with its row H19 and the cap sentence (about 6 KB); the note is 141.3 KB; 91,000 before draft 5, 88,000 before draft 3; nothing was cut to make room
 # The records the operator was shown or approved, regenerated here from the files they were made from (docs/SP11-MONITOR-PORT.md section 15 D4/D7).
 RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e035977bf700e',
            'gic and stop dry run': 'c74f7af0217c507e7738673b9d437d6c76589ef3c243c23eef4837b0ca435b3b',
@@ -59,7 +59,7 @@ RECORDS = {'dry run': '45c36225d9f23cc683aadce324ab2b56a34822b3358d0043a08e03597
 FIXED = dict(place=sb.placement(BT.BANK, 384 * BT.MIB, 48 * BT.MIB), stores=7, time_box_s=5, label='M1-FIXED', monitor=(445935, '1' * 64), reporter=(58463, '2' * 64),
              note=None, gic_stop=False, guest=dict(size=118870336, sha256='3' * 64, chunks=44, index='4' * 64))
 # The SHA-256 of record_text for FIXED and FABRICATED[...]: the text of an M1 record is what the operator approves, so a changed byte is another record.
-GOLDEN = {'a test record': 'a14b54a9950a9cd3d2e9afda9e386f959d5cdb8d726577cb6c7c63589d740425', 'another record': 'f738639330d193dced513c07a30c898c9b79e8717fd7c14770ccef9453a5b5be'}      # re-pinned on purpose for draft 5 (draft 4: 08e6c54d... and 5b0e0eee...), for A3 (draft 5: 262ea15b... and cf7dfb8b...) and for A4, whose shared words follow the delta review of the A3 text (A3: 08c45c89... and f6ad19cd...)
+GOLDEN = {'a test record': '46e218b7650099f68705be2390cdafaecc4b8146986535eb55afad98e19796aa', 'another record': '51eb9c2c6676ef386b0c4098a8e4bf9674a44cb9c5a6349c37ef1034901e218f'}      # re-pinned on purpose for draft 5 (draft 4: 08e6c54d... and 5b0e0eee...), for A3 (draft 5: 262ea15b... and cf7dfb8b...), for A4, whose shared words follow the delta review of the A3 text (A3: 08c45c89... and f6ad19cd...), and for the cap of 120 s that the text names (A4: a14b54a9... and f7386393...)
 
 
 def quietly(function, *args):
@@ -187,10 +187,10 @@ class Options(BT.Case):
 
     def test_the_time_box_is_the_one_the_wrapper_accepts(self):
         paths = stage('options')
-        for box in (0, 6, 7, 255):
+        for box in (0, 121, 255, 2 ** 32 - 1, 2 ** 32):
             with self.subTest(box):
                 self.refused('OPTIONS_BAD', template(paths, time_box_s=box))
-        for box in (1, 5):
+        for box in (1, 5, 6, 60, 120):
             with self.subTest(box):
                 code, text, err = template(paths, time_box_s=box)
                 self.assertEqual(code, 0, err)

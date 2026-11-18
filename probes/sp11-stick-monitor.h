@@ -44,10 +44,17 @@ _Static_assert((SP11_MONITOR_OFFSET) % 4096 == 0 && (SP11_MONITOR_OFFSET) > 0 &&
 _Static_assert(sizeof(SP11_STICK_MONITOR_LABEL_PREFIX) - 1 == 6, "the marker and the facts label must fit the 23 bytes that sp11sb_string_ok allows");
 
 /* ---- Parameters. A different value is a different binary and so a different authorisation. ---- */
+/* The longest time box PARAMS may carry, in seconds: 120, raised from 5 (D5): the kernel of the first run was still in early boot when its 5 s ended (OBSERVED, one unit).
+ * This stage only compares the word. The arithmetic the box feeds is the monitor's and was read for 120 s (VERIFIED by reading, hardware NOT RUN):
+ * PARAMS' watchdog_seconds is 64 bit, xnuboot_watchdog() arms the deadline as CNTPCT + CNTFRQ * seconds in 64 bit and the EL2 timer is set through
+ * CNTHP_CVAL_EL2, never the signed 32-bit TVAL. 120 s is 2.3e9 ticks at the unit's 19.2 MHz, above INT32_MAX from 112 s on, so a 32-bit signed
+ * intermediate anywhere on that path would overflow: tools/test-sp11-stick-monitor-record.py (Drift, BoxSources) pins the 64-bit forms. A cap above about 178 s needs
+ * compat/watchdog.c:18 read again: the guest's virtual WD1 counters are u32 and wrap at 178.9 s at 24 MHz (223.7 s at 19.2 MHz). The ceiling below is the cap itself, so
+ * that a -D can lower it and never exceed what was read. tools/sp11_stick_bundle_m1.py (BOX_MAX_S) and the harness spell the same number. */
 #ifndef SP11_STICK_MONITOR_BOX_MAX_S
-#define SP11_STICK_MONITOR_BOX_MAX_S 5u         /* the longest time box PARAMS may carry (D5: 5 s); the 20 s UPTIME precaution is not tested beyond it */
+#define SP11_STICK_MONITOR_BOX_MAX_S 120u
 #endif
-_Static_assert(SP11_STICK_MONITOR_BOX_MAX_S >= 1 && SP11_STICK_MONITOR_BOX_MAX_S <= 10, "the time box is 1 to 10 s");
+_Static_assert(SP11_STICK_MONITOR_BOX_MAX_S >= 1 && SP11_STICK_MONITOR_BOX_MAX_S <= 120, "the time box is 1 to 120 s");
 #define SM_WINDOW_BYTES 0x10000u        /* the monitor stores nothing at or above out + this (probes/xnuboot/report_layout.c): the extension slots follow */
 #define SM_EXT_SLOTS 2u                 /* the GIC record's slot and this one's */
 #define SM_STACK_AT 0x41000u            /* REPORT.DAT offset of the call's stack: [AT, AT + BYTES), the file's last 256 KiB */
@@ -78,7 +85,9 @@ _Static_assert(SM_FILLER_AT == 0x13000u && SM_FILLER_BYTES == 0x2E000u && SM_FIL
      defined(SP11_STICK_MONITOR_SEED_FLUSH_UNWRITABLE) || defined(SP11_STICK_MONITOR_SEED_NO_LABEL_CHECK) || \
      defined(SP11_STICK_MONITOR_SEED_ARM_REFUSAL_CALLS) || defined(SP11_STICK_MONITOR_SEED_NO_ARM_PUTBACK) || \
      defined(SP11_STICK_MONITOR_SEED_TICKS_EARLY) || defined(SP11_STICK_MONITOR_SEED_NO_WINDOW_CLEAN) || \
-     defined(SP11_STICK_MONITOR_SEED_NO_RECORD_CLEAN)) && !defined(SP11_STICK_HOST_TEST)
+     defined(SP11_STICK_MONITOR_SEED_NO_RECORD_CLEAN) || defined(SP11_STICK_MONITOR_SEED_BOX_PLUS_ONE) || \
+     defined(SP11_STICK_MONITOR_SEED_BOX_MINUS_ONE) || defined(SP11_STICK_MONITOR_SEED_BOX_NARROW) || \
+     defined(SP11_STICK_MONITOR_SEED_BOX_SIGNED) || defined(SP11_STICK_MONITOR_SEED_TICKS_INT32)) && !defined(SP11_STICK_HOST_TEST)
 #error "the seeded faults are part of the host test build only"
 #endif
 /* The stage: after COPIED, before DONE. Returns 0 once the call has been made and returned (whatever it returned: the record and the page say)

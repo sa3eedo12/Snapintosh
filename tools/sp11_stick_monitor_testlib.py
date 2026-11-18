@@ -30,7 +30,7 @@ REC_AT, REC_BYTES, WINDOW = 0x12000, 512, 0x10000          # the record's offset
 STACK_AT, STACK_BYTES, PATTERN = 0x41000, 0x40000, 0xC3A5C3A5C3A5C3A5
 FILLER_AT, FILLER_BYTES = 0x13000, 0x2E000                 # REPORT.DAT between the monitor's record slot and the stack's area
 QUARANTINE = (0x51554E01, 0x51554E02)
-BOX_MAX = 5
+BOX_MAX = 120                                              # SP11_STICK_MONITOR_BOX_MAX_S, spelled again so that the harness does not take it from the code it tests
 PARAMS_BYTES, PARAMS_WATCHDOG, PARAMS_GPU, PARAMS_EARLY = 0x2410, 192, 0x2340, 0x23E0
 ROWS = ('DAIF', 'SPSEL', 'VBAR_EL2', 'HCR_EL2', 'TPIDR_EL2', 'SCTLR_EL2', 'TCR_EL2', 'CNTHCTL_EL2', 'CNTHP_CTL_EL2', 'MDCR_EL2', 'VTTBR_EL2', 'VTCR_EL2',
         'VMPIDR_EL2')
@@ -45,7 +45,8 @@ SEEDS = {'no-params-check': 'NO_PARAMS_CHECK', 'no-digest': 'NO_DIGEST', 'no-reg
          'wrong-args': 'WRONG_ARGS', 'no-s2': 'NO_S2', 'no-overrun-check': 'NO_OVERRUN_CHECK', 'store-after': 'STORE_AFTER', 'refuse-after': 'REFUSE_AFTER',
          'no-gic-finish': 'NO_GIC_FINISH', 'no-filler-scan': 'NO_FILLER_SCAN', 'no-filler-precheck': 'NO_FILLER_PRECHECK', 'flush-unwritable': 'FLUSH_UNWRITABLE',
          'ticks-early': 'TICKS_EARLY', 'no-window-clean': 'NO_WINDOW_CLEAN', 'no-record-clean': 'NO_RECORD_CLEAN', 'no-filler-clean': 'NO_FILLER_CLEAN',
-         'no-label-check': 'NO_LABEL_CHECK'}
+         'no-label-check': 'NO_LABEL_CHECK', 'box-plus-one': 'BOX_PLUS_ONE', 'box-minus-one': 'BOX_MINUS_ONE', 'box-narrow': 'BOX_NARROW', 'box-signed': 'BOX_SIGNED',
+         'ticks-int32': 'TICKS_INT32'}
 LABEL_PREFIX = 'M1RUN-'         # tools/sp11_stick_bundle_m1.py LABEL_PREFIX, spelled again here so that the harness does not take it from the code it tests
 GIC_REFUSAL = 'GIC_NOT_READY'
 

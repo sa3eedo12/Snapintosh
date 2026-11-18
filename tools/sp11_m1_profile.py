@@ -2,14 +2,20 @@
 # SPDX-License-Identifier: MIT
 """The SP11 milestone M1 monitor profile: its flag set, the NV2 record it requires, and the offline build.
 
-    python3 tools/sp11_m1_profile.py show  --nv2-record-header FILE [--tree TREE]
-    python3 tools/sp11_m1_profile.py flags --nv2-record-header FILE [--tree TREE]
-    python3 tools/sp11_m1_profile.py build --nv2-record-header FILE OUT [--tree TREE]
+    python3 tools/sp11_m1_profile.py show  --nv2-record-header FILE [--tree TREE] [--cpu-start stop|ack]
+    python3 tools/sp11_m1_profile.py flags --nv2-record-header FILE [--tree TREE] [--cpu-start stop|ack]
+    python3 tools/sp11_m1_profile.py build --nv2-record-header FILE OUT [--tree TREE] [--cpu-start stop|ack]
 
 The profile is config/monitor-profile-sp11-m1.json laid over config/monitor-flags.json, which stays the A16 recipe and
 is never edited for the SP11. It builds the monitor milestone M1 needs (docs/SP11-MONITOR-PORT.md sections 2 and 13,
 WI 5; docs/SP11-MONITOR-PROFILE.md is the interface note): SNAP_PLATFORM_SP11, the queued service lock without which six
 vCPUs refuse at -146, the five GIC macros, no relocation and no thermal define. Nothing in it is an A16 default.
+
+--cpu-start chooses what the monitor does with the guest's first CPU-start write. `stop` is the default and the profile as it
+always was: the write is a stage-2 fault and stops the run. `ack` adds -DSNAP_SP11_CPU_START_ACK=1 after the profile's defines (the
+NV2 header define stays last) and records "cpu_start": "ack" in OUT/profile-build.json: an EXPERIMENTAL diagnostic that takes the
+write and starts no CPU (docs/SP11-MONITOR-PROFILE.md section 10). A `stop` build's flags, record and monitor are byte for byte
+what they were before the option existed.
 
 The NV2 record is a required input and has no default. `show`, `flags` and `build` all refuse, with a nonzero exit, when
 none is named, when the file is missing, a link, not a regular file, too large, not exactly the header
@@ -53,6 +59,11 @@ SAFE_PATH = re.compile(r'/[A-Za-z0-9._/+@,:=-]+')
 NO_RECORD = ('the sp11-m1 profile needs an NV2 record and has none by default: name a header written by '
              'tools/nv2_record.py with --nv2-record-header FILE. Which record to embed is operator decision D6 '
              '(docs/SP11-MONITOR-PORT.md section 9); this tool does not choose one')
+# What the monitor does with the guest's first CPU-start write (docs/SP11-MONITOR-PROFILE.md section 10): the default stops the run on it; `ack` is the opt-in
+# diagnostic that takes the write and starts no CPU. The define is code here, not a key of the profile file, so that the profile's keys and every digest that
+# names it stay what they were.
+CPU_STARTS = ('stop', 'ack')
+CPU_START_DEFINES = {'stop': [], 'ack': ['-DSNAP_SP11_CPU_START_ACK=1']}
 
 
 class Refused(Exception):
@@ -218,17 +229,18 @@ def identity_lines(info):
 
 # ---- flags and build ---------------------------------------------------------------------------------------------
 
-def profile_flags(profile, base, info):
-    return [*base, *profile['defines'], f'-D{profile["required_input"]["define"]}="{info.path}"']
+def profile_flags(profile, base, info, cpu_start='stop'):
+    need(cpu_start in CPU_STARTS, f'--cpu-start is one of {", ".join(CPU_STARTS)}, not {cpu_start!r}')
+    return [*base, *profile['defines'], *CPU_START_DEFINES[cpu_start], f'-D{profile["required_input"]["define"]}="{info.path}"']
 
 
-def prepare(tree, header):
+def prepare(tree, header, cpu_start='stop'):
     tree = Path(tree).resolve()
     profile, base = load_profile(tree)
     need(profile['required_input']['soc'] == platform_soc(tree),
          f'{PROFILE_PATH} names SoC {profile["required_input"]["soc"]} but compat/nv2-gate.h builds for {platform_soc(tree)}')
     info = read_record(header, profile['required_input']['soc'])
-    return tree, profile, info, profile_flags(profile, base, info)
+    return tree, profile, info, profile_flags(profile, base, info, cpu_start)
 
 
 def code_window(tree):
@@ -238,7 +250,7 @@ def code_window(tree):
     return at[1] - at[0]
 
 
-def build(tree, out, profile, info, flags):
+def build(tree, out, profile, info, flags, cpu_start='stop'):
     out = Path(out)
     need(not out.exists(), f'{out} exists: the build goes into a fresh directory')
     uefi, why = monitor_build_offline.locate_q1n1(tree)
@@ -262,6 +274,8 @@ def build(tree, out, profile, info, flags):
     record = dict(format=1, profile=profile['profile'], hardware='NOT RUN', flags=flags,
                   nv2_record=dict(header_sha256=info.header_sha256, record_sha256=info.record_sha256,
                                   **nv2_record.fields_of(info.record)), monitor=built)
+    if cpu_start != 'stop':
+        record['cpu_start'] = cpu_start      # only a variant says so: the record of a `stop` build is what it was before the option
     (out / 'profile-build.json').write_text(json.dumps(record, indent=1) + '\n', encoding='utf-8')
     print(json.dumps(dict(profile=profile['profile'], out=str(out), record_sha256=info.record_sha256, **built)))
     return 0
@@ -274,21 +288,27 @@ def main(argv=None):
         sub = commands.add_parser(name)
         sub.add_argument('--nv2-record-header', metavar='FILE', default=None)
         sub.add_argument('--tree', default=str(ROOT))
+        sub.add_argument('--cpu-start', choices=CPU_STARTS, default='stop',
+                         help='what the monitor does with the guest\'s first CPU-start write: stop (the default, a stage-2 fault ends the run) or ack (EXPERIMENTAL: '
+                              'take the write, start no CPU)')
         if name == 'build':
             sub.add_argument('out')
     args = ap.parse_args(argv)
     try:
-        tree, profile, info, flags = prepare(args.tree, args.nv2_record_header)
+        tree, profile, info, flags = prepare(args.tree, args.nv2_record_header, args.cpu_start)
         if args.command == 'flags':
             print(json.dumps({'flags': flags}, indent=1))
             return 0
         print(f'profile      {profile["profile"]}: {profile["target"]}')
         print(f'qualification {profile["qualification"]}')
         print('\n'.join(identity_lines(info)))
-        print('defines      ' + ' '.join([*profile['defines'], flags[-1]]))
+        print('defines      ' + ' '.join([*profile['defines'], *CPU_START_DEFINES[args.cpu_start], flags[-1]]))
+        if args.cpu_start == 'ack':
+            print('cpu start    ACK: EXPERIMENTAL diagnostic, not a model of the hardware: a 32-bit store to the PMGR CPU-start block is taken and ignored, no CPU is '
+                  'started (docs/SP11-MONITOR-PROFILE.md section 10)')
         if args.command == 'show':
             return 0
-        return build(tree, args.out, profile, info, flags)
+        return build(tree, args.out, profile, info, flags, args.cpu_start)
     except Refused as refusal:
         print(f'REFUSED: {refusal}', file=sys.stderr)
         return 2

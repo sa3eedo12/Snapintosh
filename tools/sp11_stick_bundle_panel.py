@@ -27,6 +27,7 @@ import sp11_stick_bundle_record_m1 as m1t  # noqa: E402
 import sp11_stick_bundle_panel_rung2 as r2  # noqa: E402
 import sp11_stick_bundle_panel_rung3 as r3  # noqa: E402
 import sp11_stick_bundle_panel_panic as rp  # noqa: E402
+import sp11_stick_bundle_panel_rung5 as r5  # noqa: E402
 REFUSALS = ('PANEL_MISMATCH',)      # beside m1.REFUSALS: docs/SP11-STICK-MONITOR.md section 20 lists it
 ch.KNOWN_REFUSALS.update(REFUSALS)
 Refused = ch.Refused
@@ -59,7 +60,7 @@ def command_line(choice, boot_arg=None):
 
 def kind_key(real):
     """The key of the guide's PANEL table for the facts of a real build: its choice, `+word` when its command line has a word of its own, which is a record of its own, and
-    `+let_panic` when the monitor's let_panic PARAMS word is set (K12)."""
+    `+let_panic` when the monitor's let_panic PARAMS word is set (K12, K13)."""
     return real['panel'] + (f'+{real["boot_arg"]}' if real.get('boot_arg') else '') + ('+let_panic' if real.get('let_panic') else '')
 
 # What section 3c cites and what each citation rests on: (file, first line, last line, fragments that must all be somewhere on those lines). The text below
@@ -115,6 +116,8 @@ KIND_LINES_ARG = m1t.wrap('This record is of the choice that hands the guest the
 
 def kind_lines(panel):
     """The lines that section 3 adds after the kind's own line, for the choice that read_panel found (and its word, if the guest has one)."""
+    if _rung(panel) is r5:
+        return r5.kind_lines(panel)
     if panel.get('boot_arg'):
         return KIND_LINES_ARG
     return KIND_LINES[panel['choice']]
@@ -198,6 +201,7 @@ GUIDE_WORDS = {
         stand_head=r3.STAND_HEAD, stand_loop=r3.STAND_LOOP, stand_stick=False,
         console=r3.CONSOLE, ran=r3.RAN, stop_seen=r3.STOP_SEEN, fault_seen=r3.FAULT_SEEN, film_until=r3.film_until, **{**r2.SHARED_WORDS, 'step4': r3.step4, 'step6': r3.STEP6, 'row_e': r3.row_e})}
 GUIDE_WORDS['console+cpus=1+let_panic'] = rp.guide_words(GUIDE_WORDS['console+cpus=1'])      # rung 4 (K12): rung 3's words, except those that tools/sp11_stick_bundle_panel_panic.py says again
+GUIDE_WORDS['console+cpu_boot_timeout_secs=120+let_panic'] = r5.guide_words(GUIDE_WORDS['console+cpus=1+let_panic'])      # rung 5 (K13)
 
 
 def reading_lines(panel):
@@ -205,7 +209,7 @@ def reading_lines(panel):
     that the operator reads; for the panel as the console it is section 5d, and 3c is the evidence for it."""
     if panel['choice'] == 'console':
         return m1t.wrap('This text also asks the operator to read section 5d: it says what to film, what is new beyond section 0b and what counts as a result of rung '
-                        f'{4 if panel.get("let_panic") else 3 if panel.get("boot_arg") else 2}. Section 3c is the evidence for it, which the coordinator reads.', 0, 0)
+                        f'{(5 if _rung(panel) is r5 else 4) if panel.get("let_panic") else 3 if panel.get("boot_arg") else 2}. Section 3c is the evidence for it, which the coordinator reads.', 0, 0)
     return m1t.wrap('This text also asks the operator to read section 3c: it says what the panel choice is, what the film must show and what counts as a pass of it.', 0, 0)
 
 
@@ -310,8 +314,8 @@ def _row(label, text):
 
 
 def _rung(panel):
-    """The module whose words a record of the console with a word of its own is written in: rung 3's, or rung 4's, which sets let_panic as well (K12)."""
-    return rp if panel.get('let_panic') else r3
+    """The module whose words a record of the console with a word of its own is written in: rung 3's, rung 4's (K12: let_panic) or rung 5's (K13: let_panic with the acknowledging word)."""
+    return (r5 if m1.BOOT_ARG_CPU_START.get(panel.get('boot_arg')) == 'ack' else rp) if panel.get('let_panic') else r3
 
 
 def _in_short(panel):
@@ -414,6 +418,8 @@ def _console(panel):
 
 def _console_for(panel):
     """The Console paragraph of section 3c: for rung 3 its first sentence says that boot 21 showed the console on the panel (r3.CONSOLE_OPEN3); the rest is rung 2's."""
+    if _rung(panel) is r5:
+        return r5.console_text(panel)
     text = _console(panel)
     if not panel.get('boot_arg'):
         return text
@@ -423,7 +429,7 @@ def _console_for(panel):
 
 def _screen(panel):
     if panel['choice'] == 'console':
-        return r2.screen_text(panel['gop']['height'], panel['gop']['width'])
+        return (r5 if _rung(panel) is r5 else r2).screen_text(panel['gop']['height'], panel['gop']['width'])
     return ('The screen. The wrapper\'s lines and those of SNAPREP-M1.BIN are drawn by the runner at EL2 into this same memory, as glyph pixels only and with no '
             'background (q1n1 platform/uefi/main.c: screen_char, payload_emit). What the guest paints stays until a glyph of the runner lands on it: the lines of the page '
             'drawn before the call can be painted over, and the report drawn after the stop is drawn over what the guest left, which can make it hard or impossible to '
@@ -483,7 +489,7 @@ def section_3c(panel, label):
                      f'{g["format"]} ({FORMATS.get(g["format"], "?")}): the framebuffer that the runner reports (OBSERVED: docs/SP11-STICK-BUNDLE.md section 3, PIN.DAT fb_*); '
                      'the wrapper compares it with the live GOP before the call (GOP_MISMATCH) and the builder held these facts to the firmware dumps it was given'),
         *_row('PARAMS', f'fb_pa {lo:#x}, fb_span {span:#x} ({span} bytes, {shown} MiB): that range on 16 KiB pages (words {FB_PA_WORD} and {FB_SPAN_WORD} of struct params)'),
-        *(_row('let_panic', rp.PARAMS_ROW) if panel.get('let_panic') else ()),
+        *(_row('let_panic', _rung(panel).PARAMS_ROW) if panel.get('let_panic') else ()),
         *_row('boot_args', f'Video: v_baseAddr {base:#x}, v_display {mode} (text mode), v_rowBytes {row}, v_width {width}, v_height {height}, v_depth {depth}'),
         *_row('command line', panel['cmdline']),
         *_p(_other_differences(panel)),
@@ -493,7 +499,7 @@ def section_3c(panel, label):
             'pointing outside the guest\'s memory (probes/xnuboot/sptm_dispatch.c:983-988). The firmware\'s reserved descriptor around the GOP is 0x21c0000 bytes '
             '(OBSERVED: docs/SURFACE-PRO-11.md, section WS-B); the guest gets the first part of it and nothing else is mapped.'),
         *_p(_console_for(panel)),
-        *((*_p(r3.boot21_text()), *_p(_rung(panel).word_text()), *(line for text in rp.extra_paragraphs(panel) for line in _p(text))) if boot_arg else ()),
+        *((*_p(r3.boot21_text()), *_p(_rung(panel).word_text()), *(line for text in (r5 if _rung(panel) is r5 else rp).extra_paragraphs(panel) for line in _p(text))) if boot_arg else ()),
         *_p('What stays withheld. Stage 2 maps no display, GPU or DCP register for the guest: its ranges are its RAM and reserve, this panel range and the monitor\'s '
             'work area read-only (probes/xnuboot/stage2.c:186-199); the Adreno windows exist only with gpu.flags, which the builder requires zero (PARAMS_LAUNCH), and '
             'the windows of the display timing, input and Wi-Fi models are not in this monitor (section 3b). So no guest driver can start the display pipeline: it stays '

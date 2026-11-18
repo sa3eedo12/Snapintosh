@@ -135,7 +135,18 @@ static unsigned mon_params(struct sw_mon *m)
 #endif
     if (r->early_stop_flags) return SM_OUT_PARAMS_EARLY_STOP;
     if (r->gpu_flags) return SM_OUT_PARAMS_GPU;
+#if defined(SP11_STICK_MONITOR_SEED_BOX_PLUS_ONE)
+    return !r->box_s || r->box_s > SP11_STICK_MONITOR_BOX_MAX_S + 1u ? SM_OUT_PARAMS_BOX : 0;
+#elif defined(SP11_STICK_MONITOR_SEED_BOX_MINUS_ONE)
+    return !r->box_s || r->box_s >= SP11_STICK_MONITOR_BOX_MAX_S ? SM_OUT_PARAMS_BOX : 0;
+#elif defined(SP11_STICK_MONITOR_SEED_BOX_NARROW)
+    return !(uint32_t)r->box_s || (int32_t)r->box_s > (int32_t)SP11_STICK_MONITOR_BOX_MAX_S ? SM_OUT_PARAMS_BOX : 0;
+#elif defined(SP11_STICK_MONITOR_SEED_BOX_SIGNED)
+    return !r->box_s || (int64_t)r->box_s > (int64_t)SP11_STICK_MONITOR_BOX_MAX_S ? SM_OUT_PARAMS_BOX : 0;
+#else
+    /* The word is the monitor's 64-bit watchdog_seconds, read whole: a value that needs more than 32 bits, or the top bit, is above the cap and refused. */
     return !r->box_s || r->box_s > SP11_STICK_MONITOR_BOX_MAX_S ? SM_OUT_PARAMS_BOX : 0;
+#endif
 }
 
 /* The monitor image in the file, hashed where it will run and compared with the digest the build pinned: a wrapper paired with another monitor,
