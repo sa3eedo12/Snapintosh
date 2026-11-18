@@ -23,7 +23,7 @@ DOC = ROOT / 'docs' / 'SP11-MONITOR-PORT.md'
 LABELS = ('VERIFIED', 'OBSERVED', 'INFERRED', 'EXPERIMENTAL', 'UNIMPLEMENTED', 'UNKNOWN')
 LOOKALIKES = ('ASSUMED CONFIRMED MEASURED PROVEN PROVED TESTED VALIDATED ESTABLISHED HYPOTHESIS GUESSED LIKELY SUSPECTED '
               'UNVERIFIED PRESUMED PROBABLE CERTAIN DEMONSTRATED QUALIFIED ASSERTED CLAIMED OBVIOUS TRIVIAL').split()
-MAX_BYTES = 90000       # raised from 80,000 on purpose for boot 23 (the third monitor run, rung 3; from 70,000 for boot 21); nothing was cut
+MAX_BYTES = 96000       # raised from 90,000 on purpose for boot 24 (the fourth monitor run, rung 4; from 80,000 for boot 23, 70,000 for boot 21); nothing was cut
 SECTIONS = tuple(enumerate(('reading|milestone m1|entry|delivery|memory|timer|interrupts|id registers|platform contract|console|'
                             'thermal|safety|ordered work plan|first hardware run|decisions i need from the operator|'
                             'what i could not establish').split('|'), 1))
@@ -97,9 +97,9 @@ WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                     3: ('`real` RAN end to end on the real kernelcache, host only, not a hardware result', 'answered U9',
                         'Still blocking a bundle for hardware: the monitor payload (WI 4b)'),
                     4: ('4a BUILT for the dry run, EXPERIMENTAL, RAN once on the unit (WI 7; its refusal paths NOT RUN',
-                        '4b, the monitor entry after WI 8', 'BUILT, EXPERIMENTAL (`docs/SP11-STICK-MONITOR.md`), RAN three times on the unit (boots 20, 21 and 23, OBSERVED; design below)',
-                        'D2 (decided), D4 (decided for rungs 1 to 3)'),
-                    5: ('BUILT, EXPERIMENTAL, host side', 'its monitor image ran three times on the unit as part of M1 (boots 20, 21 and 23)'),
+                        '4b, the monitor entry after WI 8', 'BUILT, EXPERIMENTAL (`docs/SP11-STICK-MONITOR.md`), RAN four times on the unit (boots 20, 21, 23 and 24, OBSERVED; design below)',
+                        'D2 (decided), D4 (decided for rungs 1 to 4)'),
+                    5: ('BUILT, EXPERIMENTAL, host side', 'its monitor image ran four times on the unit as part of M1 (boots 20, 21, 23 and 24)'),
                     6: ('MET for rungs 1, 2 and 3 (D4, 2026-11-18, each by its own record)',),
                     7: ('DONE, boot 10 (2026-11-16 10:21, plan DRYRUN-A, OBSERVED)', 'calls no monitor', '`DONE RETURN=0`',
                         '`AT S1E2W` accepted 337 of 337 probes', 'matched 13 of 13 digests',
@@ -122,11 +122,11 @@ WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                          "the plan's expected failure 5 (OBSERVED once; the match of the address with XNU's first CPU-start write is INFERRED)",
                          'the loop of boot 20 is gone (its INFERRED cause chain is consistent with the run, not proven); one vCPU, no CPU bring-up',
                          '`python3 tools/monitor_baseline.py capture NAME`, then `compare EARLIER LATER`: IDENTICAL',
-                         '1 to 3: three done (boot 20, rung 1; boot 21, rung 2; boot 23, rung 3)',
+                         '1 to 4: four done (boot 20, rung 1; boot 21, rung 2; boot 23, rung 3; boot 24, rung 4)',
                          'answers U7 (the guest ran from the bank in boots 20 and 21: OBSERVED, one boot each), and U8 and U10 in part',
                          'U10: the execute-never fault of the first native call not seen, `ABORTS=0`; one stage-2 data fault, the stop of boot 21, seen',
                          "U3's monitor stop path ran once (`MON STOP WATCHDOG`, OBSERVED), and boot 21 ended at a stage-2 fault before the box",
-                         'the NV2 gate passed with the first-image record in all three boots (-91 not seen), its regime still not recorded',
+                         'the NV2 gate passed with the first-image record in all four boots (-91 not seen), its regime still not recorded',
                          'D4 decided for rung 1 (2026-11-18) and for rung 2 (2026-11-18 about 09:46, "Approve 1ad122b3 (rung 2)")',
                          "D9's panel-handed choice decided by the rung 2 approval; the next run needs its own record and the operator's decision",
                          # rung 3 (boot 23): what ran, how it ended, what it does not settle
@@ -135,7 +135,14 @@ WORK_ITEM_STATUS = {1: ('DONE, EXPERIMENTAL (b8e8f81',),
                          "the stop was `MON STOP GUEST_EXC` with `PC=0XFFFFFE000B8C2288` (the guest's `x30`), `A=0X2000000` (`ESR_EL1`, class 0) and `C=0XFFFFFE000B8C22` (`ELR_EL1`, two digits cut), 2.17 s into the call (`TICKS=41593665`, inside the box of 5 s)",
                          "`cpus=1` was honoured and the CPU-start stop is gone; the exception is INFERRED (high confidence, a host analysis) to be the kernel's own debugger trap, so that the kernel had entered its panic or debugger funnel, and its cause is UNKNOWN",
                          'and for rung 3 (2026-11-18 about 15:05, "Approve 749361cf (rung 3)", which also kept the panel choice of D9 for it)',
-                         'and boot 23 at a guest exception (`GUEST_EXC`) before the box', 'boot 23: `ABORTS=0` again and its stop was a guest exception')}
+                         'and boot 23 at a guest exception (`GUEST_EXC`) before the box', 'boot 23: `ABORTS=0` again and its stop was a guest exception',
+                         # rung 4 (boot 24): what ran, how it ended, what it does not settle
+                         "rung 4 RAN once on the unit (boot 24, 2026-11-18, plan `M1RUN-LETPANIC-RUNG4`; OBSERVED, one unit, one boot; section 22): M1 PASSED by its own rows, rung 4's class PANIC TEXT",
+                         'Rung 4 (boot 24): rows a, c, d, e and f held (b not exercised; g for the pair that ran, the source directories differing from boot 23\'s tree by two added files and no changed file, VERIFIED, host, the byte comparison not repeated: NOT RUN)',
+                         "the stop was `MON STOP S2_FAULT` with `PC=0XFFFFFE0008BA7358` and `A=0X3082BC224`, 2.2465 s into the call (`TICKS=43133334`, inside the box of 5 s), after the kernel's own handler had printed a panic text (an ApplePMGR assertion, then nested panics)",
+                         "the decode of the stop (INFERRED) is a 32-bit read at an unmapped address in the kernel's chip-reset path; M1 PASSED by its own rows (5a), rung 4's class PANIC TEXT, a result that is neither a pass nor a failure of the record",
+                         'and for rung 4 (2026-11-18 about 21:31, "Approve 67d814f6 (R6.2) and stage the stick", by the SHA-256 of its own record)',
+                         'boot 24 at a stage-2 fault (`S2_FAULT`) before the box', 'boot 24: `ABORTS=0` again and its stop was a stage-2 data fault again, a read')}
 # The tree as the document states it (whitespace-collapsed); the sources that decide it are read below.
 STATE_REQUIRED = '''\
 is five files, the runner's whole manifest
@@ -181,7 +188,7 @@ a descriptor holds at most four ECAM entries
 the adapter demands set equality
 the MCFG lists eight allocations, a descriptor holds four
 an eight-entry descriptor is refused
-the monitor entry (WI 4b) is built on them and ran three times, in boots 20, 21 and 23 (OBSERVED, one boot each); the bundle builder ran `real` on the kernelcache, host only
+the monitor entry (WI 4b) is built on them and ran four times, in boots 20, 21, 23 and 24 (OBSERVED, one boot each); the bundle builder ran `real` on the kernelcache, host only
 probably position independent (INFERRED: no relocation check exists, WI 4b adds one)
 a polling stop cannot exist, as the wrapper does not run while the monitor owns the CPU
 the boot CPU writes only CNTHCTL_EL2
@@ -198,7 +205,7 @@ five devices (debug UART, keyboard, touchpad, touchscreen, NVMe) absent
 N1 Boot seed: DECIDED 2026-11-17 ("Accept all four (Recommended)")
 D11 proper stays OPEN
 U9 kernelcache (answered, WI 3)
-WI 4b, the monitor entry: BUILT, EXPERIMENTAL, RAN three times on the unit (boots 20, 21 and 23, OBSERVED).
+WI 4b, the monitor entry: BUILT, EXPERIMENTAL, RAN four times on the unit (boots 20, 21, 23 and 24, OBSERVED).
 `SNAP_SP11_STICK_MONITOR`, default 0
 Gaps G1 to G9
 8 -> 4b -> 6 -> 11
@@ -217,7 +224,7 @@ SGI 0 and PPIs 23, 25, 26, 27 and 30 enabled by the firmware
 PPI 26's own delivery was OBSERVED in boot 14
 quarantines this CPU's other enabled interrupts first
 GUEST.DAT 118,870,336 B (44 chunks)
-Hardware status for the port itself: NOT RUN, except three runs of the monitor entry (boots 20, 21 and 23, M1 rungs 1, 2 and 3, 2026-11-18).
+Hardware status for the port itself: NOT RUN, except four runs of the monitor entry (boots 20, 21, 23 and 24, M1 rungs 1 to 4, 2026-11-18).
 The guest was, INFERRED, stuck in an early loop of the kernel's I/O Kit start-up
 Boot 21 handed the guest the panel as its console (rung 2, WI 11): the kernel's boot log was on the panel
 CPU-start write (`MON STOP S2_FAULT`, 2.04 s into the call; OBSERVED, one unit, one boot; section 19 of the log; that the write is the CPU-start write is INFERRED, by address)
@@ -233,9 +240,9 @@ Rung 2 (boot 21) changed the panel choice by the operator's approval of 2026-11-
 the monitor's own stop path: WATCHDOG stop OBSERVED once, boot 20, WI 11; boot 21 ended at a stage-2 fault before the box
 U7 guest in the bank (the guest ran from the bank in boots 20 and 21: OBSERVED, one boot each)
 U10 stage-2 syndromes (boot 20: no stage-2 abort, so none seen); in boot 21 one stage-2 fault was seen, the stop (a write and a translation fault at level 1: INFERRED decode of `ESR` `0x93970045`), with an IPA in the report
-so what `HPFAR_EL2` holds on Oryon v1 stays UNKNOWN, and the execute-never fault of the first native call was not seen in any of boots 20, 21 and 23 (`ABORTS=0`)
-the monitor entry's stores (RAM, EL2 system registers and the GIC) ran three times, in boots 20, 21 and 23, and were put back
-The path was walked three times, for rungs 1 to 3 (boots 20, 21 and 23); a further run needs a record of its own.
+so what `HPFAR_EL2` holds on Oryon v1 stays UNKNOWN, and the execute-never fault of the first native call was not seen in any of boots 20, 21, 23 and 24 (`ABORTS=0`)
+the monitor entry's stores (RAM, EL2 system registers and the GIC) ran four times, in boots 20, 21, 23 and 24, and were put back
+The path was walked four times, for rungs 1 to 4 (boots 20, 21, 23 and 24); a further run needs a record of its own.
 SNAPREP prints six lines of 64 columns (`RP_CONSOLE_LINES`), so the page is a prefix of what the guest printed
 boot 20 ran the monitor and its guest for 5 s, with no restart in its 45 s film, alive at UPTIME 28 S
 boot 21 ran them for 2.04 s, with no restart in its 58.8 s film, alive at UPTIME 36 S on the closer view at its end
@@ -268,7 +275,7 @@ the monitor's own stop path ran once, in boot 20: `MON STOP WATCHDOG` at the 5 s
 was RELAXED for rung 1 by the approval of the M1 record
 and for rung 2 by the approval of its record (boot 21: the call took 2.04 s and UPTIME read 36 S on the closer view, with no restart)
 Boot 20 (2026-11-18): the gate passed with this record on the unit
-The gate passed with this record again in boot 21 (`STATUS=0X0`; OBSERVED, one boot); nothing changes for the regime question
+The gate passed with this record again in boot 21 (`STATUS=0X0`; OBSERVED, one boot) and in boots 23 and 24 (OBSERVED, one boot each); nothing changes for the regime question
 Boot 20 ran under it: one CPU for a call of 5.04 s (the record requires AC power; no temperature was read)
 Boot 21 ran under it too: one CPU for a call of 2.04 s (no temperature was read)
 Rung 2, DECIDED 2026-11-18 about 09:46 ("Approve 1ad122b3 (rung 2)", by the SHA-256 of its own record, which also decided D9's panel choice for it)
@@ -276,7 +283,7 @@ The panel-handed choice was then DECIDED for rung 2 by the approval of 2026-11-1
 GUEST.DAT 118,908,480 B in 46 chunks, and no `-noprogress`, so that the run tests the analysis of boot 20
 its code was inspected for the stop site only, by structure
 What the kernel does under the monitor past its first CPU-start write: UNKNOWN
-SMP, how the guest behaves above 4 GiB, the kernel past its first CPU-start write and stage-2 fault syndromes beyond the one that ended boot 21: none has run
+SMP, how the guest behaves above 4 GiB, the kernel past its first CPU-start write and stage-2 fault syndromes beyond the two that ended boots 21 and 24 (a write and a read, both translation faults at level 1: INFERRED decodes): none has run
 What boot 21 showed (rung 2; OBSERVED, one unit, one boot;
 `MON STOP S2_FAULT` with `PC=0XFFFFFE00097A352C`, `A=0X300734004`, `B=0X93970045` and `C=0XFFFFFE60A0178004`, 39,245,286 ticks for the whole call (2.04 s, inside the box of 5 s)
 `ABORTS=0`, `TRAPS=136424` and `CALLS=65955` (cumulative counts, not rates)
@@ -298,10 +305,10 @@ M1 PASSED by its own rows (the stop kinds of row d include `GUEST_EXC`); rung 3'
 Rows a, c, d, e and f held (f by the host check of the stick, read only: the 18 staged files unchanged and `REPORT.DAT` not written back, so the page is the only record of the run), row b was not exercised and row g held as a host source comparison (no monitor source changed between ea59368 and 3f48b0a: VERIFIED, host; the byte comparison of the builds was not repeated: NOT RUN).
 which a host analysis after the boot INFERS (high confidence) to be the guest kernel's own debugger trap, so that the kernel had entered its panic or debugger funnel; its text is printed only after the trap, which the monitor stopped on, so the panel shows none, and the cause is UNKNOWN
 boot 23's, `MON STOP GUEST_EXC`, ended it earlier too, at an exception that the guest took at EL1 (OBSERVED, one boot)
-and again in boot 21 (OBSERVED, one boot) and in boot 23 (OBSERVED, one boot), six vCPUs refuse
+and again in boot 21 (OBSERVED, one boot) and in boots 23 and 24 (OBSERVED, one boot each), six vCPUs refuse
 and again in boot 23 (`STATUS=0X0`, OBSERVED, one boot)
 Rung 3 (boot 23) kept that choice and added `cpus=1`: the kernel ran on, `ABORTS=0` again, to an exception at EL1 that the monitor stopped on (section 14)
-boot 23 ended at a guest exception (`MON STOP GUEST_EXC`) before the box); U4
+boot 23 ended at a guest exception (`MON STOP GUEST_EXC`) before the box; boot 24 ended at a stage-2 fault (`MON STOP S2_FAULT`) before the box); U4
 in boot 23 `ABORTS=0` again and the stop was a guest exception, not a stage-2 fault
 boot 23 ran them for 2.17 s, with no restart in the 7 s after the report page of its 25.19 s film, alive at UPTIME 18 S at its end
 Boot 23 ran under it too: one CPU for a call of 2.17 s (no temperature was read)
@@ -310,9 +317,42 @@ Rung 3 kept the choice by its own approval of 2026-11-18 about 15:05 ("Approve 7
 **What boot 23 showed (rung 3, `cpus=1`; OBSERVED, one unit, one boot; `docs/SP11-STICK-LOG.md` section 21).**
 A host analysis after the boot INFERS (high confidence; the public XNU source, tag `xnu-12377.121.6`, and the local kernelcache read as a file; no KDK, so no symbolication: NOT RUN) that the exception is the guest kernel's own debugger trap, a public constant, and not a missing CPU feature
 so that hiding a feature in the ID registers does not apply and emulating an instruction in the monitor is the wrong tool
-The next option (INFERRED; none is a decision, none is authorised): let the guest's own panic handler run through the monitor's existing `let_panic` diagnostic, a data word, so that its text reaches the panel; whether the panic path survives on this stack is UNKNOWN.
+The next option (INFERRED; none is a decision, none is authorised): let the guest's own panic handler run through the monitor's existing `let_panic` diagnostic, a data word, so that its text reaches the panel; whether the panic path survives on this stack is UNKNOWN (boot 24 took this option: the next paragraph).
 Not shown: that any driver started, CPU bring-up, SMP, a root device, stability, performance, or what the cause is.
-22 = plan nvmesnap-s1, the read-only storage survey, no monitor stage, and 23 = plan M1RUN-CPUS1-RUNG3, rung 3 with `cpus=1` (both 2026-11-18)
+22 = plan nvmesnap-s1, the read-only storage survey, no monitor stage, 23 = plan M1RUN-CPUS1-RUNG3, rung 3 with `cpus=1`, and 24 = plan M1RUN-LETPANIC-RUNG4, rung 4 with the monitor's `let_panic` word set (all 2026-11-18)
+Boot 24 (rung 4, WI 11) set the monitor's `let_panic` word: the kernel's own handler ran and printed a panic text, an ApplePMGR assertion (`enableCPUComplex`, `complex < _cpuComplexCount`), then nested panics, and the monitor stopped the run at a stage-2 fault 2.25 s into the call (OBSERVED, one unit, one boot; section 22 of the log; why the assertion failed is UNKNOWN); the rung's class is PANIC TEXT, M1's PASSED.
+**Boot 24, rung 4 (2026-11-18, plan `M1RUN-LETPANIC-RUNG4`; OBSERVED, one unit, one boot).**
+the one new input is the monitor's `let_panic` PARAMS word, set to 1 (data only: `docs/SP11-STICK-MONITOR.md` K12)
+Rows a, c, d, e and f held (f by the host check of the stick, read only: the 18 staged files unchanged and `REPORT.DAT` not written back), row b was not exercised and row g held for the pair that ran
+The kernel's own exception handler ran where boot 23's run had been stopped and printed a panic text on the panel, an ApplePMGR assertion (`enableCPUComplex(UInt32, bool)`, `REQUIRE failed: complex < _cpuComplexCount`), then nested panics up to `Nested panic count exceeds limit 5, machine will reset or spin` and `wdog: panic chipreset`
+the monitor's console ring carried the first lines of the text onto the report page (six `MON CON` lines; boots 21 and 23 had none)
+and the monitor stopped the run itself, 2.2465 s into the call, as `MON STOP S2_FAULT` with `A=0X3082BC224` (INFERRED: a 32-bit read of an address with no stage-2 mapping, in the kernel's chip-reset path), on a clean report
+M1 PASSED by its own rows; rung 4's class is PANIC TEXT (the record's first result that fits: a result, neither a pass nor a failure).
+Why the assertion failed and the rest of 22.6's questions are UNKNOWN. One vCPU, early boot only, nothing about SMP, a root device, stability, performance or the NV2 regime; no second boot.
+**What boot 24 showed (rung 4, `let_panic` set; OBSERVED, one unit, one boot; `docs/SP11-STICK-LOG.md` section 22).**
+The page ended in `MON STOP S2_FAULT` with `PC=0XFFFFFE0008BA7358`, `A=0X3082BC224`, `B=0X938A0005` and `C=0XFFFFFE612A564224`, 43,133,334 ticks for the whole call (2.2465 s, inside the box of 5 s), with `ABORTS=0`, `TRAPS=143889` and `CALLS=64986`
+its six `MON CON` lines carried the first lines of the panic text (OBSERVED; boots 21 and 23 had none; INFERRED: the panic path writes its text through the serial-putc call that the monitor logs)
+a hypothesis, not verified: `_cpuComplexCount` counts the complexes of the CPUs that stay enabled, while the boot CPU's complex index is not below that count
+the assertion is new with `cpus=1`, since boot 21 passed the driver with six CPUs
+that the frozen monitor's refusal after a panic entry did not stop the run (no `MON STOP UNNAMED`; INFERRED: no refused call was made)
+Not shown: that the kernel gets further with any change, CPU bring-up, SMP, a root device, stability, performance, or that macOS boots; there is no second boot.
+In boot 24 (`serial=2`) the window held the first six lines of the kernel's panic text (OBSERVED, one boot; INFERRED: the panic path writes its text through the serial-putc call that the monitor logs, and the ordinary log does not).
+in boot 24 (`serial=2`) the page had six, the first lines of the kernel's panic text
+Rung 4 (boot 24) kept the choice and set `let_panic`: the kernel's own handler ran and printed its panic text, `ABORTS=0` again, to a stage-2 fault (section 14).
+boot 24 ran them for 2.25 s, with no restart in the 26 s after the report page of its 56.2 s film, the heartbeat read up to UPTIME 33 S
+Boot 23 ended at a guest exception and boot 24 at a stage-2 fault, both before the box (OBSERVED, one boot each).
+Nor in boots 23 and 24 (`ABORTS=0`); boot 24's one stage-2 fault was the stop too (item 5).
+Reached again in boot 24 (OBSERVED once), after the kernel's own panic text: `MON STOP S2_FAULT` with `A=0X3082BC224`, a 32-bit read, 2.2465 s into the call (above); the device is UNKNOWN (INFERRED: the kernel's chip-reset request).
+7. A kernel panic on a platform assertion: the design note after boot 21
+Reached in boot 24 (OBSERVED once; `docs/SP11-STICK-LOG.md` section 22), with `let_panic` set so that the kernel's handler ran: an ApplePMGR assertion in `enableCPUComplex` (`complex < _cpuComplexCount`), then nested panics, `machine will reset or spin` and `wdog: panic chipreset`, ended by item 5's stage-2 fault.
+Rung 4, DECIDED 2026-11-18 about 21:31 ("Approve 67d814f6 (R6.2) and stage the stick", by the SHA-256 of its own record): the same store classes and the same two programs, one more word in the guest, the monitor's `let_panic` PARAMS word, the run happened (boot 24), and the approval covered that one boot.
+Rung 4 kept it again by its own approval of 2026-11-18 about 21:31 ("Approve 67d814f6 (R6.2) and stage the stick", by the SHA-256 of its own record; D4), with the monitor's `let_panic` word set; boot 24 ran under it (section 14).
+Boot 24 ran under it too: one CPU for a call of 2.25 s (no temperature was read).
+boots 23 and 24 (`cpus=1`) did not make that write, ending at an exception and at the kernel's own panic text
+the monitor entry, WI 4b, ran four times: boot 20, 5 s, one vCPU, INFERRED stuck in an early loop;
+boot 24, 2.25 s, one vCPU, to the kernel's own panic text, an ApplePMGR assertion, and a stage-2 fault
+boot 24's, `MON STOP S2_FAULT` after the kernel's own panic text, ended it at 2.2465 s, at a stage-2 fault (OBSERVED, one boot).
+boot 23 at a guest exception, boot 24 at a stage-2 fault)
 '''.splitlines()
 
 
@@ -1000,14 +1040,14 @@ D8 Thermal: DECIDED 2026-11-17 => D8 Thermal: OPEN
 as an SP11-only opt-in: DECIDED 2026-11-17 => as an SP11-only opt-in: OPEN
 D11 proper stays OPEN => D11 proper is settled
 U9 kernelcache (answered, WI 3) => U9 kernelcache
-BUILT, EXPERIMENTAL, RAN three times on the unit (boots 20, 21 and 23, OBSERVED). => BUILT, EXPERIMENTAL, hardware PASS (boots 20, 21 and 23, VERIFIED).
+BUILT, EXPERIMENTAL, RAN four times on the unit (boots 20, 21, 23 and 24, OBSERVED). => BUILT, EXPERIMENTAL, hardware PASS (boots 20, 21, 23 and 24, VERIFIED).
 holds the FIRST 1,024 bytes of guest output and counts the rest => is a ring of the LAST 1,024 bytes of guest output
 extension records from +0x11000 => extension records from +0x10000
 the boot CPU writes only CNTHCTL_EL2 => the boot CPU writes TCR, CNTHCTL and CPTR
 head is q1n1's payload stub => head is the monitor's own
 the gate passed with it on the unit in boot 20 (`STATUS=0X0`, OBSERVED, one boot; => the gate refused it on the unit in boot 20 (`STATUS=-91`, OBSERVED, one boot;
 for the monitor entry, rung 1 only, DECIDED 2026-11-18 01:18 => for the monitor entry OPEN, asked 2026-11-18 01:18
-except three runs of the monitor entry (boots 20, 21 and 23, M1 rungs 1, 2 and 3, 2026-11-18). => except none (boots 20, 21 and 23, M1 rungs 1, 2 and 3, 2026-11-18).
+except four runs of the monitor entry (boots 20, 21, 23 and 24, M1 rungs 1 to 4, 2026-11-18). => except none (boots 20, 21, 23 and 24, M1 rungs 1 to 4, 2026-11-18).
 The guest was, INFERRED, stuck in an early loop of the kernel's I/O Kit start-up => The guest was, VERIFIED, stuck in an early loop of the kernel's I/O Kit start-up
 the guest was **stuck, not slow** => the guest was **slow, not stuck**
 it does not settle that the kernel boots => it settles that the kernel boots
@@ -1022,9 +1062,9 @@ was RELAXED for rung 1 by the approval of the M1 record => was kept for rung 1 d
 Boot 20 (2026-11-18): the gate passed with this record on the unit => Boot 20 (2026-11-18): the gate refused this record on the unit
 which is absent on the machine used (NOT RUN) => which is present on the machine used (PASS)
 the NV2 gate passed with the embedded first-image record (D6; boot 20, OBSERVED, one boot; the record's regime is not recorded) => the NV2 gate passed with the embedded first-image record (D6; boot 20, OBSERVED, one boot; the record's regime is recorded)
-the monitor entry (WI 4b) is built on them and ran three times, in boots 20, 21 and 23 (OBSERVED, one boot each) => the monitor entry (WI 4b) is a plan
+the monitor entry (WI 4b) is built on them and ran four times, in boots 20, 21, 23 and 24 (OBSERVED, one boot each) => the monitor entry (WI 4b) is a plan
 U10 stage-2 syndromes (boot 20: no stage-2 abort, so none seen) => U10 stage-2 syndromes (boot 20: a stage-2 abort was seen)
-ran three times, in boots 20, 21 and 23, and were put back => never ran, and were put back
+ran four times, in boots 20, 21, 23 and 24, and were put back => never ran, and were put back
 rung 1 RAN once on the unit (boot 20, 2026-11-18, plan `M1RUN-RUNG1`; OBSERVED => rung 1 PASSED on the unit (boot 20, 2026-11-18, plan `M1RUN-RUNG1`; VERIFIED
 (VERIFIED, host; says nothing about hardware) => (OBSERVED, host; says nothing about hardware)
 a, c, d, e and f held; b was not exercised => a, c, d, e and f held; b was exercised and refused
@@ -1041,7 +1081,7 @@ and again in boot 21 (OBSERVED, one boot) => and not again in boot 21 (OBSERVED,
 it passed again in boot 21 (`STATUS=0X0`, OBSERVED, one boot), the regime still not recorded => it refused in boot 21 (`STATUS=-91`, OBSERVED, one boot), the regime still not recorded
 (which one: IPA `0x300734004` in boot 21, a 32-bit write, OBSERVED, one boot => (which one: IPA `0x300734000` in boot 21, a 32-bit write, OBSERVED, one boot
 Rung 2 (boot 21) changed the panel choice by the operator's approval => Rung 2 (boot 21) kept the panel choice despite the operator's approval
-and boot 21 ended at a stage-2 fault before the box, boot 23 at a guest exception) => and boot 21 ended at the watchdog at the box, boot 23 at a guest exception)
+and boot 21 ended at a stage-2 fault before the box, boot 23 at a guest exception, boot 24 at a stage-2 fault) => and boot 21 ended at the watchdog at the box, boot 23 at a guest exception, boot 24 at the watchdog at the box)
 that was its timer stop, and boot 21 ended at a stage-2 fault before the box => that was its timer stop, and boot 21 ended at its timer too
 in boot 21 one stage-2 fault was seen, the stop (a write and => in boot 21 no stage-2 fault was seen, the stop (a write and
 so what `HPFAR_EL2` holds on Oryon v1 stays UNKNOWN => so what `HPFAR_EL2` holds on Oryon v1 is VERIFIED
@@ -1050,14 +1090,14 @@ the byte comparison not repeated: NOT RUN) => the byte comparison repeated: PASS
 the stop was `MON STOP S2_FAULT` with `PC=0XFFFFFE00097A352C` and `A=0X300734004` => the stop was `MON STOP WATCHDOG` with `PC=0XFFFFFE00097A352C` and `A=0X300734004`
 the match of the address with XNU's first CPU-start write is INFERRED) => the match of the address with XNU's first CPU-start write is OBSERVED)
 (its INFERRED cause chain is consistent with the run, not proven) => (its cause chain is proven)
-1 to 3: three done (boot 20, rung 1; boot 21, rung 2; boot 23, rung 3) => 1 to 3: two done
+1 to 4: four done (boot 20, rung 1; boot 21, rung 2; boot 23, rung 3; boot 24, rung 4) => 1 to 4: three done
 the stop of boot 21, seen => the stop of boot 21, not seen
 D4 decided for rung 1 (2026-11-18) and for rung 2 => D4 decided for rung 1 (2026-11-18) and still open for rung 2
 D9's panel-handed choice decided by the rung 2 approval => D9's panel-handed choice still undecided
 alive at UPTIME 36 S on the closer view at its end => restarted at UPTIME 36 S on the closer view at its end
 the page had no `MON CON` line (OBSERVED, one boot; => the page had six `MON CON` lines (OBSERVED, one boot;
 rung 2: RAM and the panel's range, which the guest writes => rung 2: RAM only
-The path was walked three times, for rungs 1 to 3 (boots 20, 21 and 23) => The path was walked once, for rung 1 (boot 20)
+The path was walked four times, for rungs 1 to 4 (boots 20, 21, 23 and 24) => The path was walked once, for rung 1 (boot 20)
 Reached in boot 21 (OBSERVED once) => Not reached in boot 21 (OBSERVED once)
 Not seen in boot 21 either (`ABORTS=0`) => Seen in boot 21 (`ABORTS=1`)
 and the stop was the monitor's own, not a guest panic => and the stop was a guest panic
@@ -1082,7 +1122,7 @@ which one is UNKNOWN); a monitor that accepts => which one is VERIFIED); a monit
 real secondaries last (the wrapper cannot build the secondary configuration: UNIMPLEMENTED => real secondaries first (the wrapper builds the secondary configuration: IMPLEMENTED
 Each needs a record of its own and the operator's decision. => Each needs no record.
 What the kernel does under the monitor past its first CPU-start write: UNKNOWN => What the kernel does under the monitor past its first CPU-start write: OBSERVED
-beyond the one that ended boot 21: none has run => beyond the one that ended boot 21: all have run
+beyond the two that ended boots 21 and 24 (a write and a read, both translation faults at level 1: INFERRED decodes): none has run => beyond the two that ended boots 21 and 24 (a write and a read, both translation faults at level 1: INFERRED decodes): all have run
 MON STOP GUEST_EXC`), INFERRED (high confidence) to be the kernel's own debugger trap, the cause UNKNOWN => MON STOP GUEST_EXC`), VERIFIED to be the kernel's own debugger trap, the cause known
 rung 3's own verdict is NOT PASSED (c) by the letter of its record => rung 3's own verdict is PASSED by the letter of its record
 M1 PASSED by its own rows (the stop kinds of row d include `GUEST_EXC`) => M1 FAILED by its own rows (the stop kinds of row d include `GUEST_EXC`)
@@ -1106,7 +1146,34 @@ Not shown: that any driver started, CPU bring-up, SMP, a root device, stability,
 22 = plan nvmesnap-s1, the read-only storage survey, no monitor stage => 22 = plan nvmesnap-s1, a monitor stage
 Boot 23 ran under it too: one CPU for a call of 2.17 s => Boot 23 ran under it too: one CPU for a call of 5.04 s
 boot 23 ran them for 2.17 s, with no restart in the 7 s after the report page => boot 23 ran them for 2.17 s, restarted in the 7 s after the report page
-rungs 1 to 3 (boots 20, 21 and 23); a further run needs a record of its own => rungs 1 to 3 (boots 20, 21 and 23); a further run needs no record
+rungs 1 to 4 (boots 20, 21, 23 and 24); a further run needs a record of its own => rungs 1 to 4 (boots 20, 21, 23 and 24); a further run needs no record
+the one new input is the monitor's `let_panic` PARAMS word, set to 1 => the one new input is the monitor's `let_panic` PARAMS word, set to 0
+and `REPORT.DAT` not written back), row b was not exercised and row g held for the pair that ran => and `REPORT.DAT` written back), row b was not exercised and row g held for the pair that ran
+printed a panic text on the panel, an ApplePMGR assertion (`enableCPUComplex(UInt32, bool)`, `REQUIRE failed: complex < _cpuComplexCount`) => printed a panic text on the panel, a GIC assertion (`enableCPUComplex(UInt32, bool)`, `REQUIRE failed: complex < _cpuComplexCount`)
+then nested panics up to `Nested panic count exceeds limit 5, machine will reset or spin` and `wdog: panic chipreset` => then nested panics up to `Nested panic count exceeds limit 9, machine will reset or spin` and `wdog: panic chipreset`
+the monitor's console ring carried the first lines of the text onto the report page (six `MON CON` lines; boots 21 and 23 had none) => the monitor's console ring carried none of the text onto the report page (no `MON CON` line; boots 21 and 23 had none)
+as `MON STOP S2_FAULT` with `A=0X3082BC224` (INFERRED: a 32-bit read of an address with no stage-2 mapping, in the kernel's chip-reset path) => as `MON STOP S2_FAULT` with `A=0X3082BC224` (VERIFIED: a 32-bit write to an address with a stage-2 mapping, in the kernel's chip-reset path)
+rung 4's class is PANIC TEXT (the record's first result that fits: a result, neither a pass nor a failure) => rung 4's class is NOT PASSED (a) (the record's first result that fits: a failure)
+Why the assertion failed and the rest of 22.6's questions are UNKNOWN => Why the assertion failed and the rest of 22.6's questions are known
+43,133,334 ticks for the whole call (2.2465 s, inside the box of 5 s) => 43,133,334 ticks for the whole call (2.2465 s, past the box of 5 s)
+INFERRED: the panic path writes its text through the serial-putc call that the monitor logs) => VERIFIED: the panic path writes its text through the serial-putc call that the monitor logs)
+a hypothesis, not verified: `_cpuComplexCount` counts the complexes of the CPUs that stay enabled => a verified fact: `_cpuComplexCount` counts the complexes of the CPUs that stay enabled
+the assertion is new with `cpus=1`, since boot 21 passed the driver with six CPUs => the assertion is old without `cpus=1`, since boot 21 failed the driver with six CPUs
+did not stop the run (no `MON STOP UNNAMED`; INFERRED: no refused call was made) => stopped the run (`MON STOP UNNAMED`; OBSERVED: a refused call was made)
+or that macOS boots; there is no second boot. => and macOS boots; there is a second boot.
+and the ordinary log does not). => and the ordinary log does too).
+Rung 4, DECIDED 2026-11-18 about 21:31 => Rung 4, OPEN, asked 2026-11-18 about 21:31
+Rung 4 kept it again by its own approval => Rung 4 kept it again despite its own approval
+Boot 24 ran under it too: one CPU for a call of 2.25 s => Boot 24 ran under it too: one CPU for a call of 5.04 s
+boots 23 and 24 (`cpus=1`) did not make that write => boots 23 and 24 (`cpus=1`) made that write
+ended it at 2.2465 s, at a stage-2 fault (OBSERVED, one boot). => ended it at the box, at the watchdog (OBSERVED, one boot).
+an ApplePMGR assertion in `enableCPUComplex` (`complex < _cpuComplexCount`) => a CLPC assertion in `enableCPUComplex` (`complex < _cpuComplexCount`)
+Boot 23 ended at a guest exception and boot 24 at a stage-2 fault, both before the box (OBSERVED, one boot each). => Boot 23 ended at a guest exception and boot 24 at the watchdog, both at the box (OBSERVED, one boot each).
+Reached again in boot 24 (OBSERVED once), after the kernel's own panic text: => Not reached in boot 24, before the kernel's own panic text:
+the heartbeat read up to UPTIME 33 S => the heartbeat stopped at UPTIME 14 S, with a restart
+the rung's class is PANIC TEXT, M1's PASSED. => the rung's class is NOT PASSED (a), M1's PASSED.
+boot 24: `ABORTS=0` again and its stop was a stage-2 data fault again, a read => boot 24: `ABORTS=0` again and its stop was a guest exception, not a stage-2 fault
+in boot 24 (`serial=2`) the page had six, the first lines of the kernel's panic text => in boot 24 (`serial=2`) the page had none
 '''
 
     def test_a_wrong_state_of_the_tree_is_refused(self):
