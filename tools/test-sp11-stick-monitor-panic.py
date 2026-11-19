@@ -49,7 +49,7 @@ def stand_in(mutate=None, extra_word=None):
         stand, seen = xb.params_blob, {}
 
         def params_blob(built):
-            chunks = built['chunks']        # the stand-in reads the build's own PARAMS bytes, as the real function does
+            chunks = built['chunks']        # the stand-in reads the build's own PARAMS bytes, as the real one does
             chunks[xb.PARAMS_PA] = seen.setdefault(id(chunks), bytes(chunks[xb.PARAMS_PA]))
             words = list(struct.unpack(f'<{ch.PARAMS_WORDS}Q', stand(built)))
             words[WORD] = 1 if built.get('let_panic') else 0
@@ -322,7 +322,7 @@ class Options(unittest.TestCase):
                 self.assertEqual((code, BT.refusal(text)), (1, 'REFUSED=ENV_SNAP_SET'), err)
         with self.assertRaises(SystemExit):
             BT.cli(['authorisation-template', 'synthetic', *BT.opts(stores='ram,el2_sysreg'), '--let-panic'])
-        source = (TOOLS / 'sp11_stick_bundle_build.py').read_text()
+        source = (TOOLS / 'sp11_stick_bundle_build_opts.py').read_text()
         self.assertIn("p.add_argument('--let-panic', action='store_true'", source.split("p.add_argument('--kernelcache', required=True)")[1][:2000])
         self.assertNotIn('--let-panic', source.split("if kind == 'synthetic':\n        for flag, default")[1].split("p.add_argument('--kernelcache'")[0])
         self.assertNotIn('SNAP_LET_PANIC', (TOOLS / 'sp11_stick_bundle_chunks.py').read_text())

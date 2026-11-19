@@ -14,7 +14,7 @@ the two EFI files that run before the wrapper, pins `M1RUN-` in front of the fac
 stock kernel (--sptm-hvc-calls 0) with the panel withheld, D9's first choice, handed, its second, or `console` (the panel handed and serial=2 in the command line,
 as probes/run.py makes it for the A16's native panel console, which only this kind takes): the guest is then read back for the panel and the command line it is
 given, the label goes on with `PANEL-` or `CONSOLE-` (and with one word more in the console's command line, tools/sp11_stick_bundle_m1.py BOOT_ARGS, and with
-`--let-panic`, `CPUS1-`, `LETPANIC-` or `ACKPANIC-`: K10 to K14) and the record says what the panel means (tools/sp11_stick_bundle_panel.py; sections 14 and 20 of that note).
+`--let-panic`, `CPUS1-`, `LETPANIC-` or `ACKPANIC-`, and with --guest-profile, rung 7's, `Q-` after that: K10 to K15) and the record says what the panel means (tools/sp11_stick_bundle_panel.py; sections 14 and 20 of that note).
 The bundle is the five files of docs/SP11-STICK-BUNDLE.md, q1n1's PAYLOAD.MAN and, with --base-tree, a stage tree that the stager verifies.
 A refusal prints `REFUSED=<NAME>` and exits 1: the interface's name (tools/sp11_stick_bundle.py) where it has one, else BUILDER_REFUSALS.
 Output is deterministic and is written only below --out, which must be under build/ (or --allow-under). The placement (D1), the stores (D4),
@@ -42,6 +42,9 @@ import sp11_stick_bundle_m1 as m1  # noqa: E402
 import sp11_stick_bundle_record as rec  # noqa: E402
 import sp11_stick_bundle_record_gic as gq  # noqa: E402
 import sp11_stick_bundle_panel as pn  # noqa: E402
+import sp11_stick_bundle_profile as gpb  # noqa: E402
+import sp11_stick_bundle_rung7 as r7b  # noqa: E402
+from sp11_stick_bundle_build_opts import build_opts  # noqa: E402,F401  (the options moved there: this file's own size; tests and run() read them from here)
 
 Refused = ch.Refused
 MIB = sb.MIB
@@ -56,7 +59,7 @@ record_text, TOUCHES, GIC_STOP_TOUCHES = rec.record_text, rec.TOUCHES, rec.GIC_S
 TAGS = {'EL2_UNREACHABLE': 1, 'DEVICE_OWNED': 2, 'OPERATOR': 3}
 KIND_NAME = {v: k[12:] for k, v in sb.CONSTANTS.items() if k.startswith('SP11SB_KIND_') and k != 'SP11SB_KIND_MAX'}
 DUMMY = b'\x01' * 32        # a nonzero stand-in digest for the early checks, before GUEST.DAT exists
-AUTHORISATION_CAP = 10 << 14    # the approved record, as a file: 64 KiB, 128 KiB, 144 KiB, now 160 KiB on purpose (K14); nothing was cut
+AUTHORISATION_CAP = 11 << 14    # the approved record, as a file: 64 KiB, 128 KiB, 144 KiB, 160 KiB, now 176 KiB on purpose (K15: rung 7's record is about 170 KB); nothing was cut
 BUILDER_REFUSALS = (
     'FACTS_BAD', 'FACTS_DISAGREE', 'NO_DUMPS', 'DUMP_INCOMPLETE', 'FB_UNKNOWN', 'DESCRIPTOR_NOT_READY', 'AUTH_RECORD_MISMATCH', 'Q1N1_TREE_ABSENT',
     'STAGE_REFUSED', 'STAGE_VERIFY_FAILED', 'OUT_DIR_REFUSED', 'OUT_NOT_EMPTY', 'PAYLOAD_BAD', 'REPORT_NOT_ZERO', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING',
@@ -509,16 +512,18 @@ def prepare(a, kind, before_filler=None):
     let_panic = bool(getattr(a, 'let_panic', False))       # the monitor's let_panic PARAMS word, for the records of m1.LET_PANIC_FORM and m1.RUNG5_FORM (real kind only)
     cpu_start = getattr(a, 'cpu_start', 'stop')
     m1.check_cpu_start(cpu_start, m1_path is not None)       # `ack` needs --m1-run and a record text that can say what it is
+    profile = gpb.resolve(a)        # EXPERIMENTAL: a name of the closed menu, whole root sets, before the loader is called
     if m1_path is not None:         # an empty path is the kind with a file that cannot be read, never the other kind
-        m1.check_options(stores, gic_stop, a.time_box_s, getattr(a, 'panel', None), getattr(a, 'sptm_hvc_calls', None), boot_arg, let_panic, cpu_start)
+        m1.check_options(stores, gic_stop, a.time_box_s, getattr(a, 'panel', None), getattr(a, 'sptm_hvc_calls', None), boot_arg, let_panic, cpu_start, profile)
     elif getattr(a, 'panel', None) == 'console':
         raise Refused('OPTIONS_BAD', '--panel console is a choice of the monitor entry run (D9, docs/SP11-STICK-MONITOR.md section 20): it needs --m1-run')
     else:
         m1.check_boot_arg(boot_arg, getattr(a, 'panel', None), False)
         m1.check_let_panic(let_panic, getattr(a, 'panel', None), boot_arg, a.time_box_s, False)
+    gpb.check_form(profile, boot_arg, let_panic, cpu_start, getattr(a, 'panel', None), m1_path is not None, a.time_box_s)      # a profile is rung 7's form's alone
     efi = m1.read_efi(getattr(a, 'm1_efi', []), getattr(a, 'file', []), m1_path is not None)
     choice = (getattr(a, 'panel', None) or 'withheld') if m1_path is not None else 'withheld'     # D9's choice, for this kind only: the other kinds are written for the first
-    facts = dict(facts, build_label=m1.pinned_label(facts['build_label'], m1_path is not None, choice, boot_arg, let_panic, cpu_start))     # the marker of this kind, PIN.DAT's and the record's
+    facts = dict(facts, build_label=m1.pinned_label(facts['build_label'], m1_path is not None, choice, boot_arg, let_panic, cpu_start, profile=profile))     # the marker of this kind, PIN.DAT's and the record's
     descriptor, state, board = descriptor_digest(a, facts, kind)
     monitor, reporter = read_regular(a.monitor, '--monitor', minimum=4), read_regular(a.reporter, '--reporter', minimum=4)
     m1.refuse_monitor_reporter(reporter)        # every kind, the M1 kind too: the reporter slot is executed in the same boot
@@ -528,7 +533,7 @@ def prepare(a, kind, before_filler=None):
     m1_facts = m1.read_report(read_m1_report(m1_path), monitor, reporter, efi, cpu_start) if m1_path is not None else None
     if m1_facts:
         m1.check_pair_box(a.time_box_s, m1_facts['image']['sha256'])      # the report does not carry the pair's box cap
-        m1.check_pair_form(cpu_start, boot_arg, m1_facts['image']['sha256'], m1_facts['reporter']['sha256'])
+        m1.check_pair_form(cpu_start, boot_arg, m1_facts['image']['sha256'], m1_facts['reporter']['sha256'], profile)
     declared = declared_ranges(a.declared)
     early = pack_pin(pin_fields(facts, place, stores, DUMMY, DUMMY, dict(guest_file_size=1024, guest_chunk_count=1, guest_file_sha256=DUMMY,
                                                                        guest_index_sha256=DUMMY)), check=False)
@@ -546,6 +551,7 @@ def prepare(a, kind, before_filler=None):
         built = ch.synthetic_built(xb, int(a.image_mib * MIB), int(a.tables_mib * MIB), int(a.sptm_data_mib * MIB), a.seed, a.time_box_s)
     else:
         built = real_built(a, xb, place, facts)
+        nodes = gpb.read_back(xb, built, profile)       # None for the default board; any other: the loader's tree less its pinned roots
         real = dict(kernelcache_sha256=sha(built['image'].data), guest_profile=built['guest_profile'], panel=a.panel, sptm_hvc_calls=a.sptm_hvc_calls, seed=a.seed,
                     **({'boot_arg': boot_arg} if boot_arg is not None else {}), **({'let_panic': True} if let_panic else {}))        # the report of every other build keeps its fields
     lay = ch.layout_of(xb)
@@ -560,6 +566,8 @@ def prepare(a, kind, before_filler=None):
         panel = pn.with_run(pn.read_panel(chunks, lay, facts, choice, kind == 'real', board, boot_arg, **({'let_panic': True} if let_panic else {})),
                             a.time_box_s, sha(monitor), sha(reporter))   # what the guest is given of the panel, from its bytes
     head, table = sb.unpack_guest(guest)
+    if profile != gpb.DEFAULT:      # rung 7: the guest is compared with rung 6's and the comparison is what the record says it differs in
+        panel = r7b.with_guest(panel, profile, facts, chunks, table, guest, nodes)
     record = rec.record_text(dict(place=place, stores=stores, time_box_s=a.time_box_s, label=facts['build_label'], monitor=(len(monitor), sha(monitor)),
                                   reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop, gic_quarantine=gic_quarantine, m1=m1_facts,
                                   guest=dict(size=len(guest), sha256=sha(guest), chunks=len(table), index=head['index_sha256'].hex()),
@@ -691,56 +699,6 @@ def build(a, kind):
 
 
 # ---- Command line ------------------------------------------------------------------------------------------------------------
-def build_opts(p, kind, template=False):
-    for flag, kw in (('--facts', dict(required=True, help='the local facts JSON, see tools/testdata/sp11-facts.example.json')),
-                     ('--dump', dict(action='append', default=[], help='a firmware dump directory (default downloads/sp11/x*-run*)')),
-                     ('--base', dict(required=True, help='guest_base: a multiple of 32 MiB (D1)')), ('--guest-mib', dict(type=int, required=True)),
-                     ('--reserve-mib', dict(type=int, help='default: the loader\'s bootstrap_reserve() for this guest')),
-                     ('--declared', dict(action='append', default=[], help='BASE:SIZE the runner declared: kept clear')),
-                     ('--monitor', dict(required=True, help='SNAPMON.BIN: payload 0, the wrapper (the dry-run one of docs/SP11-STICK-WRAPPER.md, or any file that calls no '
-                                                            'monitor: WRAPPER_CALLS_MONITOR; with --m1-run, SNAPMON-M1.BIN)')),
-                     ('--reporter', dict(required=True, help='SNAPREP.BIN: payload 1, the reporter')),
-                     ('--stores', dict(required=True, help='ram,el2_sysreg[,gic]: the store classes authorised (D4)')),
-                     ('--gic-stop', dict(action='store_true', help='the record of the GIC and stop dry run (docs/SP11-STICK-GIC.md); needs gic in --stores')),
-                     (gq.OPTION, dict(action='store_true', help='with --gic-stop: the text for passes 5 and 6 of the stage, the quarantine; --monitor must be a pass 5 or 6 wrapper')),
-                     ('--m1-run', dict(metavar='BUILD_REPORT', help='the record of the monitor entry run (docs/SP11-STICK-MONITOR.md section 10): the build-report.json of '
-                                                                   'tools/sp11_stick_wrapper_build.py --monitor, which made the SNAPMON-M1.BIN and SNAPREP-M1.BIN given '
-                                                                   'as --monitor and --reporter; needs ram, el2_sysreg and gic in --stores and a time box of 1 to 120 s')),
-                     ('--time-box-s', dict(type=int, required=True, help='D5')), ('--descriptor', dict(help='a boot-ready board descriptor (real needs one)')),
-                     ('--m1-efi', dict(action='append', default=[], metavar='NAME=SHA256', help='with --m1-run, once for SLBOUNCE-DEVHE-MARK.EFI and Q1N1-PAYLOAD.EFI: '
-                                                                                              'the EFI files that run before the wrapper, named in section 1b')),
-                     ('--cpu-start', dict(choices=('stop', 'ack'), default='stop', help='with --m1-run: what the monitor of the pair does with the guest\'s first CPU-start write, '
-                                                                                       'which must be what the build report says: stop (the default, every record up to rung 4) or '
-                                                                                       'ack (EXPERIMENTAL, the records of rungs 5 and 6 only, with --let-panic: docs/SP11-MONITOR-PROFILE.md section 10)')),
-                     ('--note', dict(help='a text file (printable ASCII, at most 48 lines of 120 characters) appended to the record as its section 6'))):
-        p.add_argument(flag, **kw)
-    if kind == 'synthetic':
-        for flag, default in (('--image-mib', 115.5), ('--tables-mib', 16.0), ('--sptm-data-mib', 5.0)):
-            p.add_argument(flag, type=float, default=default)
-        p.add_argument('--seed', default='synthetic')
-    else:
-        p.add_argument('--kernelcache', required=True)
-        p.add_argument('--panel', choices=('handed', 'withheld', 'console'), required=True,
-                       help='D9: SNAP_NO_FB; with --m1-run also `console`: the panel handed and serial=2 in the command line (probes/run.py --console panel)')
-        p.add_argument('--boot-arg', default=None, metavar='WORD',
-                       help='with --m1-run --panel console: one more word in the guest\'s command line, from a short list (cpus=1 with the plain monitor, cpu_boot_timeout_secs=120 or =90 '
-                            'with --cpu-start ack); any other word is BOOT_ARG_REFUSED')
-        p.add_argument('--let-panic', action='store_true',
-                       help='with --m1-run --panel console and --boot-arg cpus=1 --time-box-s 5 (rung 4) or --cpu-start ack with --boot-arg cpu_boot_timeout_secs=120 --time-box-s 60 (rung 5) '
-                            'or =90 --time-box-s 120 (rung 6), and no other combination (LET_PANIC_REFUSED): set the monitor\'s PARAMS word let_panic (word 23, offset 0xB8), so that a guest EL1 '
-                            'exception that reaches one branch of the monitor runs XNU\'s own handler instead of ending the run (docs/SP11-STICK-MONITOR.md section 20, K12 to K14)')
-        p.add_argument('--sptm-hvc-calls', choices=(0, 1), type=int, required=True, help='D9: the SPTM HVC kernel patch')
-        p.add_argument('--seed', default=rec.DEFAULT_SEED, help='label of the guest\'s boot random seed (SNAP_SEED): the same label, the same bytes')
-    if not template:
-        for flag, kw in (('--out', dict(required=True)), ('--force', dict(action='store_true')), ('--allow-under', dict(action='append', default=[])),
-                         ('--authorisation', dict(help='the approved record')), ('--authorisation-sha256', dict()),
-                         ('--no-manifest', dict(action='store_true', help='the bundle files only: no PAYLOAD.MAN, no stage tree')),
-                         ('--base-tree', dict(help='a staged tree that stage-sp11-boot-media.py verify accepts')),
-                         ('--file', dict(nargs=3, action='append', default=[], metavar=('NAME', 'PATH', 'SHA256'))), ('--pins', dict()),
-                         ('--no-pins', dict(action='store_true')), ('--plan-name', dict())):
-            p.add_argument(flag, **kw)
-
-
 def build_parser():
     ap = argparse.ArgumentParser(prog='sp11_stick_bundle_build.py', description=__doc__.split('\n\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)

@@ -1,0 +1,76 @@
+# SP11 M1 guest profiles: the menu of device trees
+
+Status: EXPERIMENTAL host-side tooling; hardware NOT RUN: no profile of this menu has been booted. Labels: VERIFIED = a source read or a host run that is named; OBSERVED = boots 20 to 26, as the operator's films show them; INFERRED; UNKNOWN. No Apple byte is quoted: names, hashes and counts only.
+
+## 1. What a profile is
+
+`--guest-profile NAME` (`real` and `authorisation-template real` of `tools/sp11_stick_bundle_build.py`) names the device tree that the guest kernel is given. A profile is a virtual board description: the base board `j700ap-26A428` (the default, and the board of every bundle so far) plus a fixed union of whole ROOT SETS. A root set withdraws device-tree roots that the M1 monitor has no model for, so that the kernel never attaches to them; the A16 route did the same, root by root, and never used a catch-all (`probes/deferred.py`). Nothing is claimed about the unit beyond that: the A16 reasons for each root are comments of the A16 chain (INFERRED for the SP11), and a withdrawn device is unavailable, never reported as started.
+
+A profile changes the DEVICE_TREE chunk and the one word of the HANDOFF page that holds the tree's length (`boot_args.deviceTreeLength`), and nothing else: PARAMS and the 120 device models are the base board's, and the frozen monitor pair (SNAPMON-M1.BIN, SNAPREP-M1.BIN) is not touched (VERIFIED: `tools/test-sp11-m1-guest-profile.py` `Guest`, with the kernelcache; two of the 46 chunks differ). A build without the option, or with the default's name, is byte for byte what it was. It is not a pass criterion of any record.
+
+## 2. The root sets (`probes/guestprofile_m1.py`)
+
+Each set is one tuple, and every pin in it is the A16 chain's own object (picked by node path, never retyped): `probes/deferred.py` withdraws a root only when the SHA-256 of its generated subtree is its pin. Under `/device-tree/arm-io/` unless a path is given. The count is the nodes under the roots (VERIFIED).
+
+| Set | Roots | Nodes | Needs | A16 chain |
+|---|---|---|---|---|
+| accel | avd, scaler0, apr | 3 | - | -no-clpc (its roots only) |
+| audio | iop-audio-controller, iop-voicetrigger-controller, admac-base-ns, admac-leap-ns, admac-leap-s, admac-leap-s-rx-0-proxy, audio-shared-dart-proxy, audio-hp-mic-proxy, i2c0/audio-codec-output | 40 | - | -no-audio |
+| aop | aop, aop2, aop-spmi0 | 15 | - | -sks-quiet |
+| dcpext | dispext0, dcpext, dcpext-expert | 4 | - | -metal-display |
+| dcp | dcp, dcp0-expert, dp-audio0, dp-audio1, disp0, /device-tree/backlight | 7 | dcpext | -sks-quiet |
+| ave | ave, ave1 | 2 | - | -sks-quiet |
+| smcbtm | smc, smctempsensor0, /device-tree/buttons, :j700_has_mesa_0, nub-spmi0/btm, and seven declarations withdrawn with them: pmu-main function-external_standby, multi-touch function-afe-reset and function-ipd-pwr-seq-control, ppm function-btm-config, -start, -stop and -vthr | 13 | aop, dcp, audio | -sks-quiet |
+| clpc | pmgr/clpc, and the base board's declaration function-ane_perf_ctr on it is dropped | 1 | - | -no-clpc (its root only) |
+| usb | usb-drd, atc0-dpphy, i2c2/usb-hub-i2c | 7 | - | -bootfb-no-usb |
+
+The sets are not independent, and the needs are measured, not assumed: with the set left out, the loader's own guard refuses the base tree (a retained node still points at a withdrawn provider): `dcp` without `dcpext` (dispext0 function-send_disp_clock names disp0); `smcbtm` without `aop` (the Stockholm node of aop-spmi0 names smc-pmu), without `dcp` (disp0 function-pmu_ram_access) and without `audio` (audio-hp-mic function-input_power_enable).
+
+`smcbtm` is one unit and no profile can split it. Without btm and the four btm functions of ppm, pmu-main returns once its SMC function is withdrawn and btm is published, which panicked the A16 (AppleCotaBTM::configSampling, "unable to config PMU", generations 64 and 65: a comment of the A16 chain, INFERRED here). The loader's guard cannot see that trap: it accepts smc without btm (VERIFIED), so the menu refuses it (`GUEST_PROFILE_SPLIT`). `smc-gpio` is not in the set: the A16 retains it and the base board models it.
+
+Not offered: the four jpeg roots (jpeg0-h17a, jpeg0-h17p, jpeg1-h17a, jpeg1-h17p). The A16 chain has no pin for them; a pin is the digest of a generated subtree and a new one is a decision of its own. The host analysis of boot 26's stop (`files/stopsite-r8.md`, a file and not a run) INFERS that the JPEG engine's driver is the first of them that the kernel probes once the accelerators are withdrawn, so that rung 7's record names an S2_FAULT in its window as a possible next stop.
+
+## 3. The profiles
+
+Name prefix `j700ap-26A428-m1-`. Every profile but the base is the quiet board (accel and audio) and what it adds. Nodes: the published tree has 395 on the base board (VERIFIED).
+
+| Name | Mark | Sets | Nodes |
+|---|---|---|---|
+| (the base board, default) | - | none | 395 |
+| quiet | Q- | accel, audio | 352 |
+| quiet-aop | A- | quiet and aop | 337 |
+| quiet-dcp | D- | quiet and dcpext, dcp | 341 |
+| quiet-ave | V- | quiet and ave | 350 |
+| quiet-clpc | C- | quiet and clpc | 351 |
+| quiet-usb | U- | quiet and usb | 345 |
+| quiet-smc | S- | quiet and aop, dcpext, dcp, smcbtm | 313 |
+| all-quiet | X- | quiet and aop, dcpext, dcp, ave, smcbtm | 311 |
+
+## 4. The option, the refusals and the read-back
+
+The list is closed: the nine names of section 3 and nothing else; a profile that `probes/guestprofile.py` registers for the A16 route is not admitted. That file is unchanged and does not import the menu: the builder registers the eight profiles when it starts (`register()` of `probes/guestprofile_m1.py`), so the A16 route's tools, which copy and hash `guestprofile.py` alone, never see them. Every refusal prints `REFUSED=<NAME>` before any guest is built, except the read-back:
+
+- `GUEST_PROFILE_REFUSED`: a name outside the list; a profile in any form but rung 7's (section 5); a profile of the list other than `quiet` in that form (its prediction and falsifiers are written for the roots that `quiet` withdraws, and nothing is predicted for any other set: UNKNOWN); and the other way round, rung 7's box and word (120 s, `cpu_boot_timeout_secs=120`) without the profile, which is a form of its own that the closed list of the acknowledging monitor does not hold (`ch.ACK_FORMS`).
+- `BOOT_ARG_REFUSED`: a word outside the closed list (`cpus=1`, `cpu_boot_timeout_secs=120` and `cpu_boot_timeout_secs=90`), `nested_panic_max` among them: no form of any record carries it (unproven, and rung 7 does not need it).
+- `GUEST_PROFILE_SPLIT`: a registered profile that is not the base board and whole root sets (a set only partly withdrawn, a set without the sets it needs, another field).
+- `GUEST_PROFILE_READBACK`: after the loader has built the guest, the builder rebuilds the tree before any deferral from the same state and checks the published DEVICE_TREE chunk against it: every pin is the digest of its subtree before deferral; exactly the nodes under the profile's roots are missing; every other node, property and child list is the generated one but for the declarations withdrawn; the chunk is the serialisation of the tree it parses to. The default board is not read back.
+- `PANEL_MISMATCH`: the finished guest is not rung 6's but for the device tree and the HANDOFF page's two fields (section 5).
+- `PIN_STRING`: a facts label that starts with a mark, or does not fit (section 5).
+
+An approved record binds the label and the guest's digest, so the bundle of rung 7 under the approved record of any other kind (the five older ones, rung 5's and rung 6's) and each of those builds under rung 7's record end `REFUSED=AUTH_RECORD_MISMATCH`, and nothing is written (host run: `tools/test-sp11-stick-monitor-rung7.py` `Builder`, with the stand-in loader; the regeneration script of the session repeats it with the real guest).
+
+## 5. Rung 7: the one record that carries a profile (EXPERIMENTAL)
+
+Only one form carries a profile, and only `quiet`: rung 6's form (`--m1-run --panel console --cpu-start ack --let-panic --time-box-s 120 --sptm-hvc-calls 0`, the acknowledging pair `SNAPMON-M1-ACK.BIN` and `SNAPREP-M1-ACK.BIN`, rung 6's own) with `--boot-arg cpu_boot_timeout_secs=120 --guest-profile j700ap-26A428-m1-quiet`. The acknowledging monitor's closed list is exactly three forms (`ch.ACK_FORMS`): rung 5's (60 s, word 120), rung 6's (120 s, word 90) and rung 7's (120 s, word 120, with the quiet profile and with it only). Every other form with a profile is `GUEST_PROFILE_REFUSED`, before any guest is built: a record of a profile guest says what its profile and its words change (`tools/sp11_stick_bundle_panel_rung7.py`, `..._rung7d.py`, `tools/sp11_stick_bundle_panel_profile.py`), and the older kinds' words, which say that their guest differs from the base guest in one word, would be false of it. The other seven profiles stay in the menu until a record text exists for them.
+
+**The command line.** The word is rung 5's, `cpu_boot_timeout_secs=120`, so that XNU's wait for the CPU that never starts would end about 122 s after the guest's first CPU-start store, outside the box of 120 s by a margin of about 2 s (INFERRED, host analysis `files/stopsite-r8.md` of the session: a file and not a run) and cannot cut the run at 92 s as rung 6's 90 would have. `nested_panic_max` is in no form: the nested-panic cycle of boot 24 is a stop that this guest is not asked to reach, and the setting is unproven.
+
+**The label.** PIN.DAT holds 23 characters of label (`PIN_LABEL_MAX`). The label is `M1RUN-`, the marker of the guest's choices (none, `PANEL-`, `CONSOLE-`, `CPUS1-`, `LETPANIC-` for `--let-panic` with the plain monitor, `ACKPANIC-` for the acknowledging monitor), the mark of the profile (none for the base board; two characters from section 3), and the facts label: rung 7 is `M1RUN-ACKPANIC-Q-RUNG7` (22 characters; a facts label of up to six characters fits), distinct from rung 6's `M1RUN-ACKPANIC-RUNG6` and rung 5's `M1RUN-ACKPANIC-RUNG5` by the mark, which a facts label may not start with, nor with a marker. The other kinds keep the facts' label. The facts file of the real path is rung 6's with the label `RUNG7` (`build/m1p/sp11-facts-rung7.local.json`, git-ignored); the accounts of boots 25 and 26 in the record are keyed blocks in the text module, not facts.
+
+**What the guest is against rung 6's own.** `compare` (`tools/sp11_stick_bundle_rung7.py`) holds the finished chunk table to the table of rung 6's own bundle that the module pins (46 chunks, `RUNG6_CHUNKS`: the bundle of boot 26, record `d9d79c87...5cda`, regenerated by the session's script): exactly chunks 0 (HANDOFF) and 3 (DEVICE_TREE) differ, PARAMS (chunk 2) and the other 43 are rung 6's byte for byte, and chunk 0 with its two fields put back (the length of the tree, `deviceTreeLength` at +0x68 of boot_args, and the command line at +0x6C) has rung 6's SHA-256: `PANEL_MISMATCH` otherwise. Every "differs from rung 6" sentence of the record is made from what it returns. Host run on the kernelcache: 395 nodes become 352, the DEVICE_TREE chunk 350,576 to 327,664 bytes, GUEST.DAT 118,908,480 to 118,885,568 bytes, and the command line ends `cpu_boot_timeout_secs=120` in place of `=90`.
+
+**The windows of the withdrawn nodes.** The record of rung 7 tells the coordinator that a MON STOP S2_FAULT with A= in a window of a withdrawn node means that the profile did not take. Those windows are the reg of the 43 nodes through the ranges of arm-io, less the windows that a retained node covers (`tools/sp11_stick_bundle_windows.py`): the video decoder's 0X380000000..0X381404000 but not its DART's 0X381020000..0X381040000, the scaler's four windows (0X290000000..0X290008000 among them) but not its DART's, the ProRes engine's two and the audio roots' three; 0X308078000 and 0X3082A8000 are shared with nodes that stay. The words of the record render that one table, the read-back derives it again from the two trees and refuses a guest whose trees say otherwise (`GUEST_PROFILE_READBACK`), and `tools/test-sp11-m1-windows.py` parses both trees and fails for a seeded wrong window.
+
+## 6. Limits
+
+Whether any profile lets the stock kernel run past the stop that the default board reaches is UNKNOWN: the A16 comments say that the withdrawn drivers waited or panicked on absent hardware, which is INFERRED for the SP11. Withdrawing the display graph (`dcp`) leaves the panel as the console on boot_args.Video, which no profile touches (INFERRED from the A16 route). A withdrawn root whose register window has a model leaves the model in place (the models are those of the base board); nothing attaches to it. Each profile needs its own record, its own approval and a supervised hardware run.

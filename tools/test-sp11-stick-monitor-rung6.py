@@ -89,9 +89,9 @@ class Form(unittest.TestCase):
         self.assertEqual(caught.exception.name, name)
         return caught.exception
 
-    def test_the_form_is_the_second_of_a_closed_list_of_two_and_nothing_else_is_admitted(self):
+    def test_the_form_is_the_second_of_a_closed_list_of_three_and_nothing_else_is_admitted(self):
         self.assertEqual((ch.RUNG6_FORM, m1.RUNG6_FORM, m1.RUNG6_BOX_S, m1.BOX_MAX_S), (('console', W90, 120), ('console', W90, 120), 120, 120))
-        self.assertEqual(REAL_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM), 'rung 5\'s form is the first and rung 6\'s the second, and there is no third')
+        self.assertEqual(REAL_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM), 'rung 5\'s form is the first, rung 6\'s the second and rung 7\'s (K15, with its guest profile) the third: no fourth')
         self.assertEqual(m1.BOOT_ARG_CPU_START[W90], 'ack')
         self.assertEqual(r6.WORD, W90)
         self.assertEqual(r6.LINE, pn.command_line('console', W90))
@@ -99,7 +99,7 @@ class Form(unittest.TestCase):
         m1.check_options(7, False, 120, 'console', 0, W90, True, 'ack')
         bad = {'rung 5\'s box': ((60, W90), 'LET_PANIC_REFUSED'), 'a box of 119 s': ((119, W90), 'LET_PANIC_REFUSED'), 'a box of 1 s': ((1, W90), 'LET_PANIC_REFUSED'),
                'a box of 5 s': ((5, W90), 'LET_PANIC_REFUSED'), 'a box of 30 s': ((30, W90), 'LET_PANIC_REFUSED'), 'a box of 121 s': ((121, W90), 'OPTIONS_BAD'),
-               'rung 6\'s box with rung 5\'s word': ((120, F), 'LET_PANIC_REFUSED'), 'another timeout': ((120, 'cpu_boot_timeout_secs=91'), 'BOOT_ARG_REFUSED'),
+               'rung 6\'s box with rung 5\'s word': ((120, F), 'GUEST_PROFILE_REFUSED'), 'another timeout': ((120, 'cpu_boot_timeout_secs=91'), 'BOOT_ARG_REFUSED'),
                'a timeout of 9': ((120, 'cpu_boot_timeout_secs=9'), 'BOOT_ARG_REFUSED'), 'cpumask': ((120, 'cpumask=1'), 'BOOT_ARG_REFUSED'), 'cpus=1': ((120, P), 'BOOT_ARG_REFUSED'),
                'both words': ((120, f'{W90} {F}'), 'BOOT_ARG_REFUSED'), 'the word and cpus=1': ((120, f'{W90} {P}'), 'BOOT_ARG_REFUSED'), 'no word': ((120, None), 'BOOT_ARG_REFUSED')}
         for what, ((box, word), name) in bad.items():
@@ -119,7 +119,7 @@ class Form(unittest.TestCase):
         cases = {'no --let-panic': ({}, False, 'LET_PANIC_REFUSED'), 'no word': (dict(boot_arg=None), True, 'BOOT_ARG_REFUSED'), 'cpus=1': (dict(boot_arg=P), True, 'BOOT_ARG_REFUSED'),
                  'rung 5\'s box': (dict(time_box_s=60), True, 'LET_PANIC_REFUSED'), 'a box of 119 s': (dict(time_box_s=119), True, 'LET_PANIC_REFUSED'),
                  'a box of 5 s': (dict(time_box_s=5), True, 'LET_PANIC_REFUSED'), 'a box of 121 s': (dict(time_box_s=121), True, 'OPTIONS_BAD'),
-                 'rung 5\'s word': (dict(boot_arg=F), True, 'LET_PANIC_REFUSED'), 'the plain choice with the ack report': (dict(cpu_start='stop'), True, 'BOOT_ARG_REFUSED'),
+                 'rung 5\'s word': (dict(boot_arg=F), True, 'GUEST_PROFILE_REFUSED'), 'the plain choice with the ack report': (dict(cpu_start='stop'), True, 'BOOT_ARG_REFUSED'),
                  'the panel handed': (dict(panel='handed'), True, 'BOOT_ARG_REFUSED'), 'cpumask': (dict(boot_arg='cpumask=1'), True, 'BOOT_ARG_REFUSED')}
         for what, (over, let_panic, name) in cases.items():
             with self.subTest(what):
@@ -140,7 +140,7 @@ class Form(unittest.TestCase):
 
 class Pair(unittest.TestCase):
     def test_each_form_has_the_pair_that_its_record_is_written_for_by_digest(self):
-        self.assertEqual(sorted(REAL_PAIRS), [F, W90])
+        self.assertEqual(sorted(REAL_PAIRS), [F, W90, ch.RUNG7_PROFILE], 'the pairs are keyed by word, and rung 7\'s by its profile (its word is rung 5\'s): K15')
         for word, (monitor, reporter) in REAL_PAIRS.items():
             with self.subTest(word):
                 self.assertRegex(monitor, r'^[0-9a-f]{64}$')
@@ -278,7 +278,7 @@ class Reader(unittest.TestCase):
         panel = STATE['r6-120-panel']
         self.assertTrue(panel['let_panic'] and panel['boot_arg'] == W90)
         self.assertEqual([pn._rung(panel), pn._rung({**panel, 'boot_arg': F}), pn._rung({**panel, 'boot_arg': P}), pn._rung({**panel, 'boot_arg': P, 'let_panic': False})], [r6, r5, rp, r3])
-        self.assertEqual((r6.NUMBER, r5.NUMBER, pn.ACK), (6, 5, (r5, r6)))
+        self.assertEqual((r6.NUMBER, r5.NUMBER, pn.ACK[:2]), (6, 5, (r5, r6)))
         self.assertIn('counts as a result of rung 6.', flat(STATE['r6-120']))
         self.assertIn('counts as a result of rung 5.', flat(STATE['r5-60']))
         self.assertIn('counts as a result of rung 4.', flat(STATE[NAMES[PS.PANIC]]))
@@ -322,7 +322,7 @@ class Hygiene(unittest.TestCase):
     def test_the_record_leaves_one_kib_free_under_the_cap_of_the_approved_file(self):
         for key in ('r6-120', 'r6-30'):
             self.assertLessEqual(len(STATE[key].encode()), HELD_LIMIT, 'the 15/16 rule of rung 3 cannot hold: 1 KiB is left free (H18); the real record is longer by the facts and the regeneration checks it')
-        self.assertEqual(bb.AUTHORISATION_CAP, 163_840)
+        self.assertGreaterEqual(bb.AUTHORISATION_CAP, 163_840, 'rung 6\'s cap (K14); rung 7 raised it again (K15: tools/test-sp11-stick-monitor-rung7.py pins the number)')
 
     def test_the_modules_and_the_suites_are_under_the_size_of_a_file_of_this_tool(self):
         for rel in ('tools/sp11_stick_bundle_panel_rung6.py', 'tools/sp11_stick_bundle_panel_rung6d.py', 'tools/test-sp11-stick-monitor-rung6.py', 'tools/test-sp11-stick-monitor-rung6-words.py',

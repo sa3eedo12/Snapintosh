@@ -28,7 +28,9 @@ import sp11_stick_bundle_panel_rung3 as r3  # noqa: E402
 import sp11_stick_bundle_panel_panic as rp  # noqa: E402
 import sp11_stick_bundle_panel_rung5 as r5  # noqa: E402
 import sp11_stick_bundle_panel_rung6 as r6  # noqa: E402
-ACK = (r5, r6)                      # the rungs of the acknowledging monitor (K13, K14)
+import sp11_stick_bundle_panel_rung7 as r7  # noqa: E402
+import sp11_stick_bundle_panel_rungs as rungs  # noqa: E402
+ACK = (r5, r6, r7)                  # the rungs of the acknowledging monitor (K13 to K15)
 REFUSALS = ('PANEL_MISMATCH',)      # beside m1.REFUSALS: docs/SP11-STICK-MONITOR.md section 20 lists it
 ch.KNOWN_REFUSALS.update(REFUSALS)
 Refused = ch.Refused
@@ -59,9 +61,10 @@ def command_line(choice, boot_arg=None):
 
 
 def kind_key(real):
-    """The key of the guide's PANEL table for the facts of a real build: its choice, `+word` when its command line has a word of its own, which is a record of its own, and
-    `+let_panic` when the monitor's let_panic PARAMS word is set (K12, K13)."""
-    return real['panel'] + (f'+{real["boot_arg"]}' if real.get('boot_arg') else '') + ('+let_panic' if real.get('let_panic') else '')
+    """The key of the guide's PANEL table for the facts of a real build: its choice, `+word` when its command line has a word of its own, which is a record of its own, `+let_panic`
+    when the monitor's let_panic PARAMS word is set (K12, K13) and `+` the name of the guest profile when the guest has one (read back by the builder into the panel's `profile`, K15)."""
+    return (real['panel'] + (f'+{real["boot_arg"]}' if real.get('boot_arg') else '') + ('+let_panic' if real.get('let_panic') else '')
+            + (f'+{real["panel_facts"]["profile"]}' if (real.get('panel_facts') or {}).get('profile') else ''))
 
 # What section 3c cites and what each citation rests on: (file, first line, last line, fragments that must all be somewhere on those lines). The text below
 # is held to this table by tools/test-sp11-stick-monitor-panel.py in both directions: a path:line in the text that is not here, and an entry whose fragment is
@@ -197,9 +200,7 @@ GUIDE_WORDS = {
         decides=r3.DECIDES, hazard=r3.hazard, step7=r2.step7_console, rung=r3.RUNG, why=r3.why_lines, stand=r3.stand_extra, film=r2.FILM_STEP, also_reads=('5d',), evidence_to='3c',
         stand_head=r3.STAND_HEAD, stand_loop=r3.STAND_LOOP, stand_stick=False,
         console=r3.CONSOLE, ran=r3.RAN, stop_seen=r3.STOP_SEEN, fault_seen=r3.FAULT_SEEN, film_until=r3.film_until, **{**r2.SHARED_WORDS, 'step4': r3.step4, 'step6': r3.STEP6, 'row_e': r3.row_e})}
-GUIDE_WORDS['console+cpus=1+let_panic'] = rp.guide_words(GUIDE_WORDS['console+cpus=1'])      # rung 4 (K12): rung 3's words, except those that tools/sp11_stick_bundle_panel_panic.py says again
-GUIDE_WORDS['console+cpu_boot_timeout_secs=120+let_panic'] = r5.guide_words(GUIDE_WORDS['console+cpus=1+let_panic'])      # rung 5 (K13)
-GUIDE_WORDS['console+cpu_boot_timeout_secs=90+let_panic'] = r6.guide_words(GUIDE_WORDS['console+cpu_boot_timeout_secs=120+let_panic'])      # rung 6 (K14)
+rungs.extend(GUIDE_WORDS)      # rungs 4 to 7 (K12 to K15): the entries with a let_panic word, each from the one before
 
 
 def reading_lines(panel):
@@ -312,8 +313,9 @@ def _row(label, text):
 
 
 def _rung(panel):
-    """The module whose words a record of the console with a word of its own is written in: rung 3's, rung 4's (K12: let_panic) or, with the acknowledging word, rung 5's (K13) or rung 6's (K14)."""
-    return ((r6 if panel['boot_arg'] == r6.WORD else r5) if m1.BOOT_ARG_CPU_START.get(panel.get('boot_arg')) == 'ack' else rp) if panel.get('let_panic') else r3
+    """The module whose words a record of the console with a word of its own is written in: rung 3's, rung 4's (K12: let_panic) or, with the acknowledging word, rung 5's (K13), rung 6's
+    (K14: the word of 90 s) or rung 7's (K15: a guest profile)."""
+    return ((r7 if panel.get('profile') else r6 if panel['boot_arg'] == r6.WORD else r5) if m1.BOOT_ARG_CPU_START.get(panel.get('boot_arg')) == 'ack' else rp) if panel.get('let_panic') else r3
 
 
 def _in_short(panel):

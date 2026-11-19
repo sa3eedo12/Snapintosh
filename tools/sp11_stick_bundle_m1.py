@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import nv2_record  # noqa: E402
 import sp11_stick_bundle as sb  # noqa: E402
 import sp11_stick_bundle_chunks as ch  # noqa: E402
+import sp11_stick_bundle_profile as gpb  # noqa: E402
 
 REFUSALS = ('M1_REPORT_BAD', 'M1_REPORT_MISMATCH', 'PARAMS_LAUNCH', 'PARAMS_ANS', 'WRAPPER_CALLS_MONITOR', 'M1_NO_MONITOR_CALL')     # beside BUILDER_REFUSALS: docs/SP11-STICK-BUILD.md lists those name for name
 ch.KNOWN_REFUSALS.update(REFUSALS)
@@ -59,16 +60,16 @@ BOOT_ARG_PANEL = 'console'
 # answer "let's go with 120 seconds" to whether rung 6's box should be 120 s or 60 s) is RUNG6_BOX_S, which approving its record confirms (K14).
 DECIDED_BOX_S = 5
 RUNG5_BOX_MAX_S = ch.RUNG5_FORM[2]
-RUNG6_BOX_S = ch.RUNG6_FORM[2]
+RUNG6_BOX_S = ch.RUNG6_FORM[2]      # rung 7's form asks the same box (ch.RUNG7_FORM): its approval confirms D5'' for it as well (K15)
 ch.KNOWN_REFUSALS.add('BOOT_ARG_REFUSED')
 # The one PARAMS word of the monitor's own that a record of this tool sets: let_panic, word 23 of struct params at offset 0xB8 (probes/xnuboot/report_layout.c), which the monitor reads at
 # one place only (probes/xnuboot/trap_dispatch.c:370-387) to run XNU's own handler for a guest EL1 exception that it would otherwise stop at (docs/SP11-STICK-MONITOR.md section 20, K12).
 # --let-panic is for three records (--panel, --boot-arg, --time-box-s; chunks.py holds the list): rung 4's, LET_PANIC_FORM, the panel as the console with cpus=1 and the 5 s box and the
 # plain monitor, whose label carries LET_PANIC_MARK in place of CPUS1-; and the two of the acknowledging monitor, ACK_FORMS (K13, K14): rung 5's, the panel as the console with
-# cpu_boot_timeout_secs=120 and a box of RUNG5_BOX_MAX_S s, and rung 6's, with cpu_boot_timeout_secs=90 and a box of RUNG6_BOX_S s. No other combination. permissive and skip_undef are
-# the monitor's other diagnostic words of this kind: no record sets them.
+# cpu_boot_timeout_secs=120 and a box of RUNG5_BOX_MAX_S s, rung 6's, with cpu_boot_timeout_secs=90 and a box of RUNG6_BOX_S s, and rung 7's, with cpu_boot_timeout_secs=120, the box of
+# RUNG6_BOX_S s and the guest profile quiet (K15). No other combination. permissive and skip_undef are the monitor's other diagnostic words of this kind: no record sets them.
 LET_PANIC_FORM = ch.LET_PANIC_FORM
-RUNG5_FORM, RUNG6_FORM, ACK_FORMS = ch.RUNG5_FORM, ch.RUNG6_FORM, ch.ACK_FORMS
+RUNG5_FORM, RUNG6_FORM, RUNG7_FORM, ACK_FORMS = ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.ACK_FORMS
 LET_PANIC_MARK = 'LETPANIC-'
 DIAG_WORDS = (('permissive', 21), ('let_panic', 23), ('skip_undef', 28))
 LET_PANIC_AT = 8 * 23
@@ -93,21 +94,25 @@ def check_pair_box(time_box_s, monitor_sha256):
     if time_box_s > box_cap(monitor_sha256):
         raise ch.Refused('OPTIONS_BAD', f'--time-box-s {time_box_s}: the wrapper of this pair (SNAPMON {monitor_sha256[:8]}...) was built with the box cap at {box_cap(monitor_sha256)} s and '
                                         'refuses a longer box before it calls the monitor; give the pair of the record (K13)')
-# The pair that the record of each acknowledging form is written for (K13, K14), by the form's word: the SHA-256 of its SNAPMON-M1-ACK.BIN and of its SNAPREP-M1-ACK.BIN. The text of a record
-# says what the page of its reporter prints, and the builder reads the pair from a report that it checks against the files (read_report), so a pair that is not the form's is refused
-# where the report is read, whichever way round: the record of rung 6 does not describe the reporter of rung 5 and the record of rung 5 does not describe the other.
+# The pair that the record of each acknowledging form is written for (K13 to K15): the SHA-256 of its SNAPMON-M1-ACK.BIN and of its SNAPREP-M1-ACK.BIN, by the form's key, which is its
+# word, or, for the form that carries a guest profile (rung 7), the profile's name (the word of rung 7 is rung 5's, so the word alone would name rung 5's pair). The text of a record says what
+# the page of its reporter prints, and the builder reads the pair from a report that it checks against the files (read_report), so a pair that is not the form's is refused where the report is
+# read, whichever way round: the record of rung 6 does not describe the reporter of rung 5 and the record of rung 5 does not describe the other. Rung 7 uses rung 6's pair.
 ACK_MONITOR_SHA256 = 'bb34b9701d89302f425138b6229fd334ba9ead54699db2a131fc9a99cb22999c'
-ACK_PAIRS = {'cpu_boot_timeout_secs=120': (ACK_MONITOR_SHA256, 'ee86676001d89cf653af7bdddd797fef3c54d31b28ee42eb4a2d7aa692ee4b3b'),
-             'cpu_boot_timeout_secs=90': (ACK_MONITOR_SHA256, '533d004c27a11da964048aba34fa5a4a32309f0761c100b0959400d099c40368')}
+ACK_REPORTER5_SHA256 = 'ee86676001d89cf653af7bdddd797fef3c54d31b28ee42eb4a2d7aa692ee4b3b'
+ACK_REPORTER6_SHA256 = '533d004c27a11da964048aba34fa5a4a32309f0761c100b0959400d099c40368'
+ACK_PAIRS = {RUNG5_FORM[1]: (ACK_MONITOR_SHA256, ACK_REPORTER5_SHA256), RUNG6_FORM[1]: (ACK_MONITOR_SHA256, ACK_REPORTER6_SHA256),
+             ch.RUNG7_PROFILE: (ACK_MONITOR_SHA256, ACK_REPORTER6_SHA256)}
 
 
-def check_pair_form(cpu_start, boot_arg, monitor_sha256, reporter_sha256):
-    """M1_REPORT_MISMATCH when the acknowledging pair of a record is not the pair that its form is written for (ACK_PAIRS). The plain monitor has no table: its records name their
-    pair in their text and are held to it by their approved SHA-256."""
-    if cpu_start == 'ack' and (monitor_sha256, reporter_sha256) != ACK_PAIRS.get(boot_arg):
-        want = ACK_PAIRS.get(boot_arg, ('none',) * 2)
+def check_pair_form(cpu_start, boot_arg, monitor_sha256, reporter_sha256, profile=None):
+    """M1_REPORT_MISMATCH when the acknowledging pair of a record is not the pair that its form is written for (ACK_PAIRS, by the guest profile when there is one, else by the word). The
+    plain monitor has no table: its records name their pair in their text and are held to it by their approved SHA-256."""
+    key = profile if profile not in (None, ch.GUEST_PROFILE_DEFAULT) else boot_arg
+    if cpu_start == 'ack' and (monitor_sha256, reporter_sha256) != ACK_PAIRS.get(key):
+        want = ACK_PAIRS.get(key, ('none',) * 2)
         raise ch.Refused('M1_REPORT_MISMATCH', f'the pair (SNAPMON-M1-ACK.BIN {monitor_sha256[:8]}..., SNAPREP-M1-ACK.BIN {reporter_sha256[:8]}...) is not the pair that the record of '
-                                               f'--boot-arg {boot_arg} is written for ({want[0][:8]}... and {want[1][:8]}...)')
+                                               f'{key} is written for ({want[0][:8]}... and {want[1][:8]}...)')
 TEST_TOOL = 'wi4b-test-only'        # the `tool` field of the LOCAL TEST RECORD that the host tests build a monitor with: never the unit's
 PARAMS_BYTES = 0x2410       # sizeof(struct params) (probes/xnuboot/report_layout.c): the wrapper refuses a shorter chunk before the call
 # What the monitor would do with these words (docs/SP11-STICK-MONITOR.md section 10): gpu.flags opens the GPU paths (one SMC among them),
@@ -145,7 +150,7 @@ def _no_duplicates(pairs):
     return out
 
 
-def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None, boot_arg=None, let_panic=False, cpu_start='stop'):
+def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None, boot_arg=None, let_panic=False, cpu_start='stop', profile=None):
     """--m1-run runs the wrapper's GIC arm (gic), the monitor (el2_sysreg) and RAM stores, with the time box the wrapper's pre-call check accepts. With `real`
     (panel and hvc_calls given) D9 admits a stock kernel (--sptm-hvc-calls 0) with the panel withheld (the first choice), handed (the second) or handed as the
     kernel's console (`console`: serial=2 in the command line, as probes/run.py makes it for the A16's native panel console)
@@ -164,25 +169,30 @@ def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None, boot
                                         f'as the kernel\'s console), each with --sptm-hvc-calls 0 (a stock kernel), and this record is written for no other choice; '
                                         f'got --panel {panel} and --sptm-hvc-calls {hvc_calls}')
     check_boot_arg(boot_arg, panel, True, cpu_start)
-    check_let_panic(let_panic, panel, boot_arg, time_box_s, True, cpu_start)
+    check_let_panic(let_panic, panel, boot_arg, time_box_s, True, cpu_start, profile)
 
 
-def check_let_panic(let_panic, panel, boot_arg, time_box_s, is_m1=True, cpu_start='stop'):
-    """--let-panic is for the three records that set the monitor's let_panic word, in the monitor entry run: rung 4's (LET_PANIC_FORM: the plain monitor, the panel as the console
-    with cpus=1 and the 5 s box) and the two of the acknowledging monitor (ACK_FORMS, `cpu_start` ack, the panel as the console): rung 5's, with cpu_boot_timeout_secs=120 and the 60 s of D5',
-    and rung 6's, with cpu_boot_timeout_secs=90 and the 120 s of D5'', each with exactly its box. LET_PANIC_REFUSED for any other combination or kind of record, before any guest is
-    built. The acknowledging monitor has those two records and no other, so it is refused without --let-panic as well. False is no option."""
+def check_let_panic(let_panic, panel, boot_arg, time_box_s, is_m1=True, cpu_start='stop', profile=None):
+    """--let-panic is for the four records that set the monitor's let_panic word, in the monitor entry run: rung 4's (LET_PANIC_FORM: the plain monitor, the panel as the console
+    with cpus=1 and the 5 s box) and the three of the acknowledging monitor (ACK_FORMS, `cpu_start` ack, the panel as the console): rung 5's, with cpu_boot_timeout_secs=120 and the 60 s of D5',
+    rung 6's, with cpu_boot_timeout_secs=90 and the 120 s of D5'', and rung 7's, with cpu_boot_timeout_secs=120, the 120 s and the guest profile quiet, each with exactly its box (and
+    `profile`, the guest profile's name: rung 7's only, ch.FORM_PROFILE). LET_PANIC_REFUSED for any other combination or kind of record, before any guest is built; GUEST_PROFILE_REFUSED when
+    the combination is a form's but its profile is not (rung 7's form without its profile, another form with one). The acknowledging monitor has those three records and no other, so it is
+    refused without --let-panic as well. False is no option."""
     if not let_panic:
         if cpu_start == 'ack' and is_m1:
-            raise ch.Refused('LET_PANIC_REFUSED', '--cpu-start ack is for the records of rungs 5 and 6 and goes with --let-panic and no other option set: the acknowledging monitor has no other '
-                                                  'record (docs/SP11-STICK-MONITOR.md section 20, K13 and K14)')
+            raise ch.Refused('LET_PANIC_REFUSED', '--cpu-start ack is for the records of rungs 5 to 7 and goes with --let-panic and no other option set: the acknowledging monitor has no other '
+                                                  'record (docs/SP11-STICK-MONITOR.md section 20, K13 to K15)')
         return
     if not is_m1:
         raise ch.Refused('LET_PANIC_REFUSED', '--let-panic is a choice of the monitor entry run (docs/SP11-STICK-MONITOR.md section 20, K12): it needs --m1-run')
     if cpu_start == 'stop' and time_box_s is not None and time_box_s > LET_PANIC_FORM[2]:
         raise ch.Refused('OPTIONS_BAD', f'--m1-run: rung 4\'s record is for the first run\'s pair, whose wrapper refuses a time box over {LET_PANIC_FORM[2]} s before it calls the monitor '
                                         f'(docs/SP11-STICK-MONITOR.md section 20, K12); got {time_box_s}')
-    if not ch.let_panic_form_ok(panel, boot_arg, time_box_s, cpu_start):
+    if not ch.let_panic_form_ok(panel, boot_arg, time_box_s, cpu_start, profile):
+        if ch.let_panic_form_ok(panel, boot_arg, time_box_s, cpu_start, any_profile=True):
+            raise ch.Refused('GUEST_PROFILE_REFUSED', f'--guest-profile {profile or "(none)"} is not the guest profile of this form: only --boot-arg {ch.RUNG7_FORM[1]} --time-box-s '
+                                                      f'{ch.RUNG7_FORM[2]} has one, {ch.RUNG7_PROFILE}, and it has no other (docs/SP11-M1-GUEST-PROFILES.md section 5)')
         raise ch.Refused('LET_PANIC_REFUSED', f'--let-panic is for {ch.LET_PANIC_FORMS_TEXT} and no other combination; '
                                               f'got --panel {panel} --boot-arg {boot_arg} --time-box-s {time_box_s} --cpu-start {cpu_start}')
 
@@ -193,7 +203,7 @@ def check_boot_arg(boot_arg, panel, is_m1=True, cpu_start='stop'):
     monitor without its word), before any guest is built. None is no word, which only the plain monitor takes."""
     if boot_arg is None:
         if cpu_start == 'ack' and is_m1:
-            raise ch.Refused('BOOT_ARG_REFUSED', '--cpu-start ack needs --boot-arg cpu_boot_timeout_secs=120 (rung 5) or cpu_boot_timeout_secs=90 (rung 6): the acknowledged guest waits for a CPU '
+            raise ch.Refused('BOOT_ARG_REFUSED', '--cpu-start ack needs --boot-arg cpu_boot_timeout_secs=120 (rungs 5 and 7) or cpu_boot_timeout_secs=90 (rung 6): the acknowledged guest waits for a CPU '
                                                  'that is never started, and without the word its XNU gives up on that CPU after its own default wait, which is shorter than the box '
                                                  '(docs/SP11-STICK-MONITOR.md section 20, K11)')
         return
@@ -228,15 +238,17 @@ def check_cpu_start(cpu_start, is_m1):
                                         'CPU_START_TEXTS lists no `ack`), so no record is written for it; docs/SP11-MONITOR-PROFILE.md section 10 lists what that text must say')
 
 
-def pinned_label(label, is_m1, choice='withheld', boot_arg=None, let_panic=False, cpu_start='stop'):
+def pinned_label(label, is_m1, choice='withheld', boot_arg=None, let_panic=False, cpu_start='stop', *, profile=None):
     """The build_label PIN.DAT carries. For this kind the marker comes first (the wrapper of this kind refuses a PIN.DAT without it, D2) and, for a guest that is
     handed the panel, the marker of that choice (PANEL_MARKS) after it, so that the three choices of D9 have three labels, or, for a guest with a boot-arg word of its own
     (BOOT_ARGS), that word's marker in its place, or, for the guest of --let-panic with the plain monitor, LET_PANIC_MARK in place of that (the guest of rung 5 has the marker of
-    its word, which only the acknowledging monitor with --let-panic reaches), so that the record of that guest has a label of its own;
+    its word, which only the acknowledging monitor with --let-panic reaches), so that the record of that guest has a label of its own, and, for a guest with a profile of the
+    menu (`profile` is its name: sp11_stick_bundle_profile.MARKS), the two characters of its mark after that, whatever the marker is;
     for every other kind the label is the facts' and may not start with the marker, or a PIN.DAT of another kind would pass for this one. The facts label of this kind may
-    not start with a marker of a choice, of a word or of --let-panic either: M1RUN-PANEL- is then the label of the choice that hands the panel, M1RUN-CONSOLE- that of the
-    panel as the console, M1RUN-CPUS1- that of the panel as the console with cpus=1, M1RUN-LETPANIC- that of the same with let_panic and M1RUN-ACKPANIC- that of the
-    acknowledging monitor with let_panic (rung 5 and rung 6 alike: the facts' label, RUNG5 or RUNG6, tells their records apart), and of no other.
+    not start with a marker of a choice, of a word, of --let-panic or of a profile either: M1RUN-PANEL- is then the label of the choice that hands the panel, M1RUN-CONSOLE- that of
+    the panel as the console, M1RUN-CPUS1- that of the panel as the console with cpus=1, M1RUN-LETPANIC- that of the same with let_panic and M1RUN-ACKPANIC- that of the
+    acknowledging monitor with let_panic (rungs 5 and 6 alike: the facts' label, RUNG5 or RUNG6, tells their records apart); M1RUN-ACKPANIC-Q- is that of the same with the quiet profile
+    (rung 7; the marks of the profiles are two characters), and of no other.
     PIN_STRING: it does not fit."""
     if label.startswith(LABEL_PREFIX):
         raise ch.Refused('PIN_STRING', f'build_label starts with {LABEL_PREFIX}, which only --m1-run adds')
@@ -248,10 +260,14 @@ def pinned_label(label, is_m1, choice='withheld', boot_arg=None, let_panic=False
             raise ch.Refused('PIN_STRING', f'build_label starts with {mark}, which only --m1-run with --boot-arg {word} adds after {LABEL_PREFIX}')
     if is_m1 and label.startswith(LET_PANIC_MARK):
         raise ch.Refused('PIN_STRING', f'build_label starts with {LET_PANIC_MARK}, which only --m1-run with --let-panic adds after {LABEL_PREFIX}')
+    for owner, mark in gpb.MARKS.items():
+        if is_m1 and mark and label.startswith(mark):
+            raise ch.Refused('PIN_STRING', f'build_label starts with {mark}, which only --m1-run with --guest-profile {owner} adds after the marker of the guest\'s choices')
     if boot_arg is not None:
         check_boot_arg(boot_arg, choice, is_m1, cpu_start)
-    check_let_panic(let_panic, choice, boot_arg, None, is_m1, cpu_start)
-    front = LABEL_PREFIX + (LET_PANIC_MARK if let_panic and cpu_start == 'stop' else BOOT_ARGS[boot_arg] if boot_arg is not None else PANEL_MARKS[choice])
+    check_let_panic(let_panic, choice, boot_arg, None, is_m1, cpu_start, profile)
+    gpb.check_form(profile, boot_arg, let_panic, cpu_start, choice, is_m1)
+    front = LABEL_PREFIX + (LET_PANIC_MARK if let_panic and cpu_start == 'stop' else BOOT_ARGS[boot_arg] if boot_arg is not None else PANEL_MARKS[choice]) + gpb.mark_of(profile)
     if is_m1 and len(front + label) > PIN_LABEL_MAX:
         raise ch.Refused('PIN_STRING', f'--m1-run puts {front} in front of build_label and the pinned label holds {PIN_LABEL_MAX} characters: the facts label holds '
                                        f'{PIN_LABEL_MAX - len(front)}')

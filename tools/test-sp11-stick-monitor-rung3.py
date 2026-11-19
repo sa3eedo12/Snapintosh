@@ -276,7 +276,7 @@ class Options(unittest.TestCase):
     def test_the_synthetic_kind_has_no_such_option_and_the_real_kind_names_it_in_its_help(self):
         with self.assertRaises(SystemExit):
             BT.cli(['authorisation-template', 'synthetic', *BT.opts(stores='ram,el2_sysreg'), '--boot-arg', 'cpus=1'])
-        source = (TOOLS / 'sp11_stick_bundle_build.py').read_text()
+        source = (TOOLS / 'sp11_stick_bundle_build_opts.py').read_text()
         self.assertIn("p.add_argument('--boot-arg'", source.split("p.add_argument('--kernelcache', required=True)")[1][:1200], 'the real kind has the option, after its kernelcache')
         self.assertNotIn('--boot-arg', source.split("if kind == 'synthetic':\n        for flag, default")[1].split("p.add_argument('--kernelcache'")[0])
 

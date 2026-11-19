@@ -208,7 +208,7 @@ class Options(unittest.TestCase):
 
     def test_the_panel_as_the_console_belongs_to_the_monitor_entry_run_only(self):
         self.assertEqual(sorted(m1.PANEL_MARKS), sorted(CHOICES))
-        self.assertIn("'console'", (TOOLS / 'sp11_stick_bundle_build.py').read_text().split("p.add_argument('--panel'")[1].split('\n')[0])
+        self.assertIn("'console'", (TOOLS / 'sp11_stick_bundle_build_opts.py').read_text().split("p.add_argument('--panel'")[1].split('\n')[0])
         args = real_args('console-dry-run', 'console')
         args.update(m1_run=None, m1_efi=None)         # the kind of the dry run: no monitor is called
         code, text, err = BT.template('real', **args)

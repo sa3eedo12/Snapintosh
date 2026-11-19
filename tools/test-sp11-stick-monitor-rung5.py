@@ -126,7 +126,7 @@ class Options(unittest.TestCase):
     def test_the_acknowledging_monitor_has_two_records_and_every_other_combination_is_a_named_refusal(self):
         self.assertEqual((ch.RUNG5_FORM, m1.RUNG5_FORM, m1.RUNG5_BOX_MAX_S, m1.DECIDED_BOX_S), (('console', F, 60), ('console', F, 60), 60, 5))
         self.assertEqual((m1.BOOT_ARG_CPU_START, m1.CPU_STARTS), ({P: 'stop', F: 'ack', W90: 'ack'}, ('stop', 'ack')))
-        self.assertEqual((REAL_FORMS, ch.ACK_FORMS, m1.ACK_FORMS), ((('console', F, 60), ('console', W90, 120)),) * 3, 'the closed list: exactly these two pairs of box and word')
+        self.assertEqual((REAL_FORMS, ch.ACK_FORMS, m1.ACK_FORMS), ((('console', F, 60), ('console', W90, 120), ('console', F, 120)),) * 3, 'the closed list: exactly these three pairs of box and word')
         for word, box in ((F, 60), (W90, 120)):
             m1.check_options(7, False, box, 'console', 0, word, True, 'ack')
         m1.check_options(7, False, 5, 'console', 0, P, True, 'stop')        # rung 4's form is what it was
@@ -136,7 +136,7 @@ class Options(unittest.TestCase):
                'the other timeout word with the plain monitor': ((5, 'console', 0, W90, True, 'stop'), 'BOOT_ARG_REFUSED'),
                'a box of 61 s': ((61, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'), 'a box of 1 s': ((1, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'),
                'a box of 5 s': ((5, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'), 'a box of 10 s': ((10, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'),
-               'a box of 120 s with the word of rung 5': ((120, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'), 'a box of 60 s with the word of rung 6': ((60, 'console', 0, W90, True, 'ack'), 'LET_PANIC_REFUSED'),
+               'a box of 120 s with the word of rung 5': ((120, 'console', 0, F, True, 'ack'), 'GUEST_PROFILE_REFUSED'), 'a box of 60 s with the word of rung 6': ((60, 'console', 0, W90, True, 'ack'), 'LET_PANIC_REFUSED'),
                'a box of 119 s with the word of rung 6': ((119, 'console', 0, W90, True, 'ack'), 'LET_PANIC_REFUSED'), 'a box of 5 s with the word of rung 6': ((5, 'console', 0, W90, True, 'ack'), 'LET_PANIC_REFUSED'),
                'a box of 121 s': ((121, 'console', 0, W90, True, 'ack'), 'OPTIONS_BAD'), 'a box of 0 s': ((0, 'console', 0, F, True, 'ack'), 'OPTIONS_BAD'),
                'the panel handed': ((5, 'handed', 0, F, True, 'ack'), 'BOOT_ARG_REFUSED'), 'the panel withheld': ((5, 'withheld', 0, W90, True, 'ack'), 'BOOT_ARG_REFUSED'),
@@ -279,7 +279,8 @@ class Reader(unittest.TestCase):
         panel = STATE['r5-60-panel']
         self.assertTrue(panel['let_panic'] and panel['boot_arg'] == F)
         self.assertEqual([pn._rung(panel), pn._rung({**panel, 'boot_arg': P}), pn._rung({**panel, 'boot_arg': P, 'let_panic': False})], [r5, rp, r3])
-        self.assertEqual(sorted(k for k in m1g.PANEL if 'let_panic' in k), ['console+cpu_boot_timeout_secs=120+let_panic', 'console+cpu_boot_timeout_secs=90+let_panic', 'console+cpus=1+let_panic'])
+        self.assertEqual(sorted(k for k in m1g.PANEL if 'let_panic' in k), ['console+cpu_boot_timeout_secs=120+let_panic', 'console+cpu_boot_timeout_secs=120+let_panic+j700ap-26A428-m1-quiet',
+                                                                          'console+cpu_boot_timeout_secs=90+let_panic', 'console+cpus=1+let_panic'])
 
 
 class Kinds(unittest.TestCase):

@@ -490,7 +490,7 @@ class BoxCap(Base):
                 self.assertNotEqual(self.spellings(h, s, builder, harness), [])
 
     def test_the_builders_help_names_the_cap(self):
-        text = (T.ROOT / 'tools/sp11_stick_bundle_build.py').read_text()
+        text = (T.ROOT / 'tools/sp11_stick_bundle_build_opts.py').read_text()      # the options moved out of build.py (R11: build.py is held under 51,200 bytes)
         want = f'a time box of 1 to {m1.BOX_MAX_S} s'
         self.assertIn(want, text)
         self.assertNotIn(want, text.replace(want, 'a time box of 1 to 5 s'), 'the pin can fail')

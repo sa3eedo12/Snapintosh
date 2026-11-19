@@ -25,22 +25,30 @@ PARAMS_WORDS, PARAMS_WATCHDOG, PARAMS_MEM_LOW, PARAMS_MEM_HIGH = 1154, 24, 30, 3
 AFFINITY = 0xFF00FFFFFF     # Aff3:Aff2:Aff1:Aff0 of MPIDR_EL1, the part ACPI states
 ZERO_MIN = 0x10000      # a shorter zero stretch stays data: every ZERO chunk is a table entry, and a table holds 1024
 KNOWN_REFUSALS = {n for _, n, _ in sb.ERRORS} | {'BUILT_SHAPE', 'PARAMS_MISMATCH', 'TIME_BOX_MISMATCH', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING'}   # the builder adds its own
-# (--panel, --boot-arg, --time-box-s) of the records that set the monitor's let_panic PARAMS word (tools/sp11_stick_bundle_m1.py, K12 to K14): rung 4's, with the plain monitor and
-# exactly this box, and the two of the acknowledging monitor, ACK_FORMS, each with exactly its box: rung 5's (a 60 s box, XNU's wait for CPU 1 at 120 s, longer than the box) and rung 6's
-# (a 120 s box and a wait of 90 s, which ends inside it). The list is closed: no other pair of box and word has a record.
+# (--panel, --boot-arg, --time-box-s) of the records that set the monitor's let_panic PARAMS word (tools/sp11_stick_bundle_m1.py, K12 to K15): rung 4's, with the plain monitor and
+# exactly this box, and the three of the acknowledging monitor, ACK_FORMS, each with exactly its box: rung 5's (a 60 s box, XNU's wait for CPU 1 at 120 s, longer than the box), rung 6's
+# (a 120 s box and a wait of 90 s, which ends inside it) and rung 7's (a 120 s box and the wait of 120 s, which does not, with the guest profile of FORM_PROFILE and with it only).
+# The list is closed: no other combination of box, word and profile has a record.
 LET_PANIC_FORM = ('console', 'cpus=1', 5)
 RUNG5_FORM = ('console', 'cpu_boot_timeout_secs=120', 60)
 RUNG6_FORM = ('console', 'cpu_boot_timeout_secs=90', 120)
-ACK_FORMS = (RUNG5_FORM, RUNG6_FORM)
+RUNG7_FORM = ('console', 'cpu_boot_timeout_secs=120', 120)
+ACK_FORMS = (RUNG5_FORM, RUNG6_FORM, RUNG7_FORM)
+GUEST_PROFILE_DEFAULT = 'j700ap-26A428'      # the loader's own default board and that of every bundle built before --guest-profile (tools/sp11_stick_bundle_profile.py)
+RUNG7_PROFILE = 'j700ap-26A428-m1-quiet'
+FORM_PROFILE = {RUNG7_FORM: RUNG7_PROFILE}   # the guest profile of each form that carries one; every other form has the base board's
 LET_PANIC_FORMS_TEXT = (f'--panel {LET_PANIC_FORM[0]} --boot-arg {LET_PANIC_FORM[1]} --time-box-s {LET_PANIC_FORM[2]} (the plain monitor) or, with --cpu-start ack, '
-                        + ' or '.join(f'--panel {panel} --boot-arg {word} --time-box-s {box}' for panel, word, box in ACK_FORMS))
+                        + ' or '.join(f'--panel {form[0]} --boot-arg {form[1]} --time-box-s {form[2]}' + (f' --guest-profile {FORM_PROFILE[form]}' if form in FORM_PROFILE else '')
+                                      for form in ACK_FORMS))
 
 
-def let_panic_form_ok(panel, boot_arg, box_s, cpu_start='stop'):
-    """True when --panel, --boot-arg and --time-box-s are those of a record that sets let_panic for this CPU-start choice; `box_s` None leaves the box out (the label's check)."""
+def let_panic_form_ok(panel, boot_arg, box_s, cpu_start='stop', profile=None, any_profile=False):
+    """True when --panel, --boot-arg, --time-box-s and the guest profile are those of a record that sets let_panic for this CPU-start choice; `box_s` None leaves the box out (the
+    label's check) and `any_profile` the profile out (the caller that names a missing or a surplus profile as its own refusal). None is the base board, as is its own name."""
     if cpu_start == 'ack':
-        return any((panel, boot_arg) == form[:2] and (box_s is None or box_s == form[2]) for form in ACK_FORMS)
-    return (panel, boot_arg) == LET_PANIC_FORM[:2] and (box_s is None or box_s == LET_PANIC_FORM[2])
+        return any((panel, boot_arg) == form[:2] and (box_s is None or box_s == form[2]) and (any_profile or (profile or GUEST_PROFILE_DEFAULT) == FORM_PROFILE.get(form, GUEST_PROFILE_DEFAULT))
+                   for form in ACK_FORMS)
+    return (panel, boot_arg) == LET_PANIC_FORM[:2] and (box_s is None or box_s == LET_PANIC_FORM[2]) and (any_profile or profile in (None, GUEST_PROFILE_DEFAULT))
 
 
 class Refused(Exception):
@@ -264,7 +272,7 @@ def real_built(a, xb, place, facts):
         raise Refused('ENV_SNAP_SET', f'{stale}: the build reads SNAP_* variables, so an inherited one would change the guest: unset them')
     if not Path(a.kernelcache).is_file():
         raise Refused('KERNELCACHE_MISSING', 'the kernelcache is Apple material: it is read from a local path and never committed')
-    xb.configure_guest()
+    xb.configure_guest(getattr(a, 'guest_profile', GUEST_PROFILE_DEFAULT))
     xb.configure_txm_arena()
     xb.configure_adreno_va_wide()
     xb.HOST_TIMEBASE_HZ = facts['cntfrq_hz']
@@ -293,7 +301,7 @@ def real_built(a, xb, place, facts):
         raise Refused('BUILT_SHAPE', 'an APF device slice of the guest\'s device tree overlaps the guest, the panel or the work area') from None
     built['watchdog'] = a.time_box_s
     if getattr(a, 'let_panic', False):      # the monitor's PARAMS word let_panic: set for the records of LET_PANIC_FORM and ACK_FORMS, which the caller's option check has already held it to
-        if not let_panic_form_ok(a.panel, boot_arg, a.time_box_s, getattr(a, 'cpu_start', 'stop')):
+        if not let_panic_form_ok(a.panel, boot_arg, a.time_box_s, getattr(a, 'cpu_start', 'stop'), getattr(a, 'guest_profile', None)):
             raise Refused('LET_PANIC_REFUSED', f'let_panic is for {LET_PANIC_FORMS_TEXT} only')
         built['let_panic'] = True
     built['chunks'][xb.PARAMS_PA] = xb.params_blob(built)       # run.py serialises the parameters once more, after its run-time overrides
