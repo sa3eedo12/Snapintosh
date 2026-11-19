@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: MIT -->
-# SP11 kernel stops: what the stock kernel was doing when the monitor ended each run (host analyses of boots 20 to 25)
+# SP11 kernel stops: what the stock kernel was doing when the monitor ended each run (host analyses of the stops of boots 20, 21, 23, 24, 25 and 26)
 
-**Status: EXPERIMENTAL. This note records host analyses of five hardware stops; it is not a hardware result of its own. Hardware: the monitor entry ran five times on
-the unit, in boots 20, 21, 23, 24 and 25 (M1 rungs 1 to 5, 2026-11-18 and 19; OBSERVED, one unit, one boot each; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) sections 18, 19, 21,
-22 and 23). Everything else here is a reading of a file on the host. Nothing in this note authorises a run.**
+**Status: EXPERIMENTAL. This note records host analyses of six hardware stops; it is not a hardware result of its own. Hardware: the monitor entry ran six times on
+the unit, in boots 20, 21, 23, 24, 25 and 26 (M1 rungs 1 to 6, 2026-11-18 and 19; OBSERVED, one unit, one boot each; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) sections 18, 19, 21,
+22, 23 and 24). Everything else here is a reading of a file on the host. Nothing in this note authorises a run.**
 
 Each run of the monitor entry ended in a stop that the page names (`MON STOP`), and each time a read-only analysis of the guest kernel followed. This note is the short
 reference for those analyses, one section per stop, with what was read, what is inferred, which predictions were tested by the next boot and what is still unknown. It is
@@ -27,7 +27,7 @@ decisions and the expected failures are in [SP11-MONITOR-PORT.md](SP11-MONITOR-P
   guest's `FAR`; on `WATCHDOG`, `PC=` is the guest's PC at the monitor's interrupt, `A=` `ESR_EL1`, `B=` `FAR_EL1` and `C=` `ELR_EL1`, the guest's last EL1 exception, which is not
   necessarily its current state; on `GUEST_EXC`, `PC=` is the guest's `x30`, `A=` `ESR_EL1`, and `C=` `ELR_EL1`. The page prints 100 columns, so the last digits of a long `C=` are cut.
 
-## 2. The five stops at a glance
+## 2. The six stops at a glance
 
 | Boot | Rung and guest input | What the page ended with (OBSERVED) | What the kernel was doing (the reading) | Label of the reading |
 | --- | --- | --- | --- | --- |
@@ -35,7 +35,8 @@ decisions and the expected failures are in [SP11-MONITOR-PORT.md](SP11-MONITOR-P
 | 21 | rung 2: panel as the console, `serial=2` | `MON STOP S2_FAULT` at 2.044 s, `A=0X300734004`, a 32-bit write | writing the first CPU-start word of the platform power manager's register block | code path VERIFIED; that it is that write INFERRED, by address |
 | 23 | rung 3: `cpus=1` | `MON STOP GUEST_EXC` at 2.166 s, `A=0X2000000` | at the kernel's own debugger trap, so in its panic funnel | INFERRED, high; the cause UNKNOWN |
 | 24 | rung 4: `cpus=1` and `let_panic` | `MON STOP S2_FAULT` at 2.2465 s, `A=0X3082BC224`, a 32-bit read, after a panic text | in the chip-reset request of the panic path, after an ApplePMGR assertion and five nested panics | text OBSERVED; chain VERIFIED; reading INFERRED |
-| 25 | rung 5: six CPUs, CPU-start stores acknowledged, `let_panic`, 60 s box | `MON STOP WATCHDOG` at 60.18 s, `PC=0XFFFFFE000B8716A8` | idle, in the wait-for-interrupt of the retention idle path, interrupts masked | the WFI VERIFIED; the idle thread INFERRED; what it waits for UNKNOWN |
+| 25 | rung 5: six CPUs, CPU-start stores acknowledged, `let_panic`, 60 s box | `MON STOP WATCHDOG` at 60.18 s, `PC=0XFFFFFE000B8716A8` | idle, in the wait-for-interrupt of the retention idle path, interrupts masked | the WFI VERIFIED; the idle thread INFERRED; what it waits for UNKNOWN (read in section 7A: a wait of `bsd_init`, INFERRED) |
+| 26 | rung 6: as rung 5 with `cpu_boot_timeout_secs=90`, 120 s box, timer words printed | `MON STOP S2_FAULT` at 61.60 s, `PC=0XFFFFFE00095FF9AC`, `A=0X291000004`, a 32-bit write of 1 | in the scaler driver's hardware-abstraction initialisation, one pulse of one register, released with the other `IOSurfaceRoot` waiters when `bsd_init` published the BSD resource | code VERIFIED; names and the release INFERRED; what the register does UNKNOWN |
 
 ## 3. Boot 20: the early loop in the I/O Kit start-up
 
@@ -129,12 +130,56 @@ decisions and the expected failures are in [SP11-MONITOR-PORT.md](SP11-MONITOR-P
   code above. The silence of 25 s fits a legitimate kernel wait (every timed wait expires after the box, then a root-device wait with no timeout and no text) as well as a dead timer. Whether any guest FIQ was delivered
   in boot 25 is UNKNOWN: the monitor's report window holds the guest-timer words (reads, writes, interrupts, asserts, clears, vector entries, control, compare value, interrupt PC), and the stick reporter prints none of them.
   In-boot evidence leans, weakly, to working timers (the PMU's 1 ms retry sleeps block on a timer unless the CPU's idle latency is above 1 ms; INFERRED, medium), and the same timer code ran XNU to userspace on the A16 (that
-  chain's record; not re-checked here).
+  chain's record; not re-checked here). Boot 26 answered both questions: its timer counters show guest timer interrupts delivered (the counters are OBSERVED, the delivery INFERRED from them), and the idle was a wait of `bsd_init` (INFERRED; section 7A).
 - **UNKNOWN.** Why the kernel is idle; which wait `bsd_init` was in at 59 s of kernel time; what ended the pause of about 15 s before the USB lines; whether the CPU-boot thread sits in its wait for CPU 1 (INFERRED
   once the starts are acknowledged) and which drivers wait on it; whether the virtual FIQ is delivered and a pending masked one completes a WFI on Oryon v1 under NV2; how many of the CPU-start stores the acknowledge
   took (the report window holds the count, and no reporter prints it).
 
-## 8. Predictions that were tested (boot 21 to boot 25)
+## 7A. Boot 26: the scaler's register pulse, and the real-time clock waits behind the silence
+
+- **Page (OBSERVED).** `MON STOP S2_FAULT PC=0XFFFFFE00095FF9AC A=0X291000004 B=0X93880045 C=0XFFFFFE63AA8A0004` at 61.60 s (`TICKS=1182753011`, a box of 120 s), `MON EXIT` `SPSR=0X80400204`; `MON ESR` gives class `0x24`, a valid
+  syndrome, size 4, `SRT` 8, `WnR` 1 and `DFSC` `0x5` (a translation fault at level 1) and `MON WVAL` `X8=0X1 DATA=0X1`: a 32-bit write of 1. `MON TIM IRQS=1010 ASSERTS=2036 CLEARS=2036 VECTORS=969 CTL=0X1` and
+  `MON ACK COUNT=15` are on the same page. The film shows a silence of about 28.5 s, then about 40 new kernel lines at once at t0 + 60.4 s, a partial last line, and the page at t0 + 61.6 s
+  ([SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 24). No panic text.
+- **Provenance.** The labels are those of the stop-site analysis written after the boot (kept outside this repository); this note's author did not re-read the kernelcache. Names are INFERRED, as in section 1.
+- **Owner (VERIFIED).** The fileset entry whose own segment covers the PC is the scaler's driver (`AppleM2ScalerCSCDriver`); the device tree's `scaler0` node (`compatible` `scaler,t8101 scaler,s5l8960x`) is its
+  personality, and the address `0x291000004` is in that node's first window. `scaler0` has four windows, `0x291000000` (size `0x38000`), `0x291210000` (`0x4000`), `0x291204000` (`0x4000`) and `0x290000000` (`0x8000`);
+  its DART is a separate node, `dart-scaler`, with one window, `0x291260000` (`0x20000`), and is not part of `scaler0` (it stays in the quiet profile's tree). Read on the host in the local DeviceTree.j700ap through the
+  `ranges` of `arm-io`: a file, not a run.
+- **The function (code VERIFIED; the name INFERRED).** It is a step of the driver's hardware-abstraction layer, run once from the layer's initialisation that ends in `Scaler HAL[%u] Initialized.` (25 layer classes
+  carry a copy). It maps the first register window (`Couldn't map register memory!` otherwise), reads the device tree's `hardware-version` of the node (22), and when that is below `0x1a` writes 1 and then 0 to
+  word 1 of the window, then reads word 0: **one pulse, not a loop** (the function has no branch back; the first reading of the stop as a loop is withdrawn) and not a reset or a clock gate. For version 22 the value read
+  back is discarded. What the register is, is UNKNOWN.
+- **What the survey of the registers gives (VERIFIED code; INFERRED outcome).** The next reads are the chip version, taken from a register of the power manager's window (what the monitor's power-manager model returns
+  there: UNKNOWN), and a match of (version, hardware version) against a 47-row table that has both possible rows for 22. A model that reads zeros and ignores writes would pass the identify step. The steps after it, by
+  literals (order INFERRED), are the power and clock enables, the driver's DART, a firmware load through the scaler's own instruction memory and a wait for the firmware's acknowledge (`Firmware initialization failed to
+  ack` on zeros: a failed start, no panic literal seen, the wait's length UNKNOWN). A model that lets the driver succeed must emulate the scaler's firmware CPU, which is not cheap; the data-only answer is to withdraw `scaler0`
+  from the guest's device tree (the quiet profile of the host notes does, with 42 other nodes).
+- **Why it runs now (VERIFIED mechanism; the order UNKNOWN).** Eleven kexts carry the literal `IOSurfaceRoot`; nine wait for the service with no timeout (the video decoder, the video encoder, the JPEG and ProRes engines,
+  the scaler, the display controller, the display coprocessor's driver, the GPU family and the camera; the GPU, ISP and neural-engine nodes are deferred in the base profile). `IOSurfaceRoot` matches on the
+  `IOBSD` resource, which `bsd_init` publishes after the burst of lines, so every waiter is released at the same moment; the scaler first is OBSERVED, the order of the others UNKNOWN. The other 51 nodes with absent or partial
+  models survived 61.6 s with their drivers eligible (OBSERVED): only a driver released by `IOBSD` or `IOSurfaceRoot`, or one with a timer longer than 61 s, can still end a run. The video decoder, ranked first by the host list, was
+  not touched before the stop (a touch of its window would have stopped the run: INFERRED from the fail-closed rule).
+- **The silence (VERIFIED statically; the timing INFERRED).** `bsd_init` starts about 0.4 s into the call and its first call, the time initialisation, waits 30 s for the `IORTC` resource and then goes on to the
+  calendar's first read of the platform clock, which waits 30 s for the same resource again: 0.4 + 30 + 30 = 60.4 s, the time at which the burst came. The kernel's idle thread is what boot 25 caught inside that second
+  wait, its box of 60 s having ended there (INFERRED). No third clock wait follows: the next call only reads the calendar and warns for a negative time.
+- **`IORTC` is never published (VERIFIED code; the cause UNKNOWN).** It is published by the real-time clock driver's start after its `registering service` line, or by the platform expert's hook for a device-tree node
+  that matches the key `rtc`; the local device tree has no such node. The film shows the driver's first line (`started`) and the PMU clock child's lines and never the `registering service` line (OBSERVED in the three frames viewed; a film is not proof of absence), so the start
+  returned false or blocked before it (UNKNOWN which, and why); both waits expire by timeout.
+- **A correction.** The two messages of those waits (`... RTC did not show up` and `... "getGMTTimeOfDay" call failed with`) are `kprintf` lines. `kprintf` goes to the serial output when the serial console is
+  initialised (VERIFIED, the public `pe_kprintf` source), not to the video console, so the film cannot show them. The analysis after boot 25, the first version of
+  section 9 below and a later design note expected them on the film; that was wrong and is fixed here.
+- **The partial line (strings and plist VERIFIED; the match INFERRED, high).** `Load request for %s failed: %d` is printed by the BSD kext starter when it cannot load a kext; its VPN personality (`IOResourceMatch`
+  `IOBSD`) loads the PPP, L2TP and PPTP network extensions in that order, the kernelcache has the first two and no PPTP, and `L2TP domain init complete` came just before the partial line, so the line is
+  `Load request for com.apple.nke.pptp failed: <err>`; the console stopped in mid-line when the monitor stopped the run. Harmless.
+- **Memory (INFERRED from VERIFIED code).** `memorystatus: System is unhealthy` with 8838 free pages of 16 KiB (about 138 MiB of the 384 MiB guest) and `wired_mem_exhaustion: 1` ends in `no victim found (action: 10)` and no panic
+  path was read: a warning now, repeated with a back-off, and a blocker for launchd and daemons later. The A16 chain's installed-fresh guest is 8192 MiB (VERIFIED, repo); 384 MiB is the M1 builder's size, chosen to fit
+  the runner's free low extent (590 MiB, OBSERVED). The smallest guest that suffices for launchd is UNKNOWN; 2 GiB in a bank placement is a guess (INFERRED), 8 GiB is the evidence-backed size.
+- **UNKNOWN.** Which of the two waits the film's quiet stretch was (the second is INFERRED by arithmetic only); why the clock driver's start stops; what causes the USB lines at t0 + 31 s; the order of the `IOSurfaceRoot`
+  waiters; what the scaler's register does and how long its firmware wait is; what the monitor's power-manager model returns for the chip-version read; what `AppleT8140CLPC` does with the CPU-initialised resource; which drivers
+  beyond the nine touch hardware after `IOBSD`; the exact threshold of the wired-memory warning; the gates on launchd's path.
+
+## 8. Predictions that were tested (boot 21 to boot 26)
 
 | # | Prediction (where it was made; its label then) | Tested by | Outcome | Label |
 | --- | --- | --- | --- | --- |
@@ -148,22 +193,40 @@ decisions and the expected failures are in [SP11-MONITOR-PORT.md](SP11-MONITOR-P
 | 8 | The rung 5 record: no `cpu 1 failed to boot` panic inside the box (120 s timeout, 60 s box) | boot 25 | held, and not a test of the wait: the box ended first | OBSERVED (no panic text) |
 | 9 | The rung 5 record, from the host analysis: the run may end within seconds of the acknowledged stores at the video decoder's first unmodelled window (IPA `0X380001000`) | boot 25 | did NOT occur: the run lasted the whole box with no stage-2 fault | OBSERVED; whether the decoder driver started at all is UNKNOWN (no line of it was read) |
 | 10 | The analysis after boot 24: the clean end, once the unmodelled devices are passed, is `WATCHDOG` at the box end with a quiet kernel (a silent root-device wait) | boot 25 | held in shape (`WATCHDOG`, about 25 s of silence); the stop PC is the idle path, so which wait it is stays UNKNOWN | OBSERVED (shape); INFERRED (idle) |
-| 11 | The first reading of boot 25: the idle waits for a timer interrupt that the GIC quarantine never delivers | later host reading | not supported by the code (section 7); not refuted by a run either | VERIFIED (the code reading); the delivery UNKNOWN |
+| 11 | The first reading of boot 25: the idle waits for a timer interrupt that the GIC quarantine never delivers | later host reading | not supported by the code (section 7); not refuted by a run either | VERIFIED (the code reading); the delivery UNKNOWN then, the counters OBSERVED and the delivery INFERRED from them in boot 26 (row 14) |
+| 12 | After boot 25 (the rung 6 record): the CPU-start acknowledge is enough to go on, as boot 25 showed in 60 s | boot 26 | held for 61.6 s: the guest made 15 CPU-start stores that the monitor took (`MON ACK COUNT=15`) with nothing started, and went on to `bsd_init`; the kernel's own wait for the CPUs was not tested (row 16) | OBSERVED |
+| 13 | After boot 25 (the host analysis): the 25 s of silence was a wait that ends, so the kernel goes on after it | boot 26 | held: the silence of about 28.5 s ended at t0 + 60.4 s with the burst of `bsd_init` lines | OBSERVED (the end of the silence); INFERRED (that it was the second real-time clock wait, section 7A) |
+| 14 | After boot 25 (the timer design note): the guest's timers work, because the monitor delivers its own EL2 timer as a virtual FIQ (row 11) | boot 26 | held: `VECTORS=969`, `IRQS=1010`, `ASSERTS=CLEARS=2036` and `CTL=0X1` with a deadline about 9.6 ms ahead at the stop; boot 25's silent wait-for-interrupt was a kernel wait and not a dead timer; in hindsight its page would have been the record's class NOT DUE (a deadline armed and not served) | OBSERVED (the counters); INFERRED (that guest timer interrupts reached the kernel, from the vector entries, and the hindsight reading) |
+| 15 | After boot 25: the next stop is an unmodelled device, a stage-2 fault with an IPA (the video decoder ranked first, the scaler second) | boot 26 | held in kind: `MON STOP S2_FAULT` with `A=0X291000004` in the scaler's window; the decoder, ranked first, was not touched before it | OBSERVED (the stop); INFERRED (the decoder not touched, by the fail-closed rule) |
+| 16 | After boot 25 (the rung 6 record): with `cpu_boot_timeout_secs=90` the kernel's panic `cpu 1 failed to boot for the first time, waited 90 seconds` comes at about 92 s, inside the box of 120 s, and proves the timers | boot 26 | NOT TESTED: the run ended at 61.60 s on the scaler stop, 30 s before that time; no panic text of any kind came | OBSERVED (the time of the stop and the absence of text); the prediction itself UNKNOWN |
+| 17 | After boot 25 (the first note of section 9): the RTC lines `... RTC did not show up` and `... "getGMTTimeOfDay" call failed with` would be on the film at about 60 to 65 s | boot 26 | did NOT occur, and could not: they are `kprintf` lines that go to the serial output and not to the video console, so no film can show them (section 7A) | VERIFIED (the code path); OBSERVED (the absence on the film) |
 
 ## 9. The next timed waits, and what would separate the cases (INFERRED; nothing built, nothing approved)
 
-**The next three events after the last line of boot 25** (assuming a working guest timer, which is UNKNOWN):
+**What boot 26 observed after the last line of boot 25, and what comes next** (the timer path is INFERRED to work, from boot 26's counters, which are OBSERVED; the rest INFERRED from VERIFIED code, with the unknowns of section 10):
 
-1. At about 60 to 65 s: the RTC line or lines of the calendar step (`getGMTTimeOfDay`, a 30 s wait for the RTC resource, with `...RTC did not show up` or `... "getGMTTimeOfDay" call failed with %x`), only
-   if `bsd_init` is in that step (UNKNOWN which wait it was in). The step before it, `IOKitInitializeTime`, is a 30 s wait for the same RTC resource (the chain is INFERRED from the public code).
-2. About 30 s after `bsd_init` reaches `IOFindBSDRoot`: `!BSD` if the IOBSD matching is still busy, then `Waiting on <matching dictionary>`. The root-device wait itself prints nothing: `Still waiting for
-   root device` is not in this kernelcache (VERIFIED absence; compiled out for macOS arm64 in the public `IOKitBSDInit.cpp`), and with `wdt=-1` no recovery boot is requested.
-3. At about 2.3 s plus `cpu_boot_timeout_secs`: the panic `cpu 1 failed to boot for the first time, waited N seconds`, then nested panics and the chip-reset read of boot 24 (`MON STOP S2_FAULT`
-   `A=0X3082BC224`). With 120 it fires at about 122 s, which is outside any box the wrapper takes (its cap is 120 s); a smaller `cpu_boot_timeout_secs` brings it inside.
+1. Two real-time clock waits, 0.4 + 30 + 30 = 60.4 s, ended by timeout (the silence of boot 26 ended at t0 + 60.4 s): `IOKitInitializeTime`, a 30 s wait for the `IORTC` resource, then the calendar's first read of the
+   platform clock (`getUTCTimeOfDay`), a second 30 s wait for the same resource; the resource is never published (section 7A). Their messages (`...RTC did not show up` and `... "getGMTTimeOfDay" call failed with %x`)
+   are `kprintf` lines that go to the serial output and not to the video console, so the film cannot show them: the first version of this item expected them on the film, which was wrong (VERIFIED, public source;
+   corrected). No third clock wait follows.
+2. Next, in `IOFindBSDRoot`, a stall of up to 30 s on the IOBSD resource (short in practice), `!BSD` only if an IOBSD-matched start hangs, then `Waiting on <matching dictionary>`, the one visible line. The root-device wait
+   itself then prints nothing, in silent 60 s loops without end: `Still waiting for
+   root device` is not in this kernelcache (VERIFIED absence; compiled out for macOS arm64 in the public `IOKitBSDInit.cpp`), and with `wdt=-1` no recovery boot is requested, and no panic. A run that no unmodelled device
+   stops first ends in that loop, with `Waiting on <matching dictionary>` as its last text, at the box's end.
+3. The CPU wait. The CPU-boot thread's wait starts after the last acknowledged store, at about 2.3 s, and ends in the panic `cpu 1 failed to boot for the first time, waited N seconds` at about 2.3 s plus
+   `cpu_boot_timeout_secs`, then nested panics and the chip-reset read of boot 24 (`MON STOP S2_FAULT` `A=0X3082BC224`). With 120 it fires at about 122 s, which is outside any box the wrapper takes (its cap is 120 s);
+   with 90, rung 6's word, at about 92 s, inside the box of 120 s, which boot 26 did not reach (its stop was at 61.60 s). The wait blocks only that thread (no lock is held) and the starts of three kexts that
+   import the CPU-initialised resource, the watchdog timer's, the processor trace's and the CLPC's (what the last one does with it was not read: UNKNOWN); nothing on the root or launchd path was found (launchd's exec path
+   was not examined).
+4. The other `IOSurfaceRoot` waiters, released with the scaler (section 7A). The host list ranks them by their chance to end the run (INFERRED): the video decoder (a stage-2 fault at its window, `0x380001000`, high), the
+   `apr` node (low to medium) and the JPEG engines (four nodes, low to medium) can stop it; the video encoders, the display controller and the display coprocessor's driver wait (for a power state and a firmware
+   that never wakes) and are not expected to. With the scaler and the decoder withdrawn by data, the expected clean end is the CPU panic or the box's end, last text `Waiting on <matching dictionary>`; a stage-2 fault with an
+   IPA in the JPEG, encoder or display windows would name the row that stopped it.
 
 The kernel prints nothing when I/O Kit quiesces (the `Waiting for matching to complete` literal exists but needs a debug flag).
 
-**What would separate "the timer works and the kernel waits for something else" from "no timer fires"** (the timer design note; INFERRED). The monitor's report window already exports the guest-timer words, and a
+**What would have separated "the timer works and the kernel waits for something else" from "no timer fires"** (the timer design note; INFERRED; settled by boot 26: the first case holds by the counters, INFERRED; the reporter printed the
+words). The monitor's report window already exports the guest-timer words, and a
 reporter that prints them is the missing piece: no monitor change, no new store class, a new record. Read against the clock adapter's words, the page then says one of four things: the timer works (interrupts and
 vector entries counted, or a far deadline armed), nothing is armed (the kernel waits for another interrupt, which is not a timer matter), a deadline was armed and no tick came (the monitor's wake of an idle CPU is
 the suspect), or the virtual FIQ was asserted and never taken (the architecture says a pending masked interrupt completes a WFI; Oryon v1 is UNKNOWN). A gated trace and a gated wake cap are options only after a
@@ -178,18 +241,24 @@ difference (`MIDR_EL1` differs on clusters 1 and 2, and the NV2, timer and PPI m
 
 ## 10. Open UNKNOWNs
 
-- What the idle thread of boot 25 waits for, and whether any guest timer interrupt was delivered (the page prints no timer word).
+- What the kernel waits for in each of its timed waits is now read (section 7A); what stays open is why the real-time clock driver's start stops before it publishes `IORTC`, which of the two clock waits the film's
+  quiet stretch was (the second is INFERRED by arithmetic), and what causes the USB lines at t0 + 31 s. That guest timer interrupts are delivered is INFERRED from boot 26's counters (`VECTORS=969`, OBSERVED once), and no longer open as a question.
 - What `_cpuComplexCount` was at boot 24's stop, the initialiser of the driver's mode word, and whether real hardware with `cpus=1` asserts the same way.
-- Which kexts wait for `IOAllCPUInitialized` (published only after `sched_cpu_init_completed` returns), and what the kernel does at its next timer expiry.
+- Which kexts wait for `IOAllCPUInitialized` (published only after `sched_cpu_init_completed` returns): four kexts import its name, the platform driver that publishes it and the watchdog timer, processor trace and
+  CLPC kexts (VERIFIED by a scan of the kexts' imports); what the CLPC kext does with it, and whether the CPU wait would panic at about 92 s with a word of 90, are UNKNOWN (boot 26 ended at 61.60 s).
 - The run-time value of the CoreSight guard byte that `cpu_start` tests, and the defaults of the power-manager hook flags; whether other CPU-event listeners do MMIO when a secondary becomes active (the
   seven callbacks found are inert for the events a CPU start broadcasts: VERIFIED for those found; the search is INFERRED to be complete).
-- Which of the driver families with unmodelled device windows would stop a longer run: the host list ranks them, and only the first (the video decoder) had an explicit A16 statement; the
-  order is UNKNOWN, and boot 25 did not reach any of them within the box.
-- The unreadable parts of the run: the value of the stores, the count the acknowledge took, the last digits of `C=` on a long line, the `REPORT.DAT` ring beyond the first 1 KiB (a run does not write it back).
+- Which of the driver families with unmodelled device windows would stop a longer run: boot 26 reached the first (the scaler, ranked second by the host list; the decoder ranked first was not touched before it). The order in which
+  the other `IOSurfaceRoot` waiters run after `IOBSD`, which of them touches an unmodelled window next, and which drivers beyond the nine touch hardware after `IOBSD` are UNKNOWN.
+- What the scaler's register does, how long its firmware-acknowledge wait is, and what the monitor's power-manager model returns for the chip-version read the driver makes.
+- The smallest guest that is enough for launchd (384 MiB draws the kernel's memory warning; the A16 chain's guest is 8192 MiB), the exact threshold of the wired-memory warning, and the gates on launchd's path.
+- The unreadable parts of the runs: the value of the stores, the last digits of `C=` on a long line, the `REPORT.DAT` ring beyond the first 1 KiB (a run does not write it back). The count the acknowledge took is
+  OBSERVED in boot 26 (`MON ACK COUNT=15`).
 
 ## 11. Adding a stop to this note
 
 A new section for a new boot keeps this shape: the page values as read (OBSERVED, one boot), what was read on the host (VERIFIED, with the sources named and no kernelcache bytes or listings), the
 causes (INFERRED, with their strength), the predictions that the boot tested (a row in section 8, with the label of the outcome and what stays open), the UNKNOWNs (section 10), and the next waits or options
 (INFERRED, none a decision). The page and the film belong in [SP11-STICK-LOG.md](SP11-STICK-LOG.md) and the plan and decisions in [SP11-MONITOR-PORT.md](SP11-MONITOR-PORT.md); this note holds only the
-kernel's side of the stop. A label is never raised: a host read is VERIFIED only as "read on the host", never as "ran on the unit".
+kernel's side of the stop. A label is never raised: a host read is VERIFIED only as "read on the host", never as "ran on the unit". Section numbers that other documents cite stay fixed, so a later stop takes the
+next letter after section 7 (7A for boot 26, 7B for the next) and its row goes to section 8, rather than renumbering; a stop that the host analysis corrects states the correction in the section it corrects and in section 8.
