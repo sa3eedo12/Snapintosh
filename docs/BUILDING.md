@@ -73,26 +73,34 @@ python3 tools/test-extract-basesystem.py                 # host tests on synthet
 over Range requests (hard cap `--max-fetch-mib`, default 1300), makes ONE unauthenticated request to the key URL named in the
 member (host `wkms-public.apple.com`, no retry, no other source; `--key-redirects N` is the operator's explicit allowance for N
 redirect hops to https hosts under Apple's own domains `apple.com` and `cdn-apple.com`, default 0; the real key service answered
-its first request with a 301 to a `cdn-apple.com` host, OBSERVED once), opens the wrapped key with HPKE, streams the member to disk checking its SHA-384 against the manifest,
+its first request with a 301 to a `cdn-apple.com` host, OBSERVED once), opens the wrapped key with HPKE, streams the member to disk checking its size and the zip's CRC-32 (the transfer's integrity; the manifest's SHA-384 of the member is compared and reported, see below),
 runs `aea decrypt` with the key in a 0600 file under `build/`, converts the UDIF image to the raw container with `hdiutil convert
--format UDTO` and checks it against the profile pin (size a multiple of 16 KiB, `NXSB` at byte 32, 4096-byte blocks, SHA-256).
+-format UDTO` (a GUID-partitioned image, which Apple's BaseSystem is, has its one Apple APFS partition sliced out after both GPT
+CRC-32s have been checked) and checks it against the profile pin (size a multiple of 16 KiB, `NXSB` at byte 32, 4096-byte blocks, SHA-256).
+The manifest's SHA-384 of `BaseSystem` is compared with the member and then with the unwrapped image and each result is printed,
+not enforced: on the real archive the member's SHA-384 was NOT the manifest's and the unwrapped image's was (OBSERVED: the manifest
+digest covers the unwrapped image); what is enforced is the size and CRC-32 of the member, the archive's own authentication (checked
+by `aea decrypt`) and the raw image's pin.
 Each intermediate is deleted the moment the next stage is verified, no stage runs that would leave less than
 `--min-free-gib` (default 25) free, and the key is never printed. Without `--fetch` it stops after the plan. Disk (INFERRED from the
 sizes): the member is 1.22 GiB, and while the unwrapped image is converted it sits beside the raw image (1,776 MiB in the A16
 history), so the flow needs at most about 28.5 GiB free at the start to keep the default 25 GiB floor. A stop never loses the one
 key request: the 0600 key file stays until the decrypt has succeeded and a stop after the decrypt keeps the unwrapped image, so a
-re-run continues from what is on disk (a key file is validated and reused, an archive is re-checked against the manifest, an
+re-run continues from what is on disk (a key file is validated and reused, an archive is re-checked against its size and CRC-32, an
 unwrapped image goes straight to the conversion). A leftover it cannot continue from (an archive without its key file, an archive
 beside an unwrapped image) is refused and never deleted; deleting the key file to start over makes a new key request a new decision.
 
 Evidence, 2026-11-19. VERIFIED (read on the host): the member names, the root-hash payload (208 bytes) and the trust cache
 (26,496 bytes, 1,103 entries) of the 26A428 image match the profile pins; the AEA header is profile 1 with the key URL, a 65-byte
-encapsulation and a 48-byte wrapped key; the tool's tests (`tools/test-extract-basesystem.py`) pass on synthetic archives, with
-the real `aea` and `hdiutil` and a local HPKE key. OBSERVED (one run): the key URL answered HTTP 301 to a request that did not
-follow redirects, so no key was obtained and the root was never fetched; the redirect's Location was not recorded. UNKNOWN:
-whether following the redirect returns the key, the HPKE parameters for the real archive (the tool uses empty info, as the public
-blacktop/ipsw client does), the unwrapped image's format and whether its raw form equals the pin. A partition-mapped image is
-refused, not sliced (UNIMPLEMENTED). Everything this writes is Apple's and stays under git-ignored `downloads/`.
+encapsulation and a 48-byte wrapped key; the tool's tests (`tools/test-extract-basesystem.py`, `tools/test-extract-basesystem-gpt.py`)
+pass on synthetic archives and on a real small GUID-partitioned APFS image, with the real `aea` and `hdiutil` and a local HPKE key.
+OBSERVED (real run, one Mac, 2026-11-19): the key service answered its first request with an HTTP 301 to
+`fcs-keys-pub-prod.cdn-apple.com`, and the redirect target answered 200 with the key (HPKE, empty info, opened the wrapped key);
+161 Range requests fetched 1,314,860,164 bytes; the member's size and zip CRC-32 held; its SHA-384 (`a928139f...`) is NOT the manifest's
+(`d2a4ffea...`); `aea decrypt` authenticated and wrote a 1,826,560,512-byte UDIF image whose SHA-384 IS the manifest's (so the manifest
+digest covers the unwrapped image, not the encrypted member); the image is a GUID-partitioned disk (MBR, GPT, one Apple_APFS partition
+at sectors 34 to 3,637,281, backup GPT), and the sliced partition is 1,862,270,976 bytes with SHA-256 `7cab6d69...` = the profile pin.
+Other partition schemes (an Apple partition map) are still refused. Everything this writes is Apple's and stays under git-ignored `downloads/`.
 
 Install the 26A428 KDK from Apple's developer downloads.
 

@@ -57,7 +57,9 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import zipfile
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -431,8 +433,9 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def stream_member(members, name, destination, expect_sha384, disk, progress=None):
-    """The member to disk in 8 MiB steps, its SHA-384 and size checked; a failure removes the partial file."""
+def stream_member(members, name, destination, disk, progress=None):
+    """The member to disk in 8 MiB steps; its size and the zip's own CRC-32 (transport integrity) are checked, and a failure removes the
+    partial file. Returns its SHA-384, which the caller compares with the manifest: the digest is reported, not enforced here."""
     info = members.getinfo(name)
     if info.compress_type != zipfile.ZIP_STORED:
         raise Refusal(f'{name} is not stored in the archive: refused')
@@ -441,12 +444,13 @@ def stream_member(members, name, destination, expect_sha384, disk, progress=None
         out = open(destination, 'xb')
     except FileExistsError:
         raise Refusal(f'{destination.name} already exists: delete it, or finish the earlier run, first') from None
-    digest, done = hashlib.sha384(), 0
+    digest, crc, done = hashlib.sha384(), 0, 0
     with out:
         try:
             with members.open(name) as source:
                 for block in iter(lambda: source.read(CHUNK), b''):
                     digest.update(block)
+                    crc = zlib.crc32(block, crc)
                     out.write(block)
                     done += len(block)
                     if done % (64 * MIB) < CHUNK:
@@ -455,26 +459,48 @@ def stream_member(members, name, destination, expect_sha384, disk, progress=None
                             progress(done, info.file_size)
             out.flush()
             os.fsync(out.fileno())
+        except zipfile.BadZipFile as error:
+            destination.unlink(missing_ok=True)
+            raise Refusal(f'the fetched member failed the zip integrity check ({error}): deleted') from None
         except BaseException:
             destination.unlink(missing_ok=True)
             raise
-    if done != info.file_size or digest.digest() != expect_sha384:
+    if done != info.file_size or crc != info.CRC:
         destination.unlink(missing_ok=True)
-        raise Refusal(f'the fetched member is {done:,} B with SHA-384 {digest.hexdigest()[:16]}..., not what the manifest lists: deleted')
-    return done
+        raise Refusal(f'the fetched member is {done:,} B with CRC-32 {crc:#010x}, the archive lists {info.file_size:,} B and {info.CRC:#010x}: deleted')
+    return digest.digest()
 
 
-def verify_member(path, size, expect_sha384):
-    """An archive left by an earlier run, checked against the manifest the way a fresh one is; never deleted or repaired here."""
-    found = path.stat().st_size
-    if found != size:
-        raise Refusal(f'{path.name} is {found:,} B, the manifest lists {size:,}: a partial file; delete it and re-run')
-    digest = hashlib.sha384()
+def file_digests(path):
+    """(CRC-32, SHA-384 bytes) of a file, read in blocks."""
+    digest, crc = hashlib.sha384(), 0
     with open(path, 'rb') as stream:
         for block in iter(lambda: stream.read(CHUNK), b''):
             digest.update(block)
-    if digest.digest() != expect_sha384:
-        raise Refusal(f'{path.name} is not what the manifest lists (SHA-384 {digest.hexdigest()[:16]}...); delete it and re-run')
+            crc = zlib.crc32(block, crc)
+    return crc, digest.digest()
+
+
+def verify_member(path, info):
+    """An archive left by an earlier run, checked against the archive's own size and CRC-32 the way a fresh one is; never deleted or
+    repaired here. Returns its SHA-384."""
+    found = path.stat().st_size
+    if found != info.file_size:
+        raise Refusal(f'{path.name} is {found:,} B, the archive lists {info.file_size:,}: a partial file; delete it and re-run')
+    crc, digest = file_digests(path)
+    if crc != info.CRC:
+        raise Refusal(f'{path.name} fails the archive\'s CRC-32 ({crc:#010x}, listed {info.CRC:#010x}); delete it and re-run')
+    return digest
+
+
+def say_manifest(label, digest, expected):
+    """The manifest's SHA-384 compared with a digest of the member or of the unwrapped image: reported, never enforced. The final pin on
+    the raw image (SHA-256, the profile's) is what decides."""
+    if digest == expected:
+        print(f'{label}: SHA-384 matches the manifest')
+        return True
+    print(f'{label}: SHA-384 {digest.hex()[:16]}... is not the manifest\'s {expected.hex()[:16]}...')
+    return False
 
 
 def run_watched(argv, output, disk, poll=0.5):
@@ -517,11 +543,13 @@ def image_info(dmg):
 
 
 def convert_udif(dmg, destination, disk):
-    """The UDIF image to the raw container at `destination` (hdiutil convert -format UDTO writes <base>.cdr, renamed)."""
+    """The UDIF image to the raw container at `destination` (hdiutil convert -format UDTO writes <base>.cdr, renamed). A bare APFS image
+    is renamed as it is; a GUID-partitioned one (Apple's BaseSystem is: MBR, GPT, one Apple_APFS partition, backup GPT) has its single
+    APFS partition sliced out, after both GPT CRC-32s have been checked."""
     fmt, scheme, total = image_info(dmg)
-    if scheme != 'none':
-        raise Refusal(f'the unwrapped image has partition scheme {scheme!r}, not a bare APFS container: slicing is not implemented')
-    disk.room(destination.parent, total or 0, 'converting the image')
+    if scheme not in ('none', 'GUID'):
+        raise Refusal(f'the unwrapped image has partition scheme {scheme!r}, neither a bare APFS container nor a GUID map: not implemented')
+    disk.room(destination.parent, (total or 0) * (2 if scheme == 'GUID' else 1), 'converting the image')
     base = destination.with_name(destination.name + '.part')
     produced = base.with_name(base.name + '.cdr')
     produced.unlink(missing_ok=True)                  # this function's own scratch name, only ever complete after the rename below
@@ -529,8 +557,74 @@ def convert_udif(dmg, destination, disk):
     if code or not produced.exists():
         produced.unlink(missing_ok=True)
         raise Refusal(f'hdiutil convert failed ({code}): {errors.strip()[:200]}')
+    if scheme == 'GUID':
+        try:
+            first, last = apfs_partition(produced)
+            slice_file(produced, destination, first * GPT_SECTOR, (last + 1 - first) * GPT_SECTOR, disk)
+        finally:
+            produced.unlink(missing_ok=True)
+        return f'{fmt}, GUID map: the APFS partition (sectors {first} to {last}) sliced out'
     os.replace(produced, destination)
     return fmt
+
+
+GPT_SECTOR = 512
+APFS_PARTITION_TYPE = uuid.UUID('7C3457EF-0000-11AA-AA11-00306543ECAC').bytes_le
+
+
+def apfs_partition(path):
+    """(first LBA, last LBA) of the one Apple APFS partition of a raw GPT disk image; the GPT header and entry array CRC-32s must hold,
+    the partition must lie inside the usable range and the file, and there must be exactly one."""
+    size = Path(path).stat().st_size
+    with open(path, 'rb') as stream:
+        stream.seek(GPT_SECTOR)
+        head = stream.read(GPT_SECTOR)
+        if len(head) < 92 or head[:8] != b'EFI PART':
+            raise Refusal('the raw disk image has no GPT header at LBA 1')
+        header_size, header_crc = struct.unpack_from('<II', head, 12)
+        if not 92 <= header_size <= GPT_SECTOR or zlib.crc32(head[:16] + bytes(4) + head[20:header_size]) != header_crc:
+            raise Refusal('the GPT header fails its CRC-32')
+        usable_first, usable_last = struct.unpack_from('<QQ', head, 40)
+        entries_lba, count, entry_size, entries_crc = struct.unpack_from('<QIII', head, 72)
+        if entry_size != 128 or not 1 <= count <= 1024 or (entries_lba + (count * entry_size + GPT_SECTOR - 1) // GPT_SECTOR) * GPT_SECTOR > size:
+            raise Refusal('the GPT entry array is not 128-byte entries inside the file')
+        stream.seek(entries_lba * GPT_SECTOR)
+        entries = stream.read(count * entry_size)
+    if len(entries) != count * entry_size or zlib.crc32(entries) != entries_crc:
+        raise Refusal('the GPT entry array fails its CRC-32')
+    found = []
+    for at in range(0, len(entries), entry_size):
+        if entries[at:at + 16] == APFS_PARTITION_TYPE:
+            found.append(struct.unpack_from('<QQ', entries, at + 32))
+    if len(found) != 1:
+        raise Refusal(f'the GPT holds {len(found)} Apple APFS partitions, expected exactly one')
+    first, last = found[0]
+    if not usable_first <= first <= last <= usable_last or (last + 1) * GPT_SECTOR > size:
+        raise Refusal('the APFS partition lies outside the GPT usable range or the file')
+    return first, last
+
+
+def slice_file(source, destination, offset, length, disk):
+    """`length` bytes of `source` from `offset` to a new file `destination` (renamed from <destination>.slice when complete)."""
+    part = destination.with_name(destination.name + '.slice')
+    part.unlink(missing_ok=True)
+    disk.room(destination.parent, length, 'slicing the APFS partition')
+    try:
+        with open(source, 'rb') as stream, open(part, 'xb') as out:
+            stream.seek(offset)
+            left = length
+            while left:
+                block = stream.read(min(CHUNK, left))
+                if not block:
+                    raise Refusal('the raw disk image ended inside the APFS partition')
+                out.write(block)
+                left -= len(block)
+            out.flush()
+            os.fsync(out.fileno())
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    os.replace(part, destination)
 
 
 def check_raw(path, spec):
@@ -670,11 +764,12 @@ def run(args, remote_factory=None, profile_factory=None, key_transport=None, dec
                 save_key(keys, archive_key)
             try:
                 if have_aea:
-                    verify_member(aea_path, info.file_size, located.aea_sha384)
+                    member_digest = verify_member(aea_path, info)
                 else:
-                    stream_member(members, located.aea, aea_path, located.aea_sha384, disk,
-                                  lambda done, total: print(f'  fetched {done / MIB:,.0f} of {total / MIB:,.0f} MiB', flush=True))
-                print(f'{aea_path.name}: SHA-384 matches the manifest')
+                    member_digest = stream_member(members, located.aea, aea_path, disk,
+                                                  lambda done, total: print(f'  fetched {done / MIB:,.0f} of {total / MIB:,.0f} MiB', flush=True))
+                print(f'{aea_path.name}: size and the archive\'s CRC-32 verified')
+                say_manifest(aea_path.name, member_digest, located.aea_sha384)
                 (decrypt or aea_decrypt)(aea_path, dmg_path, key_path, disk, args.threads)
             except BaseException:
                 print('the 0600 key file stays, so a re-run needs no new key request (delete it to start over)', file=sys.stderr)
@@ -682,6 +777,7 @@ def run(args, remote_factory=None, profile_factory=None, key_transport=None, dec
             key_path.unlink()
             aea_path.unlink()
             print(f'decrypted: {dmg_path.name} {dmg_path.stat().st_size:,} B; the key file and {aea_path.name} are deleted')
+        say_manifest(f'{dmg_path.name} (unwrapped)', file_digests(dmg_path)[1], located.aea_sha384)
         fmt = (convert or convert_udif)(dmg_path, image, disk)
         try:
             size, digest = check_raw(image, spec)

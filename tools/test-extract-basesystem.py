@@ -656,14 +656,33 @@ class B_Flow(unittest.TestCase):
         self.assertIn('-> HTTP 301', out)
         self.assertIn('-> HTTP 200', out)
 
-    def test_a_manifest_digest_that_is_not_the_member_deletes_the_partial_file_and_keeps_the_key_file(self):
+    def test_a_manifest_digest_that_is_not_the_member_is_reported_and_the_pin_decides(self):
         flow = Flow('digest', data=build_zip(F.aea, F.root_im4p, F.cache_im4p, digest=bytes(48)))
         code, out, err = flow.go()
+        self.assertEqual((code, err), (0, ''), out)
+        self.assertEqual(out.count('is not the manifest'), 2, 'the member and the unwrapped image are both compared and both reported')
+        self.assertNotIn('SHA-384 matches the manifest', out)
+        self.assertEqual((flow.out / 'basesystem-26A428.apfs').read_bytes(), F.raw)
+        self.assertEqual((flow.left(flow.work), flow.left(flow.keys)), ([], []))
+
+    def test_a_manifest_digest_of_the_unwrapped_image_is_recognised(self):
+        dmg = (BUILD / 'fixture' / 'image.dmg').read_bytes()
+        flow = Flow('imagedigest', data=build_zip(F.aea, F.root_im4p, F.cache_im4p, digest=hashlib.sha384(dmg).digest()))
+        code, out, err = flow.go()
+        self.assertEqual((code, err), (0, ''), out)
+        self.assertEqual(out.count('is not the manifest'), 1)
+        self.assertIn('(unwrapped): SHA-384 matches the manifest', out)
+
+    def test_a_member_that_fails_the_archive_crc_is_deleted_and_the_key_file_stays(self):
+        zipped = bytearray(build_zip(F.aea, F.root_im4p, F.cache_im4p))
+        at = bytes(zipped).index(F.aea[1000:1064]) + 7              # inside the stored member: its CRC-32 in the headers no longer fits
+        zipped[at] ^= 0x55
+        flow = Flow('crc', data=bytes(zipped))
+        code, out, err = flow.go()
         self.assertEqual(code, 1)
-        self.assertIn('not what the manifest lists', err)
+        self.assertIn('zip integrity check', err)
         self.assertIn('needs no new key request', err)
-        self.assertEqual((flow.left(flow.work), flow.left(flow.keys), flow.left(flow.out)), ([], ['basesystem.key'], []),
-                         'the partial archive is deleted, the key file stays')
+        self.assertEqual((flow.left(flow.work), flow.left(flow.keys), flow.left(flow.out)), ([], ['basesystem.key'], []))
 
     def test_a_key_that_opens_but_does_not_decrypt_keeps_the_archive_and_the_key_file(self):
         flow = Flow('wrongkey', data=build_zip(F.aea_wrongkey, F.root_im4p, F.cache_im4p))
@@ -675,10 +694,12 @@ class B_Flow(unittest.TestCase):
         self.assertNotIn(F.other_key.hex(), out + err)
 
     def test_a_failure_after_the_key_request_is_resumed_without_a_second_request(self):
-        flow = Flow('resume-stream', data=build_zip(F.aea, F.root_im4p, F.cache_im4p, digest=bytes(48)))
+        corrupt = bytearray(F.zip)
+        corrupt[bytes(corrupt).index(F.aea[1000:1064]) + 7] ^= 0x55      # a transfer error inside the stored member
+        flow = Flow('resume-stream', data=bytes(corrupt))
         code, out, err = flow.go()
         self.assertEqual((code, flow.left(flow.work), flow.left(flow.keys)), (1, [], ['basesystem.key']))
-        flow.fake = tir.FakeTransport(F.zip)                     # the same IPSW, now with the right digest
+        flow.fake = tir.FakeTransport(F.zip)                     # the same IPSW, now served intact
         flow.hooks['remote_factory'] = tir.factory(flow.fake, block=BLOCK)
         code, out, err = flow.go()
         self.assertEqual((code, err), (0, ''), out)
@@ -728,7 +749,7 @@ class B_Flow(unittest.TestCase):
         flow.keys.mkdir()
         tool.save_key(flow.keys, F.key)
         for label, data, expect in (('one byte short', F.aea[:-1], 'a partial file'),
-                                    ('one byte changed', F.aea[:-1] + bytes([F.aea[-1] ^ 1]), 'is not what the manifest lists')):
+                                    ('one byte changed', F.aea[:-1] + bytes([F.aea[-1] ^ 1]), 'fails the archive')):
             with self.subTest(label):
                 (flow.work / AEA_NAME).write_bytes(data)
                 code, out, err = flow.go()
