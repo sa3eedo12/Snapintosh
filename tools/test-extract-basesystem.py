@@ -347,7 +347,15 @@ class A_Rules(unittest.TestCase):
         service = tool.KeyService(transport, redirects=1)
         self.assertEqual(service.fetch(KEY_URL), b'pem')
         self.assertEqual([url for url, _ in transport.calls], [KEY_URL, 'https://wkms-public.apple.com/fcs-keys/elsewhere/'])
-        self.assertEqual(len(service.trace), 2)
+        self.assertEqual(len(service.trace), 3)
+        self.assertIn('redirect target: https://wkms-public.apple.com/fcs-keys/elsewhere/<0 characters>', service.trace[1])
+        for label, shown in {'https://evil.example/x?k=v': 'redirect target: https://evil.example/<1 characters> with a query',
+                             'http://wkms-public.apple.com/x': 'redirect target: http://wkms-public.apple.com/<1 characters>',
+                             'https://wkms-public.apple.com:443/x': 'redirect target: https://wkms-public.apple.com:443/<1 characters>'}.items():
+            service = tool.KeyService(KeyTransport((301, {'Location': label}, b''), ok(b'pem')), redirects=1)
+            with self.subTest(label), self.assertRaises(tool.KeyServiceRefusal):
+                service.fetch(KEY_URL)
+            self.assertEqual(service.trace[1], shown, 'a refused target is shown to the operator, without any query value')
         for label, location in {'other host': 'https://evil.example/x', 'plain http': 'http://wkms-public.apple.com/x',
                                 'credentials': 'https://u@wkms-public.apple.com/x', 'port': 'https://wkms-public.apple.com:9/x'}.items():
             transport = KeyTransport((302, {'Location': location}, b''), ok(b'pem'))

@@ -272,6 +272,18 @@ def shape(url):
     return f'{parts.scheme}://{parts.hostname}{parts.path.rsplit("/", 1)[0]}/<{len(parts.path.rsplit("/", 1)[1])} characters>'
 
 
+def describe_target(url):
+    """A redirect target as the operator may read it: scheme, host, port, the path without its last segment, no query value."""
+    parts = urllib.parse.urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError:
+        port = 'invalid'
+    head, _, last = parts.path.rpartition('/')
+    return (f'{parts.scheme or "no-scheme"}://{parts.hostname or "no-host"}' + (f':{port}' if port is not None else '') + f'{head}/<{len(last)} characters>'
+            + (' with a query' if parts.query else '') + (' with credentials' if parts.username else ''))
+
+
 def urllib_transport(url, agent, timeout):
     """One GET, redirects not followed, any HTTP status returned as (status, headers, body prefix)."""
     class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -319,6 +331,7 @@ class KeyService:
             location = {k.lower(): v for k, v in headers.items()}.get('location')
             if 300 <= status < 400 and location and hops < self.redirects:
                 url, hops = urllib.parse.urljoin(url, location), hops + 1
+                self.trace.append(f'redirect target: {describe_target(url)}')
                 check_redirect(url)
                 continue
             text = ''.join(chr(c) if 32 <= c < 127 or c in (10, 13) else '.' for c in body[:300])
