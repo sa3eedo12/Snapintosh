@@ -108,6 +108,28 @@ The GPU and Wi-Fi firmware is supplied on the q1n1 side. See q1n1's
 documentation and the "Bring your own Apple software" section of the
 [README](../README.md).
 
+### The ISC image (optional: the RAM-root route)
+
+The RAM-root route also carries a second raw APFS container, the ISC, with three empty volumes whose roles are xART (256),
+Preboot (16) and Hardware (320); `tools/cycle_lib/speed_test.py` (`isc_roles`) demands exactly that set. A macOS host builds one
+from nothing with the host tool that also stamps the one-volume xART fixture:
+
+```sh
+python3 tools/make-isc-fixture.py --build-three-role build/isc-three-role.apfs   # sparse, 1.5 GiB; --size-mib 1025 to 2048
+python3 tools/make-isc-fixture.py --three-role SOURCE OUTPUT --source-sha256 <hex>   # the stamp alone, no macOS tool
+ISC_FIXTURE_HOST_TOOLS=1 python3 tools/test-bootmedia.py   # adds the tests that attach a scratch image under build/
+```
+
+It creates a sparse file under `build/`, attaches only that file with `hdiutil attach -nomount`, formats it with
+`newfs_apfs -C` and `-A` on that image's own nodes, detaches it and proves the detach. The formatter creates Preboot (`-R b`)
+and Hardware (`-R h`) itself and refuses xART (`newfs_apfs -R x`, `diskutil apfs addVolume -role X` and
+`diskutil apfs changeVolumeRole X` all fail for an unprivileged caller), so the tool writes 0x100 into the unmounted copy and
+recomputes the block checksum, exactly as for the one-volume fixture. A container of three volumes must be larger than 1 GiB:
+the formatter allows ceil(size / 512 MiB) volumes (OBSERVED, macOS 27.3). VERIFIED on the host (macOS 27.3): `isc_roles` reads
+back exactly {256, 16, 320}, the stamped container attaches read-only, lists the three roles and passes `fsck_apfs -n`.
+UNKNOWN until a boot: whether the guest accepts empty volumes carrying these roles. The image is a git-ignored local artifact; its
+volume UUIDs are random, so two builds differ.
+
 ### Generated inputs that are not in the repository
 
 Some build inputs are derived from Apple software. They are not distributed,
