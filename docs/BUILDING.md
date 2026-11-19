@@ -72,7 +72,8 @@ python3 tools/test-extract-basesystem.py                 # host tests on synthet
 `--fetch` reads three small members and the BaseSystem member (`022-20292-673.dmg.aea`, 1,308,622,848 bytes, stored in the zip)
 over Range requests (hard cap `--max-fetch-mib`, default 1300), makes ONE unauthenticated request to the key URL named in the
 member (host `wkms-public.apple.com`, no retry, no other source; `--key-redirects N` is the operator's explicit allowance for N
-redirect hops, default 0), opens the wrapped key with HPKE, streams the member to disk checking its SHA-384 against the manifest,
+redirect hops to https hosts under Apple's own domains `apple.com` and `cdn-apple.com`, default 0; the real key service answered
+its first request with a 301 to a `cdn-apple.com` host, OBSERVED once), opens the wrapped key with HPKE, streams the member to disk checking its SHA-384 against the manifest,
 runs `aea decrypt` with the key in a 0600 file under `build/`, converts the UDIF image to the raw container with `hdiutil convert
 -format UDTO` and checks it against the profile pin (size a multiple of 16 KiB, `NXSB` at byte 32, 4096-byte blocks, SHA-256).
 Each intermediate is deleted the moment the next stage is verified, no stage runs that would leave less than

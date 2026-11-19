@@ -68,6 +68,7 @@ MIB, GIB = 1 << 20, 1 << 30
 DEFAULT_PROFILE = 'j700ap-26A428'
 VARIANT = 'macOS Customer'
 KEY_HOST = 'wkms-public.apple.com'
+REDIRECT_DOMAINS = ('apple.com', 'cdn-apple.com')       # Apple's own; the key service's first answer is a 301 to fcs-keys-pub-prod.cdn-apple.com (OBSERVED once, 2026-11-19)
 KEY_PREFIX = '/fcs-keys/'
 KEY_BODY_MAX = 8192
 USER_AGENT = 'snapintosh-extract-basesystem'
@@ -256,15 +257,16 @@ def check_key_url(url):
 
 
 def check_redirect(url):
-    """A redirect hop the operator allowed: https, a host under apple.com, no credentials or port."""
+    """A redirect hop the operator allowed: https, a host under Apple's own domains (REDIRECT_DOMAINS), no credentials or port."""
     parts = urllib.parse.urlsplit(url)
     try:
         port = parts.port
     except ValueError:
         port = -1
     host = parts.hostname or ''
-    if parts.scheme != 'https' or not (host == 'apple.com' or host.endswith('.apple.com')) or parts.username or port is not None:
-        raise KeyServiceRefusal('a redirect target is not https on apple.com without credentials or port: refused, not requested')
+    if parts.scheme != 'https' or not any(host == d or host.endswith('.' + d) for d in REDIRECT_DOMAINS) or parts.username or port is not None:
+        raise KeyServiceRefusal('a redirect target is not https on an Apple domain (apple.com, cdn-apple.com) without credentials or port: '
+                                'refused, not requested')
 
 
 def shape(url):
@@ -304,7 +306,7 @@ class KeyService:
 
     No retry, no other endpoint, no database. A status other than 200 raises with every response header and, for an error
     page, its first bytes, so the refusal says exactly what came back. Redirects are not followed unless the operator allows
-    N hops (--key-redirects): each hop must be https on apple.com and is a request of its own, and is traced.
+    N hops (--key-redirects): each hop must be https on an Apple domain (apple.com, cdn-apple.com) and is a request of its own, and is traced.
     """
 
     def __init__(self, transport=None, redirects=0, timeout=60):
@@ -705,7 +707,7 @@ def main(argv=None, **hooks):
     ap.add_argument('--fetch', action='store_true', help='make the key request, fetch the member and unwrap it (default: plan only)')
     ap.add_argument('--max-fetch-mib', type=int, default=DEFAULT_CAP_MIB, help='hard cap on bytes read from the IPSW (default %(default)s)')
     ap.add_argument('--min-free-gib', type=float, default=DEFAULT_FLOOR_GIB, help='refuse a stage that leaves less free disk (default %(default)s)')
-    ap.add_argument('--key-redirects', type=int, default=0, help='redirect hops the key request may follow, https on apple.com (default 0: none)')
+    ap.add_argument('--key-redirects', type=int, default=0, help='redirect hops the key request may follow, https on an Apple domain (default 0: none)')
     ap.add_argument('--threads', type=int, default=4, help='aea worker threads (default %(default)s)')
     ap.add_argument('--out', help='output directory (default downloads/extracted/<profile board>)')
     ap.add_argument('--work', default=str(ROOT / 'downloads'), help='where the member and the unwrapped image live meanwhile')

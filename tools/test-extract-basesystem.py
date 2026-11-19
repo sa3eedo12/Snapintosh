@@ -357,11 +357,18 @@ class A_Rules(unittest.TestCase):
                 service.fetch(KEY_URL)
             self.assertEqual(service.trace[1], shown, 'a refused target is shown to the operator, without any query value')
         for label, location in {'other host': 'https://evil.example/x', 'plain http': 'http://wkms-public.apple.com/x',
-                                'credentials': 'https://u@wkms-public.apple.com/x', 'port': 'https://wkms-public.apple.com:9/x'}.items():
+                                'credentials': 'https://u@wkms-public.apple.com/x', 'port': 'https://wkms-public.apple.com:9/x',
+                                'look-alike suffix': 'https://fcs-keys-pub-prod.evilcdn-apple.com/fcs-keys/x',
+                                'apple name inside another domain': 'https://fcs-keys-pub-prod.cdn-apple.com.evil.example/fcs-keys/x',
+                                'plain http on the cdn': 'http://fcs-keys-pub-prod.cdn-apple.com/fcs-keys/x'}.items():
             transport = KeyTransport((302, {'Location': location}, b''), ok(b'pem'))
             with self.subTest(label), self.assertRaises(tool.KeyServiceRefusal):
                 tool.KeyService(transport, redirects=2).fetch(KEY_URL)
             self.assertEqual(len(transport.calls), 1, 'the vetted target is never requested')
+        cdn = 'https://fcs-keys-pub-prod.cdn-apple.com/fcs-keys/elsewhere/'      # the redirect that the real key service answered (OBSERVED once)
+        transport = KeyTransport((301, {'Location': cdn}, b''), ok(b'pem'))
+        self.assertEqual(tool.KeyService(transport, redirects=1).fetch(KEY_URL), b'pem')
+        self.assertEqual([url for url, _ in transport.calls], [KEY_URL, cdn])
         transport = KeyTransport(MOVED, MOVED, ok(b'pem'))
         with self.assertRaises(tool.KeyServiceRefusal):
             tool.KeyService(transport, redirects=1).fetch(KEY_URL)
