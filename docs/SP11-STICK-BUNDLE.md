@@ -11,7 +11,7 @@ none of the operator decisions D1 to D10 of the audit (its section 15) is taken 
 Labels (AGENTS.md): **VERIFIED** read in this repository or a reproducible host fact (a build, a test), never "ran on the Surface";
 **OBSERVED** measured on the unit (boots 3 to 9, the restart probe and control, the dry run, the X1 and X2 runs) or reported by the operator, one unit, one boot
 each; **INFERRED** reasoned, not checked; **EXPERIMENTAL** code exists, unqualified; **UNIMPLEMENTED** no code; **UNKNOWN** not established.
-Citations: `path:line` is this repository, `q1n1:path:line` the sibling q1n1 checkout; a quoted fragment is written
+Citations: `path:line` is this repository, `q1n1:path:line` the sibling q1n1 checkout (e448f9a); a quoted fragment is written
 `fragment`[path:line]. Facts about the unit come from the committed documents, not from a dump quoted here. Test outcomes are not recorded in
 this note: they belong to the run that made them.
 
@@ -26,8 +26,8 @@ this note: they belong to the run that made them.
 ## 2. The five files
 
 The bundle is the manifest of q1n1's stick runner: at most 5 files of at most 256 MiB, called in manifest order, the first a payload,
-a name `<stem>.BIN` marking a payload and every other file data that is never called (`#define Q1N1_PAYLOAD_MAX_FILES`[q1n1:platform/uefi/sp11-payload.h:64],
-`#define Q1N1_PAYLOAD_MAX_FILE_BYTES`[q1n1:platform/uefi/sp11-payload.h:69]; VERIFIED). The position in the manifest is the role.
+a name `<stem>.BIN` marking a payload and every other file data that is never called (`#define Q1N1_PAYLOAD_MAX_FILES`[q1n1:platform/uefi/sp11-payload.h:71],
+`#define Q1N1_PAYLOAD_MAX_FILE_BYTES`[q1n1:platform/uefi/sp11-payload.h:76]; VERIFIED). The position in the manifest is the role.
 
 | Index | File | Kind | Content | Size rule |
 | --- | --- | --- | --- | --- |
@@ -39,7 +39,7 @@ a name `<stem>.BIN` marking a payload and every other file data that is never ca
 
 Paths are `\SP11\` plus the name, in any case; names are 8.3, as the manifest tool requires. The payloads are hashed by the runner
 before the bounce and again at EL2 before each call; the data files are hashed once, before the bounce, and the runner's check at EL2
-compares only the table's own fields for them (`though only the payload's bytes are hashed`[q1n1:platform/uefi/sp11-payload-run.c:103]; VERIFIED).
+compares only the table's own fields for them (`though only the payload's bytes are hashed`[q1n1:platform/uefi/sp11-payload-run.c:106]; VERIFIED).
 Consequence, the design rule of this note: **the wrapper hashes and checks what it uses**. The runner passes a payload no RAM beyond its own stack and
 the preload table; a payload finds the others through that table, whose entry for a path holds its base and size
 (`char path[256]`[q1n1:platform/uefi/preload.h:9]).
@@ -265,7 +265,7 @@ runner left them. ARGS_BAD, FILE_COUNT and a bad slot for REPORT.DAT itself cann
 
 | Claim | Why | Label |
 | --- | --- | --- |
-| The runner leaves the file alone between payloads: it rebuilds its arguments from nothing and writes only the stack's two guard words (`for (unsigned i = 0; i < GUARD_WORDS; i++) guard[i] = GUARD_PATTERN;`[q1n1:platform/uefi/sp11-payload-run.c:214]) | read | VERIFIED |
+| The runner leaves the file alone between payloads: it rebuilds its arguments from nothing and writes only the stack's two guard words (`for (unsigned i = 0; i < GUARD_WORDS; i++) guard[i] = GUARD_PATTERN;`[q1n1:platform/uefi/sp11-payload-run.c:263]) | read | VERIFIED |
 | The report is outside the guest's reach: the A16 stage 2 maps the DRAM and reserve, the panel and the shadow-table arena only (`probes/xnuboot.py:233`), and REPORT.DAT is outside the placement by `PLACE_DECLARED` and `PLACE_NOT_CONV` | read, host test | VERIFIED |
 | A declared data file survives the bounce intact | the payload files did: the second hash passed after the bounce (boots 4, 5, 7); a data file takes the same path | INFERRED |
 | The memory is reachable and writable at EL2 | the payload stack, also LoaderData, was written at EL2 on every payload call (boots 4, 5, 7) | INFERRED |
@@ -289,7 +289,7 @@ A wrapper that never returns (a hang or a fault) is not followed by SNAPREP: the
 ## 7. The gate `SNAP_SP11_STICK`
 
 The wrapper, loader and reporter sources are built only under `-DSNAP_SP11_STICK=1`. It is off by default, needs `-DSNAP_PLATFORM_SP11=1` (an `#error` otherwise, the form of
-`#error "Q1N1_SP11_PAYLOAD=1 needs SNAP_PLATFORM_SP11=1`[q1n1:platform/uefi/sp11-payload.h:39]) and accepts no value but 0 and 1. The sources enter the link through the `OPTIONAL` table of `probes/run.py`, whose rule is
+`#error "Q1N1_SP11_PAYLOAD=1 needs SNAP_PLATFORM_SP11=1`[q1n1:platform/uefi/sp11-payload.h:46]) and accepts no value but 0 and 1. The sources enter the link through the `OPTIONAL` table of `probes/run.py`, whose rule is
 `Units linked only when their opt-in define is in FLAGS`[probes/run.py:129]. `probes/sp11-stick-bundle.h` itself has no gate: it declares a contract and no existing build includes it (the test checks the build files).
 
 With the gate off the A16 monitor is byte-identical: `tools/monitor_baseline.py` compares the size, the binary and the linked ELF for its four flag sets (`SETS = ('bare', 'base', 'control', 'fast')`[tools/monitor_baseline.py:40]) and must say IDENTICAL.

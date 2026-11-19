@@ -166,10 +166,10 @@ A test that lacks clang, `llvm-objdump` or a q1n1 checkout prints SKIP with the 
 
 ## 10. The opt-in CPU-start acknowledge variant (`--cpu-start ack`)
 
-**EXPERIMENTAL, hardware NOT RUN, and not a model of the hardware.** Boot 21 (M1 rung 2; OBSERVED once, one unit, one boot) ran the stock kernel for 2.04 s and stopped on a 32-bit store to IPA
+**EXPERIMENTAL, not a model of the hardware; it ran once on the unit, in boot 25 (rung 5; OBSERVED, one boot; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 23).** Boot 21 (M1 rung 2; OBSERVED once, one unit, one boot) ran the stock kernel for 2.04 s and stopped on a 32-bit store to IPA
 0x300734004: `MON STOP S2_FAULT PC=0XFFFFFE00097A352C A=0X300734004 B=0X93970045` (the decode is INFERRED from the architecture: EC 0x24, ISV 1, SAS word, SRT 23, WnR 1, DFSC 0x05, a translation fault of level 1).
 That is the first CPU-start write the A16 route documents (`compat/boot-relocate.h`: ApplePMGR's register-write helper, PMGR register block 24 + 0x4000, the global core mask, value 0x2 for CPU 1), and the profile
-starts the guest with x4 = 0, so `compat/cpu-release.c` is never reached. The experiments after boot 21 that took guest input only (`cpus=1`: rung 3, boot 23, and rung 4 with `--let-panic`, boot 24) ended in the kernel's panic in the PMGR driver (XNU's one-cluster topology, INFERRED); this variant, with the guest's six CPUs, is rung 5 (`docs/SP11-STICK-MONITOR.md` section 20, K13).
+starts the guest with x4 = 0, so `compat/cpu-release.c` is never reached. The experiments after boot 21 that took guest input only (`cpus=1`: rung 3, boot 23, and rung 4 with `--let-panic`, boot 24) ended in the kernel's panic in the PMGR driver (XNU's one-cluster topology, INFERRED); this variant, with the guest's six CPUs, is rung 5 (`docs/SP11-STICK-MONITOR.md` section 20, K13), which ran as boot 25.
 
 **What it does.** Built with `-DSNAP_SP11_CPU_START_ACK=1`, and only when no secondary is configured (x4 = 0), the monitor takes a 32-bit store to +4, +8 or +12 of that block, reported as a stage-2 translation fault
 with a valid syndrome, ignores the value and resumes the guest after the store. **No CPU is started.** What follows is the guest's own wait (a panic after its CPU-start timeout, or the next device): on the silicon the
@@ -204,5 +204,4 @@ room, which on the unit it had not (boot 21: 512 events, 96,475 dropped before t
 stop at the CPU-start window is no longer the expected stop (the next `A=` names the next device, a guest panic about a CPU that did not start is an expected observation and not a monitor failure); that no store class is
 new (the acknowledge stores to the monitor's own RAM only) and the census rows are those of the plain monitor; that the guest's CPU-start timeout is guest input and the longer exposure of the one CPU is D8's.
 
-**Not established.** What the stock kernel does after the three stores (UNKNOWN: the public source says its wait ends in a panic after a timeout of 1 s by default, INFERRED for 26A428); whether HPFAR_EL2 reads valid on this
-unit for this fault (UNKNOWN, a zero is accepted); whether the kernel reads the block back (the first read stops the run, by design). Hardware: NOT RUN.
+**What boot 25 showed, and what is not established.** The acknowledged stores stopped nothing (OBSERVED, one boot): no stop in the block and none at a read of it, and the run lasted the whole box of 60 s on one vCPU, to an idle WFI; how many stores the monitor took is UNKNOWN, because no reporter prints the window. What the stock kernel does after the stores with its default timeout of 1 s is UNKNOWN (the public source says its wait ends in a panic, INFERRED for 26A428; rung 5's word is 120 s, and no panic text came in 60 s); whether HPFAR_EL2 reads valid on this unit for this fault is UNKNOWN (a zero is accepted); the host analyses of the stops are in [SP11-KERNEL-STOPS.md](SP11-KERNEL-STOPS.md). Hardware: boot 25 only.
