@@ -27,6 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sp11_stick_gic_testlib as G  # noqa: E402
+import sp11_stick_monitor_pagelib as P  # noqa: E402
 import sp11_stick_monitor_testlib as M  # noqa: E402
 import sp11_stick_wrapper_testlib as T  # noqa: E402
 from sp11_stick_wrapper_checks import Checks as WC, expected_reporter_lines, full_report  # noqa: E402
@@ -117,34 +118,11 @@ def reporter(name, report):
     return M.run(FIX['exe'], [(name, G.scenario(name, w, (), ('snaprep',)))]).results[name][0], w
 
 
-def expected_window(rec, win_args):
-    """The lines the document's section 6 says the reporter prints for a window of a guest that ran (or failed to), without the prefix."""
-    status, count = win_args.get('status', 0), win_args.get('words', (0,) * 8)[3]
-    out = []
-    if status == 0:
-        out.append(f'MON STATUS=OK ENTERED={h(win_args.get("entered", 1))}')
-    elif status < 0:
-        out.append(f'MON PREPARE FAILED CODE={status} {STATUS_NAMES[status][0] if status in STATUS_NAMES else "UNNAMED"}')
-    else:
-        out += [f'MON EL2 FAULT ESR={h(status)} EC={h(status >> 26 & 0x3F)}',
-                f'MON FAULT ELR={h(win_args["bad"][0])} OFF={h((win_args["bad"][0] - rec.monitor_pa) & MASK)} FAR={h(win_args["bad"][1])}']
-    w, c = win_args.get('words', (0,) * 8), win_args.get('counters', (0,) * 13)
-    out.append(f'MON COUNTS EVENTS={count} TRAPS={w[2]} ABORTS={w[4] & 0xFFFFFFFF} STEPS={w[4] >> 32} CALLS={w[7] & 0xFFFFFFFF} DROPPED={c[6]}')
-    if win_args.get('terminal'):
-        t = win_args['terminal']
-        out.append(f'MON STOP {EVENT_NAMES.get(t[0], "UNNAMED")} PC={h(t[1])} A={h(t[2])} B={h(t[3])} C={h(t[4])}')
-    if win_args.get('capture'):
-        out.append(f'MON EXIT PC={h(0xFFFF000008001234)} SPSR={h(0x3C5)} ESR={h(0x96000045)} FAR={h(0xFFFF000008004567)}')
-    for n, e in enumerate(win_args.get('events', ())[:5]):
-        if n < count:
-            out.append(f'MON EV {n} {EVENT_NAMES.get(e[0], "UNNAMED")} PC={h(e[1])} A={h(e[2])} B={h(e[3])} C={h(e[4])}')
-    text = win_args.get('console', b'')[:min(win_args.get('words', (0,) * 8)[7] >> 32, 1024)]
-    shown = 0
-    for raw in re.split(rb'[\n\x00]+', text):
-        if raw and shown < 6:
-            out.append('MON CON ' + ''.join(chr(c - 32) if 97 <= c <= 122 else chr(c) if chr(c) in M.FONT else '?' for c in raw[:64]))
-            shown += 1
-    return out
+def expected_window(rec, win_args, before=15):
+    """The lines the document's section 6 and docs/SP11-STICK-REPORT-LINES.md say the reporter prints for a window of a guest that ran (or failed to),
+    without the prefix: the independent renderer of tools/sp11_stick_monitor_pagelib.py. `before` is the 8 head lines and the 7 monitor lines."""
+    spec = P.Spec(**win_args)
+    return P.window_lines(spec, rec.ticks_call, rec.ticks_return, rec.monitor_pa, before, STATUS_NAMES)
 
 
 def gic_lines(g):
@@ -324,19 +302,25 @@ class Drift(unittest.TestCase):
             flags = profile.main(['flags', '--nv2-record-header', str(cls.scratch / 'record' / 'test-record.h')])
         cls.flags = json.loads(out.getvalue())['flags'] if flags == 0 else None
         assert cls.flags, err.getvalue()
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            flags = profile.main(['flags', '--nv2-record-header', str(cls.scratch / 'record' / 'test-record.h'), '--cpu-start', 'ack'])
+        cls.flags_ack = json.loads(out.getvalue())['flags'] if flags == 0 else None
+        assert cls.flags_ack and '-DSNAP_SP11_CPU_START_ACK=1' in cls.flags_ack, err.getvalue()
 
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.scratch, ignore_errors=True)
 
-    def compile(self, asserts, name):
+    def compile(self, asserts, name, ack=False):
         sys.path.insert(0, str(T.TOOLS))
         import monitor_build_offline as offline
         uefi, why = offline.locate_q1n1(ROOT)
         self.assertIsNotNone(uefi, why)
         source = self.scratch / f'{name}.c'
         T.write(source, f'#include "{ROOT / "probes/xnuboot.c"}"\n#include <stddef.h>\n{asserts}\n'.encode())
-        done = subprocess.run([str(offline.LLVM / 'clang'), *self.flags, f'-I{ROOT / "shadow"}', f'-I{uefi}', '-fsyntax-only', str(source)], capture_output=True, text=True)
+        done = subprocess.run([str(offline.LLVM / 'clang'), *(self.flags_ack if ack else self.flags), f'-I{ROOT / "shadow"}', f'-I{uefi}', '-fsyntax-only', str(source)],
+                              capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr[-2500:])
 
     def reporter_constants(self):
@@ -346,16 +330,31 @@ class Drift(unittest.TestCase):
     def test_the_window_offsets_are_the_monitors(self):
         c = self.reporter_constants()
         self.assertEqual(sorted(c), sorted(['RP_W_STATUS', 'RP_W_ENTERED', 'RP_W_WORDS', 'RP_W_LOG', 'RP_W_CONSOLE', 'RP_W_COUNTERS', 'RP_W_BAD', 'RP_W_TERMINAL',
-                                            'RP_W_ASYNC']))
+                                            'RP_W_ENDPOINTS', 'RP_W_ASYNC', 'RP_W_CLOCK_READS', 'RP_W_TIMER', 'RP_W_CLOCK_RAW', 'RP_W_ACK']))
+        self.assertEqual(c, {'RP_W_STATUS': P.STATUS, 'RP_W_ENTERED': P.ENTERED, 'RP_W_WORDS': P.WORDS, 'RP_W_LOG': P.LOG, 'RP_W_CONSOLE': P.CONSOLE,
+                             'RP_W_COUNTERS': P.COUNTERS, 'RP_W_BAD': P.BAD, 'RP_W_TERMINAL': P.TERMINAL, 'RP_W_ENDPOINTS': P.ENDPOINTS, 'RP_W_ASYNC': P.ASYNC,
+                             'RP_W_CLOCK_READS': P.CLOCK_READS, 'RP_W_TIMER': P.TIMER, 'RP_W_CLOCK_RAW': P.CLOCK_RAW, 'RP_W_ACK': P.ACK}, 'the independent renderer holds the same layout')
+        self.compile(f'_Static_assert(16 + 8 * OUT_CPU_START_ACK == {c["RP_W_ACK"]:#x} && CPU_START_ACK_REPORT_WORDS == {P.ACK_WORDS} && '
+                     f'sizeof(struct cpu_start_ack) == {P.ACK_LAYOUT >> 32} && CPU_START_ACK_VERSION == {P.ACK_LAYOUT & 0xFFFFFFFF} && CPU_START_ACK_FIRST == {P.ACK_FIRST} && '
+                     f'CPU_START_ACK_MAGIC == {P.ACK_MAGIC:#x}ull && offsetof(struct cpu_start_ack, total) == 0 && offsetof(struct cpu_start_ack, last_pc) == 8 * 4 && '
+                     f'offsetof(struct cpu_start_ack, first) == 8 * 6 && sizeof(((struct cpu_start_ack *)0)->first[0]) == 16, "the CPU-start acknowledge block");', 'ack', ack=True)
         asserts = '\n'.join([f'_Static_assert(16 + 8 * 8 == {c["RP_W_LOG"]:#x}, "log");',
                              f'_Static_assert(16 + 8 * (8 + 6 * EVENT_MAX) == {c["RP_W_CONSOLE"]:#x}, "console");',
-                             f'_Static_assert(16 + 8 * OUT_COUNTERS == {c["RP_W_COUNTERS"]:#x}, "counters");',
+                             f'_Static_assert(16 + 8 * OUT_COUNTERS == {c["RP_W_COUNTERS"]:#x} && OUT_COUNTERS_N == 13, "counters");',
                              f'_Static_assert(16 + 8 * OUT_BAD_REGS == {c["RP_W_BAD"]:#x}, "bad");',
                              f'_Static_assert(16 + 8 * OUT_LAST_EVENT == {c["RP_W_TERMINAL"]:#x}, "terminal");',
+                             f'_Static_assert(16 + 8 * OUT_ENDPOINTS == {c["RP_W_ENDPOINTS"]:#x} && ENDPOINT_BUCKETS == 64 && '
+                             f'16 + 8 * (OUT_ENDPOINTS + ENDPOINT_BUCKETS) == {c["RP_W_ENDPOINTS"] + 8 * 64:#x}, "endpoints and the bucket of the other calls");',
                              f'_Static_assert(16 + 8 * OUT_ASYNC_REGS == {c["RP_W_ASYNC"]:#x}, "async");',
+                             f'_Static_assert(16 + 8 * OUT_CLOCK_FLOW == {c["RP_W_CLOCK_READS"]:#x} && offsetof(struct guest_clock, reads) == 0, "clock reads");',
+                             f'_Static_assert(16 + 8 * OUT_TIMER_FLOW == {c["RP_W_TIMER"]:#x} && OUT_DEVICE_FLOW == OUT_TIMER_FLOW + 11, "the guest timer\'s words");',
+                             f'_Static_assert(16 + 8 * (OUT_CLOCK_ADAPTER + 8) == {c["RP_W_CLOCK_RAW"]:#x} && '
+                             f'16 + 8 * (OUT_CLOCK_ADAPTER + 9) == {c["RP_W_CLOCK_RAW"] + 8:#x}, "clock raw samples");',
                              '_Static_assert(EVENT_MAX == 512 && CONSOLE_MAX == 1024 && sizeof(struct event) == 48, "log geometry");',
-                             '_Static_assert(offsetof(struct guest_regs, spsr) == 8 * 32 && offsetof(struct guest_regs, pc) == 8 * 33 && '
-                             'offsetof(struct guest_regs, esr) == 8 * 34 && offsetof(struct guest_regs, far) == 8 * 35, "snapshot");',
+                             '_Static_assert(offsetof(struct guest_regs, x) == 0 && sizeof(((struct guest_regs *)0)->x) == 8 * 31 && '
+                             'offsetof(struct guest_regs, sp_el1) == 8 * 31 && offsetof(struct guest_regs, spsr) == 8 * 32 && '
+                             'offsetof(struct guest_regs, pc) == 8 * 33 && offsetof(struct guest_regs, esr) == 8 * 34 && '
+                             'offsetof(struct guest_regs, far) == 8 * 35 && GUEST_REGS_WORDS == 36, "snapshot: x0 to x30, sp, spsr, pc, esr, far");',
                              f'_Static_assert({c["RP_W_WORDS"]:#x} == 16 && {c["RP_W_STATUS"]:#x} == 0 && {c["RP_W_ENTERED"]:#x} == 8, "head words");'])
         self.compile(asserts, 'window')
 

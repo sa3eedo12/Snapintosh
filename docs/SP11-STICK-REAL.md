@@ -32,6 +32,7 @@ Inputs: the boot set of `downloads/extracted/j700ap/` (the kernelcache is 120,93
 | GUEST.DAT, panel console with `cpus=1` (rung 3) | 118,908,480 bytes, 46 chunks (the console guest with ` cpus=1` after its command line: seven bytes of the same chunk; built by `--panel console --boot-arg cpus=1`, `--m1-run` only: `docs/SP11-STICK-MONITOR.md` section 20, K10) |
 | GUEST.DAT, panel console with `cpus=1` and `--let-panic` (rung 4) | 118,908,480 bytes, 46 chunks (rung 3's guest with the monitor's `let_panic` PARAMS word, word 23 at offset 0xB8, set to 1: eight bytes of the PARAMS chunk; built by `--panel console --boot-arg cpus=1 --let-panic --time-box-s 5`, `--m1-run` only: `docs/SP11-STICK-MONITOR.md` section 20, K12) |
 | GUEST.DAT, rung 5 (K13) | 118,908,480 bytes, 46 chunks: rung 4's guest with `cpu_boot_timeout_secs=120` where its command line has `cpus=1` (22 bytes of the boot_args chunk) and the box in PARAMS word 24 (one byte: 5 s to 60 s); built by `--cpu-start ack --let-panic --boot-arg cpu_boot_timeout_secs=120 --time-box-s 60`, `--m1-run` only |
+| GUEST.DAT, rung 6 (K14) | 118,908,480 bytes, 46 chunks: rung 5's guest with `cpu_boot_timeout_secs=90` for 120 and the PARAMS box word 60 s to 120 s; built by `--cpu-start ack --let-panic --boot-arg cpu_boot_timeout_secs=90 --time-box-s 120`, `--m1-run` only |
 | Chunk kinds present | KERNEL, TABLES, HANDOFF, DEVICE_TREE, PARAMS, MONITOR_IMAGE, MONITOR_DATA; OTHER is absent (no RAM disk, SEP preload or trust-cache fallback) |
 | Withheld, by kind (data and zero chunks) | KERNEL 13 and 12; MONITOR_DATA 4 and 4; MONITOR_IMAGE 4 and 2; HANDOFF 2; DEVICE_TREE 1; PARAMS 1; TABLES 1 |
 | PARAMS, from the placement | `mem_low` 0x880000000, `mem_high` 0x89b000000 (guest plus reserve: the work base), `watchdog_seconds` 5; destination (x3 of the monitor call) 0x88000c000 = base + 0xC000 |
@@ -43,6 +44,7 @@ Inputs: the boot set of `downloads/extracted/j700ap/` (the kernelcache is 120,93
 | GUEST.DAT SHA-256, console, cpus=1, 0 | a7e159ad6c18832c60264f81763db6e7d5b4c3f3d3d5bafc7efcf6a073752f50 |
 | GUEST.DAT SHA-256, console, cpus=1, let_panic, 0 | 5effb5c128395793075e8e26bd0e4368b5911e516322573ed5c3fa336a70fc32 |
 | GUEST.DAT SHA-256, rung 5, box 60, 0 | 896f56e29dfc5e49501c16b6d7f6bf64c05de606ef299c6674735eb13d8903d0 |
+| GUEST.DAT SHA-256, rung 6, box 120, 0 | 1dd2e9ac94fdb7413f1e5d222c54b2c20cd635ee34f3211a2199a4db97ea57a2 |
 | Determinism | two builds, separate processes (one with another `PYTHONHASHSEED`): all 26 files identical, `build-report.json` and the stage tree included |
 | Stage tree | 18 files, `verify` COMPLETE, `shell_pin: match` (the dry run's base tree and EFI images) |
 | `probes/xnuboot.py --check` | exit 0 at its default base (328 chunks, 12 of 12 addresses resolve); the same check at the bank base with 384 MiB, with no SNAP variable and with the native-call and HVC variables, exit 0 each |

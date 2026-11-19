@@ -23,6 +23,7 @@ import sp11_stick_bundle_panel_rung3 as r3  # noqa: E402
 import sp11_stick_bundle_panel_panic as rp  # noqa: E402
 
 WORD = 'cpu_boot_timeout_secs=120'          # the one word of this record's command line (m1.BOOT_ARGS): it goes with the acknowledging monitor
+NUMBER = 5                                  # the rung's number, for the pointer to section 5d in the reading lines (tools/sp11_stick_bundle_panel.py)
 LOADER_LINE = '-v debug=0x8 serial=2 cluster_power=0 wdt=-1'      # the loader's line with serial=2: rung 2's command line, to which this record adds the word
 LINE = f'{LOADER_LINE} {WORD}'
 assert rp.LINE == f'{LOADER_LINE} cpus=1', 'the line of rung 4 has changed under the words of rung 5'
@@ -372,3 +373,12 @@ CITES = (
 # cites (above). The text of rung 4's record is approved as it is (its SHA-256 is part of the proof that this change leaves it alone), so its suite holds its cite to the moved line:
 # (path, the cited first line) -> lines of drift.
 CITE_DRIFT = {('probes/xnuboot/trap_dispatch.c', 472): 19}
+# The records of rungs 2 to 5 cite probes/sp11-stick-reporter.c at the lines that the reporter of their pair had (ac9f634). The reporter of rung 6 prints more, so the same code lies elsewhere in
+# the tree; those texts are approved as they are (their SHA-256 is part of the proof that this change leaves them alone) and rung 6's own text cites the new lines
+# (tools/sp11_stick_bundle_panel_rung6.py). The suites that hold a cite to its source read it through this table: the cite as written (path, first, last) -> (first, last, fragments) in the tree.
+REPORTER = 'probes/sp11-stick-reporter.c'
+REPORTER_DRIFT = {
+    (REPORTER, 244, 245): (256, 257, ('RP_CONSOLE_LINES 6u', 'RP_CONSOLE_WIDTH 64u')),
+    (REPORTER, 338, 360): (390, 433, ('n < RP_CONSOLE_LINES', 'pl_text(&l, "MON CON ")', 'if (!width) break;')),
+    (REPORTER, 247, 271): (281, 305, ('case 6: return "WATCHDOG";', 'case 9: return "PANIC_ENTRY";', 'default: return "UNNAMED";')),
+}

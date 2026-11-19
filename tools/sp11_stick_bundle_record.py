@@ -308,7 +308,7 @@ def m1_d8_lines(box_s):
                          ': the charger is in before the boot and stays in until the end (section 5c).', first=3, rest=3))
 
 
-def m1_time_lines(box_s, place, guest_bytes, panel=None):
+def m1_time_lines(box_s, place, guest_bytes, panel=None, real=None):
     """Section 4 of the record of an M1 run: the box, what it does not bound, the time budget with its numbers, what UPTIME reads, and D8. The sums are of the figures
     as printed. Everything that depends on the box comes from `box_s`: the budget, the runaway case, the relaxation of D5's 20 s and what D8 decided. `panel` is set
     for a choice that hands the guest the panel: its range is cleaned at the stop too, and the monitor's two reads of it are a row of their own that the sums cannot
@@ -342,7 +342,7 @@ def m1_time_lines(box_s, place, guest_bytes, panel=None):
         f'      {"the known parts, high sum":<41}at most {high} s ({high_wrapper} + {t["arm_wait_s"]} + {box_s} + {clean_s}), plus the prepare',
         *(pn.TIME_SUM_NOTE if panel else ()),
         *m1t.wrap(size, first=3, rest=3),
-        *(m1t.wrap(m1g.d8_exposure_words(box_s), first=3, rest=3) if box_s > m1g.D5_BOX_S else ()),
+        *(m1t.wrap(m1g.d8_exposure_words(box_s, real), first=3, rest=3) if box_s > m1g.D5_BOX_S else ()),
         *m1t.wrap('The plan\'s budget is a run well under 20 s of UPTIME, a precaution of low weight (docs/SP11-MONITOR-PORT.md section 10, D5); this run does not meet it, '
                   f'whatever the box: the known parts alone are about {low} to {high} s, and the runner\'s own load comes before them (UPTIME, below). APPROVING THIS TEXT '
                   f'RELAXES THE 20 s PRECAUTION OF D5 ({kept}; the 8 s '
@@ -478,7 +478,7 @@ def record_text(r):
     lines += m1t.GIC_FACT_LINES if m1 else ()
     lines += ['   Not authorised: any other store class, a disk or NVMe write, a firmware write, a clock, voltage or DVFS change, a secondary CPU.',
               *(m1t.SMC_LINES if m1 else ()), *(('', *m1t.DEVICE_LINES) if m1 else ()), *(('', *pn.section_3c(panel, r['label'])) if panel else ()), '',
-              *(m1_time_lines(r['time_box_s'], p, g['size'], panel) if m1 else gq.time_lines(r['time_box_s']) if r.get('gic_quarantine') else
+              *(m1_time_lines(r['time_box_s'], p, g['size'], panel, r.get('real')) if m1 else gq.time_lines(r['time_box_s']) if r.get('gic_quarantine') else
                 [f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.']), '',
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
               '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',

@@ -23,7 +23,6 @@ nothing about the unit. It needs clang and a q1n1 checkout ($Q1N1_SP11_TREE) and
 written below build/sp11-wrapper-test-scratch-record-gic-model/, deleted at the end."""
 import collections
 import re
-import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -35,6 +34,7 @@ import sp11_monitor_census as C  # noqa: E402
 import sp11_stick_bundle as sb  # noqa: E402
 import sp11_stick_bundle_record as rec  # noqa: E402
 import sp11_stick_bundle_record_gic as gq  # noqa: E402
+import sp11_stick_gatescan as gatescan  # noqa: E402
 import sp11_stick_gic_checks as GC  # noqa: E402
 import sp11_stick_gic_testlib as G  # noqa: E402
 import sp11_stick_wrapper_build as wb  # noqa: E402
@@ -278,11 +278,12 @@ WRAPPER_TOOL_SHA256 = '0c272f55fa9ddf39ab4d26767985b57c5a4a3aaaf6394772a7a74aa8a
 
 
 def source_problems(commit, files):
-    """The `files` that differ between the tree of `commit` and this one: [str]. SKIPS when git does not have the commit (a shallow clone)."""
-    git = lambda *args: subprocess.run(['git', '-C', str(ROOT), *args], capture_output=True, text=True)       # noqa: E731
-    if git('cat-file', '-e', f'{commit}^{{commit}}').returncode:
-        raise unittest.SkipTest(f'git does not have commit {commit[:7]}')
-    return git('diff', '--name-only', commit, '--', *files).stdout.split()
+    """The `files` that differ between the tree of `commit` and this one where SNAP_SP11_STICK_MONITOR is 0: [str] (tools/sp11_stick_gatescan.py: an edit inside that gate is not a
+    change of the pair, any other edit is). SKIPS when git does not have the commit (a shallow clone)."""
+    try:
+        return gatescan.source_problems(commit, files)
+    except LookupError as why:
+        raise unittest.SkipTest(str(why)) from why
 
 
 def gated_out(text):

@@ -46,25 +46,29 @@ LABEL_PREFIX = 'M1RUN-'         # SP11_STICK_MONITOR_LABEL_PREFIX in probes/sp11
 PANEL_MARKS = {'withheld': '', 'handed': 'PANEL-', 'console': 'CONSOLE-'}      # after LABEL_PREFIX in the label of each choice of D9 (docs/SP11-STICK-MONITOR.md section 20): the wrapper checks LABEL_PREFIX only, so these are the builder's rule
 D9_PANELS = tuple(PANEL_MARKS)  # the --panel choices this record is written for, each with a stock kernel (--sptm-hvc-calls 0)
 # The words that the monitor entry run may add to the guest's command line after its choice's own, each the one change of a record of its own (docs/SP11-STICK-MONITOR.md
-# section 20, K10 and K13), with the marker that the label carries after LABEL_PREFIX in place of the panel's: PIN.DAT's label holds 23 characters, so CONSOLE-CPUS1- would leave three for
+# section 20, K10, K13 and K14), with the marker that the label carries after LABEL_PREFIX in place of the panel's: PIN.DAT's label holds 23 characters, so CONSOLE-CPUS1- would leave three for
 # the facts' label. Only the panel as the console takes one (BOOT_ARG_PANEL); any other word is BOOT_ARG_REFUSED, never passed on to the guest. Each word goes with one choice of the
-# monitor's CPU-start (BOOT_ARG_CPU_START): cpus=1 asks XNU for one CPU and goes with the plain monitor (`stop`); cpu_boot_timeout_secs=120 lengthens XNU's wait for a CPU that was
-# started and goes with the acknowledging monitor (`ack`), which starts none and whose one record (rung 5, K13, with --let-panic) needs it, because its box is longer than XNU's own wait.
-BOOT_ARGS = {'cpus=1': 'CPUS1-', 'cpu_boot_timeout_secs=120': 'ACKPANIC-'}
-BOOT_ARG_CPU_START = {'cpus=1': 'stop', 'cpu_boot_timeout_secs=120': 'ack'}
+# monitor's CPU-start (BOOT_ARG_CPU_START): cpus=1 asks XNU for one CPU and goes with the plain monitor (`stop`); cpu_boot_timeout_secs=120 and =90 set XNU's wait for a CPU that was
+# started and go with the acknowledging monitor (`ack`), which starts none: =120 is the word of rung 5 (K13: a wait longer than its 60 s box) and =90 that of rung 6 (K14: a wait that
+# ends inside its 120 s box). Both put ACKPANIC- in the label, and the facts' label tells the two records apart (RUNG5, RUNG6).
+BOOT_ARGS = {'cpus=1': 'CPUS1-', 'cpu_boot_timeout_secs=120': 'ACKPANIC-', 'cpu_boot_timeout_secs=90': 'ACKPANIC-'}
+BOOT_ARG_CPU_START = {'cpus=1': 'stop', 'cpu_boot_timeout_secs=120': 'ack', 'cpu_boot_timeout_secs=90': 'ack'}
 BOOT_ARG_PANEL = 'console'
 # D5 (2026-11-16) and D8 (2026-11-17) decided a time box of 5 s, DECIDED_BOX_S (tools/test-sp11-stick-monitor-rung5.py holds it to the guide's D5_BOX_S), which every record up to rung 4
-# carries; D5' (2026-11-18, the operator's answer "Yes, up to 60 s") lets rung 5's record, the acknowledging monitor's, carry up to RUNG5_BOX_MAX_S with AC power.
+# carries; D5' (2026-11-18, the operator's answer "Yes, up to 60 s") lets rung 5's record, the acknowledging monitor's, carry RUNG5_BOX_MAX_S with AC power; D5'' (2026-11-19, the operator's
+# answer "let's go with 120 seconds" to whether rung 6's box should be 120 s or 60 s) is RUNG6_BOX_S, which approving its record confirms (K14).
 DECIDED_BOX_S = 5
 RUNG5_BOX_MAX_S = ch.RUNG5_FORM[2]
+RUNG6_BOX_S = ch.RUNG6_FORM[2]
 ch.KNOWN_REFUSALS.add('BOOT_ARG_REFUSED')
 # The one PARAMS word of the monitor's own that a record of this tool sets: let_panic, word 23 of struct params at offset 0xB8 (probes/xnuboot/report_layout.c), which the monitor reads at
 # one place only (probes/xnuboot/trap_dispatch.c:370-387) to run XNU's own handler for a guest EL1 exception that it would otherwise stop at (docs/SP11-STICK-MONITOR.md section 20, K12).
-# --let-panic is for two records, in this order (--panel, --boot-arg, --time-box-s): rung 4's, LET_PANIC_FORM, the panel as the console with cpus=1 and the 5 s box and the plain monitor,
-# whose label carries LET_PANIC_MARK in place of CPUS1-; and rung 5's, RUNG5_FORM (K13), the panel as the console with cpu_boot_timeout_secs=120, a box of 1 to RUNG5_BOX_MAX_S s and the
-# acknowledging monitor. No other combination. permissive and skip_undef are the monitor's other diagnostic words of this kind: no record sets them.
+# --let-panic is for three records (--panel, --boot-arg, --time-box-s; chunks.py holds the list): rung 4's, LET_PANIC_FORM, the panel as the console with cpus=1 and the 5 s box and the
+# plain monitor, whose label carries LET_PANIC_MARK in place of CPUS1-; and the two of the acknowledging monitor, ACK_FORMS (K13, K14): rung 5's, the panel as the console with
+# cpu_boot_timeout_secs=120 and a box of RUNG5_BOX_MAX_S s, and rung 6's, with cpu_boot_timeout_secs=90 and a box of RUNG6_BOX_S s. No other combination. permissive and skip_undef are
+# the monitor's other diagnostic words of this kind: no record sets them.
 LET_PANIC_FORM = ch.LET_PANIC_FORM
-RUNG5_FORM = ch.RUNG5_FORM
+RUNG5_FORM, RUNG6_FORM, ACK_FORMS = ch.RUNG5_FORM, ch.RUNG6_FORM, ch.ACK_FORMS
 LET_PANIC_MARK = 'LETPANIC-'
 DIAG_WORDS = (('permissive', 21), ('let_panic', 23), ('skip_undef', 28))
 LET_PANIC_AT = 8 * 23
@@ -89,6 +93,21 @@ def check_pair_box(time_box_s, monitor_sha256):
     if time_box_s > box_cap(monitor_sha256):
         raise ch.Refused('OPTIONS_BAD', f'--time-box-s {time_box_s}: the wrapper of this pair (SNAPMON {monitor_sha256[:8]}...) was built with the box cap at {box_cap(monitor_sha256)} s and '
                                         'refuses a longer box before it calls the monitor; give the pair of the record (K13)')
+# The pair that the record of each acknowledging form is written for (K13, K14), by the form's word: the SHA-256 of its SNAPMON-M1-ACK.BIN and of its SNAPREP-M1-ACK.BIN. The text of a record
+# says what the page of its reporter prints, and the builder reads the pair from a report that it checks against the files (read_report), so a pair that is not the form's is refused
+# where the report is read, whichever way round: the record of rung 6 does not describe the reporter of rung 5 and the record of rung 5 does not describe the other.
+ACK_MONITOR_SHA256 = 'bb34b9701d89302f425138b6229fd334ba9ead54699db2a131fc9a99cb22999c'
+ACK_PAIRS = {'cpu_boot_timeout_secs=120': (ACK_MONITOR_SHA256, 'ee86676001d89cf653af7bdddd797fef3c54d31b28ee42eb4a2d7aa692ee4b3b'),
+             'cpu_boot_timeout_secs=90': (ACK_MONITOR_SHA256, '533d004c27a11da964048aba34fa5a4a32309f0761c100b0959400d099c40368')}
+
+
+def check_pair_form(cpu_start, boot_arg, monitor_sha256, reporter_sha256):
+    """M1_REPORT_MISMATCH when the acknowledging pair of a record is not the pair that its form is written for (ACK_PAIRS). The plain monitor has no table: its records name their
+    pair in their text and are held to it by their approved SHA-256."""
+    if cpu_start == 'ack' and (monitor_sha256, reporter_sha256) != ACK_PAIRS.get(boot_arg):
+        want = ACK_PAIRS.get(boot_arg, ('none',) * 2)
+        raise ch.Refused('M1_REPORT_MISMATCH', f'the pair (SNAPMON-M1-ACK.BIN {monitor_sha256[:8]}..., SNAPREP-M1-ACK.BIN {reporter_sha256[:8]}...) is not the pair that the record of '
+                                               f'--boot-arg {boot_arg} is written for ({want[0][:8]}... and {want[1][:8]}...)')
 TEST_TOOL = 'wi4b-test-only'        # the `tool` field of the LOCAL TEST RECORD that the host tests build a monitor with: never the unit's
 PARAMS_BYTES = 0x2410       # sizeof(struct params) (probes/xnuboot/report_layout.c): the wrapper refuses a shorter chunk before the call
 # What the monitor would do with these words (docs/SP11-STICK-MONITOR.md section 10): gpu.flags opens the GPU paths (one SMC among them),
@@ -149,14 +168,14 @@ def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None, boot
 
 
 def check_let_panic(let_panic, panel, boot_arg, time_box_s, is_m1=True, cpu_start='stop'):
-    """--let-panic is for the two records that set the monitor's let_panic word, in the monitor entry run: rung 4's (LET_PANIC_FORM: the plain monitor, the panel as the console
-    with cpus=1 and the 5 s box) and rung 5's (RUNG5_FORM: the acknowledging monitor, `cpu_start` ack, the panel as the console with cpu_boot_timeout_secs=120 and a box of 1 to
-    the 60 s of D5'). LET_PANIC_REFUSED for any other combination or kind of record, before any guest is built. The acknowledging monitor has rung 5's record and no other, so it
-    is refused without --let-panic as well. False is no option."""
+    """--let-panic is for the three records that set the monitor's let_panic word, in the monitor entry run: rung 4's (LET_PANIC_FORM: the plain monitor, the panel as the console
+    with cpus=1 and the 5 s box) and the two of the acknowledging monitor (ACK_FORMS, `cpu_start` ack, the panel as the console): rung 5's, with cpu_boot_timeout_secs=120 and the 60 s of D5',
+    and rung 6's, with cpu_boot_timeout_secs=90 and the 120 s of D5'', each with exactly its box. LET_PANIC_REFUSED for any other combination or kind of record, before any guest is
+    built. The acknowledging monitor has those two records and no other, so it is refused without --let-panic as well. False is no option."""
     if not let_panic:
         if cpu_start == 'ack' and is_m1:
-            raise ch.Refused('LET_PANIC_REFUSED', '--cpu-start ack is the record of rung 5 and goes with --let-panic and no other option set: the acknowledging monitor has no other record '
-                                                  '(docs/SP11-STICK-MONITOR.md section 20, K13)')
+            raise ch.Refused('LET_PANIC_REFUSED', '--cpu-start ack is for the records of rungs 5 and 6 and goes with --let-panic and no other option set: the acknowledging monitor has no other '
+                                                  'record (docs/SP11-STICK-MONITOR.md section 20, K13 and K14)')
         return
     if not is_m1:
         raise ch.Refused('LET_PANIC_REFUSED', '--let-panic is a choice of the monitor entry run (docs/SP11-STICK-MONITOR.md section 20, K12): it needs --m1-run')
@@ -174,8 +193,9 @@ def check_boot_arg(boot_arg, panel, is_m1=True, cpu_start='stop'):
     monitor without its word), before any guest is built. None is no word, which only the plain monitor takes."""
     if boot_arg is None:
         if cpu_start == 'ack' and is_m1:
-            raise ch.Refused('BOOT_ARG_REFUSED', '--cpu-start ack needs --boot-arg cpu_boot_timeout_secs=120: the acknowledged guest waits for a CPU that is never started, and '
-                                                 'without the word its XNU gives up on that CPU after its own default wait, which is shorter than the box (docs/SP11-STICK-MONITOR.md section 20, K11)')
+            raise ch.Refused('BOOT_ARG_REFUSED', '--cpu-start ack needs --boot-arg cpu_boot_timeout_secs=120 (rung 5) or cpu_boot_timeout_secs=90 (rung 6): the acknowledged guest waits for a CPU '
+                                                 'that is never started, and without the word its XNU gives up on that CPU after its own default wait, which is shorter than the box '
+                                                 '(docs/SP11-STICK-MONITOR.md section 20, K11)')
         return
     if not is_m1:
         raise ch.Refused('BOOT_ARG_REFUSED', '--boot-arg is a choice of the monitor entry run (docs/SP11-STICK-MONITOR.md section 20, K10): it needs --m1-run')
@@ -216,7 +236,7 @@ def pinned_label(label, is_m1, choice='withheld', boot_arg=None, let_panic=False
     for every other kind the label is the facts' and may not start with the marker, or a PIN.DAT of another kind would pass for this one. The facts label of this kind may
     not start with a marker of a choice, of a word or of --let-panic either: M1RUN-PANEL- is then the label of the choice that hands the panel, M1RUN-CONSOLE- that of the
     panel as the console, M1RUN-CPUS1- that of the panel as the console with cpus=1, M1RUN-LETPANIC- that of the same with let_panic and M1RUN-ACKPANIC- that of the
-    acknowledging monitor with let_panic, and of no other.
+    acknowledging monitor with let_panic (rung 5 and rung 6 alike: the facts' label, RUNG5 or RUNG6, tells their records apart), and of no other.
     PIN_STRING: it does not fit."""
     if label.startswith(LABEL_PREFIX):
         raise ch.Refused('PIN_STRING', f'build_label starts with {LABEL_PREFIX}, which only --m1-run adds')

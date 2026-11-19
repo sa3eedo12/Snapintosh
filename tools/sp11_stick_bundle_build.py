@@ -13,8 +13,8 @@ the only kind that authorises a wrapper that calls a monitor, and it refuses one
 the two EFI files that run before the wrapper, pins `M1RUN-` in front of the facts label (which the wrapper of this kind requires) and, with `real`, takes a
 stock kernel (--sptm-hvc-calls 0) with the panel withheld, D9's first choice, handed, its second, or `console` (the panel handed and serial=2 in the command line,
 as probes/run.py makes it for the A16's native panel console, which only this kind takes): the guest is then read back for the panel and the command line it is
-given, the label goes on with `PANEL-` or `CONSOLE-` (`CPUS1-` for the console with `--boot-arg cpus=1`, one word more in its command line, from a short list: tools/sp11_stick_bundle_m1.py
-BOOT_ARGS; `LETPANIC-` with `--let-panic` on top of that and the 5 s box, which sets the monitor's let_panic PARAMS word and no other: K12) and the record says what the panel means (tools/sp11_stick_bundle_panel.py; sections 14 and 20 of that note).
+given, the label goes on with `PANEL-` or `CONSOLE-` (and with one word more in the console's command line, tools/sp11_stick_bundle_m1.py BOOT_ARGS, and with
+`--let-panic`, `CPUS1-`, `LETPANIC-` or `ACKPANIC-`: K10 to K14) and the record says what the panel means (tools/sp11_stick_bundle_panel.py; sections 14 and 20 of that note).
 The bundle is the five files of docs/SP11-STICK-BUNDLE.md, q1n1's PAYLOAD.MAN and, with --base-tree, a stage tree that the stager verifies.
 A refusal prints `REFUSED=<NAME>` and exits 1: the interface's name (tools/sp11_stick_bundle.py) where it has one, else BUILDER_REFUSALS.
 Output is deterministic and is written only below --out, which must be under build/ (or --allow-under). The placement (D1), the stores (D4),
@@ -56,7 +56,7 @@ record_text, TOUCHES, GIC_STOP_TOUCHES = rec.record_text, rec.TOUCHES, rec.GIC_S
 TAGS = {'EL2_UNREACHABLE': 1, 'DEVICE_OWNED': 2, 'OPERATOR': 3}
 KIND_NAME = {v: k[12:] for k, v in sb.CONSTANTS.items() if k.startswith('SP11SB_KIND_') and k != 'SP11SB_KIND_MAX'}
 DUMMY = b'\x01' * 32        # a nonzero stand-in digest for the early checks, before GUEST.DAT exists
-AUTHORISATION_CAP = 9 << 14     # the approved record, as a file: 64 KiB, then 128 KiB, now 144 KiB on purpose (rung 5: K13, about 142 KB); nothing was cut
+AUTHORISATION_CAP = 10 << 14    # the approved record, as a file: 64 KiB, 128 KiB, 144 KiB, now 160 KiB on purpose (K14); nothing was cut
 BUILDER_REFUSALS = (
     'FACTS_BAD', 'FACTS_DISAGREE', 'NO_DUMPS', 'DUMP_INCOMPLETE', 'FB_UNKNOWN', 'DESCRIPTOR_NOT_READY', 'AUTH_RECORD_MISMATCH', 'Q1N1_TREE_ABSENT',
     'STAGE_REFUSED', 'STAGE_VERIFY_FAILED', 'OUT_DIR_REFUSED', 'OUT_NOT_EMPTY', 'PAYLOAD_BAD', 'REPORT_NOT_ZERO', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING',
@@ -528,6 +528,7 @@ def prepare(a, kind, before_filler=None):
     m1_facts = m1.read_report(read_m1_report(m1_path), monitor, reporter, efi, cpu_start) if m1_path is not None else None
     if m1_facts:
         m1.check_pair_box(a.time_box_s, m1_facts['image']['sha256'])      # the report does not carry the pair's box cap
+        m1.check_pair_form(cpu_start, boot_arg, m1_facts['image']['sha256'], m1_facts['reporter']['sha256'])
     declared = declared_ranges(a.declared)
     early = pack_pin(pin_fields(facts, place, stores, DUMMY, DUMMY, dict(guest_file_size=1024, guest_chunk_count=1, guest_file_sha256=DUMMY,
                                                                        guest_index_sha256=DUMMY)), check=False)
@@ -710,7 +711,7 @@ def build_opts(p, kind, template=False):
                                                                                               'the EFI files that run before the wrapper, named in section 1b')),
                      ('--cpu-start', dict(choices=('stop', 'ack'), default='stop', help='with --m1-run: what the monitor of the pair does with the guest\'s first CPU-start write, '
                                                                                        'which must be what the build report says: stop (the default, every record up to rung 4) or '
-                                                                                       'ack (EXPERIMENTAL, rung 5\'s record only, with --let-panic: docs/SP11-MONITOR-PROFILE.md section 10)')),
+                                                                                       'ack (EXPERIMENTAL, the records of rungs 5 and 6 only, with --let-panic: docs/SP11-MONITOR-PROFILE.md section 10)')),
                      ('--note', dict(help='a text file (printable ASCII, at most 48 lines of 120 characters) appended to the record as its section 6'))):
         p.add_argument(flag, **kw)
     if kind == 'synthetic':
@@ -722,12 +723,12 @@ def build_opts(p, kind, template=False):
         p.add_argument('--panel', choices=('handed', 'withheld', 'console'), required=True,
                        help='D9: SNAP_NO_FB; with --m1-run also `console`: the panel handed and serial=2 in the command line (probes/run.py --console panel)')
         p.add_argument('--boot-arg', default=None, metavar='WORD',
-                       help='with --m1-run --panel console: one more word in the guest\'s command line, from a short list (cpus=1 with the plain monitor, cpu_boot_timeout_secs=120 '
+                       help='with --m1-run --panel console: one more word in the guest\'s command line, from a short list (cpus=1 with the plain monitor, cpu_boot_timeout_secs=120 or =90 '
                             'with --cpu-start ack); any other word is BOOT_ARG_REFUSED')
         p.add_argument('--let-panic', action='store_true',
-                       help='with --m1-run --panel console and --boot-arg cpus=1 --time-box-s 5 (rung 4) or --cpu-start ack --boot-arg cpu_boot_timeout_secs=120 --time-box-s 1 to 60 '
-                            '(rung 5), and no other combination (LET_PANIC_REFUSED): set the monitor\'s PARAMS word let_panic (word 23, offset 0xB8), so that a guest EL1 '
-                            'exception that reaches one branch of the monitor runs XNU\'s own handler instead of ending the run (docs/SP11-STICK-MONITOR.md section 20, K12, K13)')
+                       help='with --m1-run --panel console and --boot-arg cpus=1 --time-box-s 5 (rung 4) or --cpu-start ack with --boot-arg cpu_boot_timeout_secs=120 --time-box-s 60 (rung 5) '
+                            'or =90 --time-box-s 120 (rung 6), and no other combination (LET_PANIC_REFUSED): set the monitor\'s PARAMS word let_panic (word 23, offset 0xB8), so that a guest EL1 '
+                            'exception that reaches one branch of the monitor runs XNU\'s own handler instead of ending the run (docs/SP11-STICK-MONITOR.md section 20, K12 to K14)')
         p.add_argument('--sptm-hvc-calls', choices=(0, 1), type=int, required=True, help='D9: the SPTM HVC kernel patch')
         p.add_argument('--seed', default=rec.DEFAULT_SEED, help='label of the guest\'s boot random seed (SNAP_SEED): the same label, the same bytes')
     if not template:

@@ -25,18 +25,21 @@ PARAMS_WORDS, PARAMS_WATCHDOG, PARAMS_MEM_LOW, PARAMS_MEM_HIGH = 1154, 24, 30, 3
 AFFINITY = 0xFF00FFFFFF     # Aff3:Aff2:Aff1:Aff0 of MPIDR_EL1, the part ACPI states
 ZERO_MIN = 0x10000      # a shorter zero stretch stays data: every ZERO chunk is a table entry, and a table holds 1024
 KNOWN_REFUSALS = {n for _, n, _ in sb.ERRORS} | {'BUILT_SHAPE', 'PARAMS_MISMATCH', 'TIME_BOX_MISMATCH', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING'}   # the builder adds its own
-# (--panel, --boot-arg, --time-box-s) of the records that set the monitor's let_panic PARAMS word (tools/sp11_stick_bundle_m1.py, K12 and K13): rung 4's, with the plain monitor and
-# exactly this box, and rung 5's, with the acknowledging monitor and a box of 1 to its last number.
+# (--panel, --boot-arg, --time-box-s) of the records that set the monitor's let_panic PARAMS word (tools/sp11_stick_bundle_m1.py, K12 to K14): rung 4's, with the plain monitor and
+# exactly this box, and the two of the acknowledging monitor, ACK_FORMS, each with exactly its box: rung 5's (a 60 s box, XNU's wait for CPU 1 at 120 s, longer than the box) and rung 6's
+# (a 120 s box and a wait of 90 s, which ends inside it). The list is closed: no other pair of box and word has a record.
 LET_PANIC_FORM = ('console', 'cpus=1', 5)
 RUNG5_FORM = ('console', 'cpu_boot_timeout_secs=120', 60)
-LET_PANIC_FORMS_TEXT = (f'--panel {LET_PANIC_FORM[0]} --boot-arg {LET_PANIC_FORM[1]} --time-box-s {LET_PANIC_FORM[2]} (the plain monitor) or --panel {RUNG5_FORM[0]} '
-                        f'--boot-arg {RUNG5_FORM[1]} --time-box-s 1 to {RUNG5_FORM[2]} with --cpu-start ack')
+RUNG6_FORM = ('console', 'cpu_boot_timeout_secs=90', 120)
+ACK_FORMS = (RUNG5_FORM, RUNG6_FORM)
+LET_PANIC_FORMS_TEXT = (f'--panel {LET_PANIC_FORM[0]} --boot-arg {LET_PANIC_FORM[1]} --time-box-s {LET_PANIC_FORM[2]} (the plain monitor) or, with --cpu-start ack, '
+                        + ' or '.join(f'--panel {panel} --boot-arg {word} --time-box-s {box}' for panel, word, box in ACK_FORMS))
 
 
 def let_panic_form_ok(panel, boot_arg, box_s, cpu_start='stop'):
     """True when --panel, --boot-arg and --time-box-s are those of a record that sets let_panic for this CPU-start choice; `box_s` None leaves the box out (the label's check)."""
     if cpu_start == 'ack':
-        return (panel, boot_arg) == RUNG5_FORM[:2] and (box_s is None or 1 <= box_s <= RUNG5_FORM[2])
+        return any((panel, boot_arg) == form[:2] and (box_s is None or box_s == form[2]) for form in ACK_FORMS)
     return (panel, boot_arg) == LET_PANIC_FORM[:2] and (box_s is None or box_s == LET_PANIC_FORM[2])
 
 
@@ -289,7 +292,7 @@ def real_built(a, xb, place, facts):
     except (ValueError, SystemExit):
         raise Refused('BUILT_SHAPE', 'an APF device slice of the guest\'s device tree overlaps the guest, the panel or the work area') from None
     built['watchdog'] = a.time_box_s
-    if getattr(a, 'let_panic', False):      # the monitor's PARAMS word let_panic: set for the records of LET_PANIC_FORM and RUNG5_FORM, which the caller's option check has already held it to
+    if getattr(a, 'let_panic', False):      # the monitor's PARAMS word let_panic: set for the records of LET_PANIC_FORM and ACK_FORMS, which the caller's option check has already held it to
         if not let_panic_form_ok(a.panel, boot_arg, a.time_box_s, getattr(a, 'cpu_start', 'stop')):
             raise Refused('LET_PANIC_REFUSED', f'let_panic is for {LET_PANIC_FORMS_TEXT} only')
         built['let_panic'] = True

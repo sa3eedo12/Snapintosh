@@ -32,11 +32,13 @@ m1t, m1g = pn.m1t, rec.m1g
 STATE, spying = PT.STATE, PT.spying
 flat = lambda text: ' '.join(text.split())    # noqa: E731
 LABEL = 'r5-test'               # 7 characters: M1RUN-ACKPANIC- and these are 22 of the 23
-P, F = 'cpus=1', 'cpu_boot_timeout_secs=120'
-BOXES = (60, 10)                # the box of the main fixture and a shorter one, for the sentences that follow the box
+P, F, W90 = 'cpus=1', 'cpu_boot_timeout_secs=120', 'cpu_boot_timeout_secs=90'
+BOXES = (60, 10)                # the box of the main fixture and a shorter one, for the sentences that follow the box (10 is no form of the builder: the fixture alone is built under it)
 OLD = PS.KINDS                  # the five kinds before this one: (D9 choice, word, --let-panic)
 NAMES = {**PS.NAMES, 'rung5': 'rung5'}
 HELD_LIMIT = bb.AUTHORISATION_CAP - 1024
+REAL_PAIRS, REAL_FORMS = dict(m1.ACK_PAIRS), ch.ACK_FORMS      # the builder's own tables, kept before a suite puts the stand-in pair into the first and a shorter box into the second
+STAND_IN = {}                   # the patches of setUpModule, stopped by tearDownModule
 
 
 def ack_report():
@@ -98,15 +100,19 @@ def setUpModule():
         assert code == 0, err
         STATE[NAMES[kind]] = text
     r2.RUNG1_MONITOR = STATE['first_run_pair'][0]       # the first run's real monitor digest: the stand-in pair is not it, and rung 5 says that its own differs
+    fake = STATE['fake']
+    STAND_IN['pair'] = mock.patch.dict(m1.ACK_PAIRS, {word: (AUTH.sha(fake['image']), AUTH.sha(fake['reporter'])) for word in REAL_PAIRS})     # the stand-in pair is every acknowledging form's pair
+    STAND_IN['pair'].start()
     for box in BOXES:
         made = []
-        with spying(made):
+        with spying(made), mock.patch.object(ch, 'ACK_FORMS', (*REAL_FORMS, ('console', F, 10))):
             code, text, err = record5(f'setup-{box}', box)
         assert code == 0, err
         STATE[f'r5-{box}'], STATE[f'r5-{box}-panel'] = text, {**made[0], 'run': r2.facts(box, 'ab' * 32, r2.RUNG1_REPORTER)}
 
 
 def tearDownModule():
+    STAND_IN['pair'].stop()
     PT.tearDownModule()
 
 
@@ -117,20 +123,26 @@ class Options(unittest.TestCase):
         self.assertEqual(caught.exception.name, name)
         return caught.exception
 
-    def test_the_acknowledging_monitor_has_one_record_and_every_other_combination_is_a_named_refusal(self):
+    def test_the_acknowledging_monitor_has_two_records_and_every_other_combination_is_a_named_refusal(self):
         self.assertEqual((ch.RUNG5_FORM, m1.RUNG5_FORM, m1.RUNG5_BOX_MAX_S, m1.DECIDED_BOX_S), (('console', F, 60), ('console', F, 60), 60, 5))
-        self.assertEqual((m1.BOOT_ARG_CPU_START, m1.CPU_STARTS), ({P: 'stop', F: 'ack'}, ('stop', 'ack')))
-        for box in (1, 5, 10, 60):
-            m1.check_options(7, False, box, 'console', 0, F, True, 'ack')
+        self.assertEqual((m1.BOOT_ARG_CPU_START, m1.CPU_STARTS), ({P: 'stop', F: 'ack', W90: 'ack'}, ('stop', 'ack')))
+        self.assertEqual((REAL_FORMS, ch.ACK_FORMS, m1.ACK_FORMS), ((('console', F, 60), ('console', W90, 120)),) * 3, 'the closed list: exactly these two pairs of box and word')
+        for word, box in ((F, 60), (W90, 120)):
+            m1.check_options(7, False, box, 'console', 0, word, True, 'ack')
         m1.check_options(7, False, 5, 'console', 0, P, True, 'stop')        # rung 4's form is what it was
         m1.check_options(7, False, 5, 'console', 0, P, False, 'stop')       # and rung 3's
         bad = {'no --let-panic': ((5, 'console', 0, F, False, 'ack'), 'LET_PANIC_REFUSED'), 'no word': ((5, 'console', 0, None, True, 'ack'), 'BOOT_ARG_REFUSED'),
                'cpus=1 with the acknowledge': ((5, 'console', 0, P, True, 'ack'), 'BOOT_ARG_REFUSED'), 'the timeout word with the plain monitor': ((5, 'console', 0, F, True, 'stop'), 'BOOT_ARG_REFUSED'),
-               'a box of 61 s': ((61, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'), 'a box of 120 s': ((120, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'),
-               'a box of 121 s': ((121, 'console', 0, F, True, 'ack'), 'OPTIONS_BAD'), 'a box of 0 s': ((0, 'console', 0, F, True, 'ack'), 'OPTIONS_BAD'),
-               'the panel handed': ((5, 'handed', 0, F, True, 'ack'), 'BOOT_ARG_REFUSED'), 'the panel withheld': ((5, 'withheld', 0, F, True, 'ack'), 'BOOT_ARG_REFUSED'),
+               'the other timeout word with the plain monitor': ((5, 'console', 0, W90, True, 'stop'), 'BOOT_ARG_REFUSED'),
+               'a box of 61 s': ((61, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'), 'a box of 1 s': ((1, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'),
+               'a box of 5 s': ((5, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'), 'a box of 10 s': ((10, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'),
+               'a box of 120 s with the word of rung 5': ((120, 'console', 0, F, True, 'ack'), 'LET_PANIC_REFUSED'), 'a box of 60 s with the word of rung 6': ((60, 'console', 0, W90, True, 'ack'), 'LET_PANIC_REFUSED'),
+               'a box of 119 s with the word of rung 6': ((119, 'console', 0, W90, True, 'ack'), 'LET_PANIC_REFUSED'), 'a box of 5 s with the word of rung 6': ((5, 'console', 0, W90, True, 'ack'), 'LET_PANIC_REFUSED'),
+               'a box of 121 s': ((121, 'console', 0, W90, True, 'ack'), 'OPTIONS_BAD'), 'a box of 0 s': ((0, 'console', 0, F, True, 'ack'), 'OPTIONS_BAD'),
+               'the panel handed': ((5, 'handed', 0, F, True, 'ack'), 'BOOT_ARG_REFUSED'), 'the panel withheld': ((5, 'withheld', 0, W90, True, 'ack'), 'BOOT_ARG_REFUSED'),
                'another value': ((5, 'console', 0, 'cpu_boot_timeout_secs=60', True, 'ack'), 'BOOT_ARG_REFUSED'), 'cpumask': ((5, 'console', 0, 'cpumask=1', True, 'ack'), 'BOOT_ARG_REFUSED'),
-               'both words': ((5, 'console', 0, f'{P} {F}', True, 'ack'), 'BOOT_ARG_REFUSED'), 'a patched kernel': ((5, 'console', 1, F, True, 'ack'), 'OPTIONS_BAD'),
+               'both words': ((5, 'console', 0, f'{P} {F}', True, 'ack'), 'BOOT_ARG_REFUSED'), 'both timeout words': ((60, 'console', 0, f'{F} {W90}', True, 'ack'), 'BOOT_ARG_REFUSED'),
+               'a patched kernel': ((5, 'console', 1, F, True, 'ack'), 'OPTIONS_BAD'),
                'rung 4 with a longer box': ((10, 'console', 0, P, True, 'stop'), 'OPTIONS_BAD'), 'rung 4 with a shorter box': ((4, 'console', 0, P, True, 'stop'), 'LET_PANIC_REFUSED')}
         for what, (args, name) in bad.items():
             with self.subTest(what):
@@ -140,7 +152,9 @@ class Options(unittest.TestCase):
         self.raises('LET_PANIC_REFUSED', m1.check_let_panic, False, 'console', F, 5, True, 'ack')
         self.assertIsNone(m1.check_let_panic(False, 'console', None, 5, True, 'stop'))
         self.assertEqual([ch.let_panic_form_ok('console', F, 60, 'ack'), ch.let_panic_form_ok('console', F, 61, 'ack'), ch.let_panic_form_ok('console', F, 5, 'stop'),
-                          ch.let_panic_form_ok('console', P, 5, 'stop')], [True, False, False, True])
+                          ch.let_panic_form_ok('console', P, 5, 'stop'), ch.let_panic_form_ok('console', W90, 120, 'ack'), ch.let_panic_form_ok('console', W90, 60, 'ack'),
+                          ch.let_panic_form_ok('console', F, None, 'ack'), ch.let_panic_form_ok('console', W90, None, 'ack'), ch.let_panic_form_ok('console', 'cpu_boot_timeout_secs=1', None, 'ack')],
+                         [True, False, False, True, True, False, True, True, False])
 
     def test_each_bad_form_is_refused_end_to_end_by_name_and_writes_nothing(self):
         cases = {'no --let-panic': ({}, False, 'LET_PANIC_REFUSED'), 'no word': (dict(boot_arg=None), True, 'BOOT_ARG_REFUSED'), 'cpus=1': (dict(boot_arg=P), True, 'BOOT_ARG_REFUSED'),
@@ -178,7 +192,8 @@ class Options(unittest.TestCase):
         with mock.patch.dict(m1.LOW_CAP_MONITORS, {mon: 5}):
             code, text, err = record5('cap-of-the-pair', 60)
             self.assertEqual((code, BT.refusal(text)), (1, 'REFUSED=OPTIONS_BAD'), err)
-            code, text, err = record5('cap-of-the-pair-5', 5)
+            with mock.patch.object(ch, 'ACK_FORMS', (*REAL_FORMS, ('console', F, 5))):      # a 5 s box is no form of the builder: the text of a pair at the cap of 5 is held under a patched list
+                code, text, err = record5('cap-of-the-pair-5', 5)
             self.assertEqual(code, 0, err)
             self.assertIn('at most 5 s (the wrapper\'s PARAMS check)', flat(text))
         self.assertIn('at most 120 s (the wrapper\'s PARAMS check)', flat(STATE['r5-60']))
@@ -196,8 +211,8 @@ class Label(unittest.TestCase):
         with self.assertRaises(ch.Refused) as caught:
             m1.pinned_label('x' * 9, True, 'console', F, True, 'ack')
         self.assertEqual(caught.exception.name, 'PIN_STRING')
-        self.assertEqual(sorted(m1.BOOT_ARGS.values()), ['ACKPANIC-', 'CPUS1-'])
-        marks = [m for m in m1.PANEL_MARKS.values() if m] + list(m1.BOOT_ARGS.values()) + [m1.LET_PANIC_MARK]
+        self.assertEqual(sorted(m1.BOOT_ARGS.values()), ['ACKPANIC-', 'ACKPANIC-', 'CPUS1-'], 'the two acknowledging records share the marker, and the facts label (RUNG5, RUNG6) tells them apart')
+        marks = [m for m in m1.PANEL_MARKS.values() if m] + sorted(set(m1.BOOT_ARGS.values())) + [m1.LET_PANIC_MARK]
         self.assertEqual(len(marks), len(set(marks)))
         self.assertFalse([a for a in marks for b in marks if a != b and a.startswith(b)], 'no marker is the start of another: one label, one kind of record')
 
@@ -252,7 +267,9 @@ class Reader(unittest.TestCase):
         reference = five[1][0]
         self.assertEqual([i for i, (x, y) in enumerate(zip(words(params), words(reference))) if x != y], [PS.WORD], 'word 23 and no other')
         self.assertEqual((words(params)[PS.WORD], words(reference)[PS.WORD]), (1, 0))
-        differing = [c['kind'] for c, d in zip(a, chunks5(5)[0]) if c.get('data') != d.get('data')]
+        with mock.patch.object(ch, 'ACK_FORMS', (*REAL_FORMS, ('console', F, 5))):      # a shorter box is no form of the builder: the fixture alone is built under it
+            shorter = chunks5(5)[0]
+        differing = [c['kind'] for c, d in zip(a, shorter) if c.get('data') != d.get('data')]
         self.assertEqual(differing, [sb.KIND_PARAMS], 'the box is a word of PARAMS and nothing else of the guest changes')
 
     def test_the_key_of_the_guide_and_the_module_of_each_record(self):
@@ -262,7 +279,7 @@ class Reader(unittest.TestCase):
         panel = STATE['r5-60-panel']
         self.assertTrue(panel['let_panic'] and panel['boot_arg'] == F)
         self.assertEqual([pn._rung(panel), pn._rung({**panel, 'boot_arg': P}), pn._rung({**panel, 'boot_arg': P, 'let_panic': False})], [r5, rp, r3])
-        self.assertEqual(sorted(k for k in m1g.PANEL if 'let_panic' in k), ['console+cpu_boot_timeout_secs=120+let_panic', 'console+cpus=1+let_panic'])
+        self.assertEqual(sorted(k for k in m1g.PANEL if 'let_panic' in k), ['console+cpu_boot_timeout_secs=120+let_panic', 'console+cpu_boot_timeout_secs=90+let_panic', 'console+cpus=1+let_panic'])
 
 
 class Kinds(unittest.TestCase):
@@ -295,7 +312,7 @@ class Hygiene(unittest.TestCase):
         for box in BOXES:
             self.assertLessEqual(len(STATE[f'r5-{box}'].encode()), HELD_LIMIT, 'rung 3\'s 15/16 rule (H16, H17) cannot hold: 1 KiB is left free, as for rung 4 (H18); the real record is longer by '
                                  'the facts and the regeneration checks it')
-        self.assertEqual(bb.AUTHORISATION_CAP, 147_456)
+        self.assertGreaterEqual(bb.AUTHORISATION_CAP, 147_456, 'rung 5\'s cap (K13); rung 6 raised it again (K14: tools/test-sp11-stick-monitor-rung6.py pins the number)')
 
     def test_the_modules_and_the_suites_are_under_the_size_of_a_file_of_this_tool(self):
         for rel in ('tools/sp11_stick_bundle_panel_rung5.py', 'tools/sp11_stick_bundle_panel_rung5d.py', 'tools/test-sp11-stick-monitor-rung5.py', 'tools/test-sp11-stick-monitor-rung5-words.py',

@@ -31,8 +31,8 @@ PT.SCRATCH = PT.BLD.SCRATCH = PT.AUTH.SCRATCH = SCRATCH
 pn, rp, r2, r3, m1, rec, BT, ch, sb, bb, BLD = PT.pn, PT.pn.rp, PT.pn.r2, PT.pn.r3, PT.m1, PT.rec, PT.BT, PT.ch, PT.sb, PT.bb, PT.BLD
 STATE, spying = PT.STATE, PT.spying
 flat = lambda text: ' '.join(text.split())    # noqa: E731
-LABEL = 'r4-test'               # 7 characters: M1RUN-LETPANIC- and these are 22 of the 23
-WAIT, WORD = 60, 23             # the silence rule's wait for the fixture's box of 5 s; let_panic in struct params
+LABEL = 'r4-test'    # 7 characters: with M1RUN-LETPANIC- 22 of 23
+WAIT, WORD = 60, 23  # the silence rule's wait for the fixture's box of 5 s; let_panic in struct params
 # The five kinds of record: (the D9 choice, the word, --let-panic); each has its own guest, label and text.
 KINDS = (('withheld', None, False), ('handed', None, False), ('console', None, False), ('console', 'cpus=1', False), ('console', 'cpus=1', True))
 NAMES = dict(zip(KINDS, ('withheld', 'handed', 'console', 'rung3', 'panic')))
@@ -49,7 +49,7 @@ def stand_in(mutate=None, extra_word=None):
         stand, seen = xb.params_blob, {}
 
         def params_blob(built):
-            chunks = built['chunks']        # the stand-in works from the build's own PARAMS bytes, as the real function does from built's fields: the same function on each call
+            chunks = built['chunks']        # the stand-in reads the build's own PARAMS bytes, as the real function does
             chunks[xb.PARAMS_PA] = seen.setdefault(id(chunks), bytes(chunks[xb.PARAMS_PA]))
             words = list(struct.unpack(f'<{ch.PARAMS_WORDS}Q', stand(built)))
             words[WORD] = 1 if built.get('let_panic') else 0
@@ -418,7 +418,7 @@ class Label(unittest.TestCase):
         with self.assertRaises(ch.Refused) as caught:
             m1.pinned_label('x' * 9, True, 'console', 'cpus=1', True)
         self.assertEqual(caught.exception.name, 'PIN_STRING')
-        marks = [m for m in m1.PANEL_MARKS.values() if m] + list(m1.BOOT_ARGS.values()) + [m1.LET_PANIC_MARK]
+        marks = [m for m in m1.PANEL_MARKS.values() if m] + sorted(set(m1.BOOT_ARGS.values())) + [m1.LET_PANIC_MARK]
         self.assertEqual(len(marks), len(set(marks)))
         self.assertFalse([a for a in marks for b in marks if a != b and a.startswith(b)], 'no marker is the start of another: one label, one kind of record')
         self.assertEqual(m1.LET_PANIC_MARK, 'LETPANIC-')
@@ -562,6 +562,7 @@ class Words(unittest.TestCase):
         self.assertEqual(mine - cited, set(), 'every entry of the table is cited')
         for path, first, last, fragments in rp.CITES:
             shift = pn.r5.CITE_DRIFT.get((path, first), 0)
+            first, last, fragments = pn.r5.REPORTER_DRIFT.get((path, first, last), (first, last, fragments))
             held = '\n'.join((ROOT / path).read_text().splitlines()[first - 1 + shift:last + shift])
             for fragment in fragments:
                 with self.subTest(f'{path}:{first}-{last} {fragment}'):
