@@ -300,6 +300,13 @@ def real_built(a, xb, place, facts):
     except (ValueError, SystemExit):
         raise Refused('BUILT_SHAPE', 'an APF device slice of the guest\'s device tree overlaps the guest, the panel or the work area') from None
     built['watchdog'] = a.time_box_s
+    import devicemodel      # the loader's own modules are on the path that it was loaded with
+    import guestprofile_m1 as menu
+    if any(m.kind == devicemodel.SPMI_PMU_RTC_V1 for m in built.get('device_models', ())):
+        try:    # a stick has no host to sample UTC from (probes/run.py does at upload): the menu's constant, so that the bundle is reproducible
+            built['device_models'] = menu.seeded(built['device_models'])
+        except ValueError as error:
+            raise Refused('BUILT_SHAPE', f'the real-time clock model cannot be seeded: {error}') from None
     if getattr(a, 'let_panic', False):      # the monitor's PARAMS word let_panic: set for the records of LET_PANIC_FORM and ACK_FORMS, which the caller's option check has already held it to
         if not let_panic_form_ok(a.panel, boot_arg, a.time_box_s, getattr(a, 'cpu_start', 'stop'), getattr(a, 'guest_profile', None)):
             raise Refused('LET_PANIC_REFUSED', f'let_panic is for {LET_PANIC_FORMS_TEXT} only')

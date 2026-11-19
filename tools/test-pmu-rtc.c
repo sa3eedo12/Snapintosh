@@ -28,6 +28,16 @@ static void submit(uint32_t cmd,const uint8_t *bytes,unsigned n)
         access_at(4,1,word);
     }
 }
+/* AppleSPMIController::extendedReadWriteCommand of the stock 26A428 kernel (read from the J700 kernelcache): a long read (opcodes 0x38..0x3f, at most 8 bytes) of n bytes passes
+ * only when bits 31:16 of the response header, under the mask 0xff, equal (1<<n)-1, one set bit per received byte; the data words that follow are not checked. */
+static int kernel_parity_ok(unsigned reg,unsigned n,unsigned sid)
+{
+    uint32_t cmd=command(reg,n,0,sid),header;
+    submit(cmd,0,0);
+    header=(uint32_t)access_at(8,0,0);
+    for(unsigned i=0;i<(n+3)/4;i++)access_at(8,0,0);
+    return ((header>>16)&0xff)==((1U<<n)-1);
+}
 static uint64_t counter(void)
 {
     uint32_t cmd=command(0xf802,6,0,14);submit(cmd,0,0);
@@ -70,6 +80,11 @@ int main(void)
         cmd=command(invalid[i],4,1,14);submit(cmd,seconds,4);
         CHECK(access_at(8,0,0)==(cmd&0xfff));CHECK(!memcmp(before,state.pmu_rtc.offset,6));
     }
+    /* The reads that the stock clock driver makes at start (the film of boot 27 shows the first, f704 for 4 bytes, failing with parity_rcv=0x0000) pass the stock kernel's
+     * predicate; the SOCD container header (8800, 5 bytes), a scratch-pad word and another slave do not, as on the film. */
+    CHECK(kernel_parity_ok(0xf704,4,14));CHECK(kernel_parity_ok(0xf715,2,14));CHECK(kernel_parity_ok(0xf802,6,14));
+    CHECK(!kernel_parity_ok(0x8800,5,14));CHECK(!kernel_parity_ok(0xf700,2,14));CHECK(!kernel_parity_ok(0x8f80,8,14));CHECK(!kernel_parity_ok(0xf704,4,13));
+    access_at(0x80,1,UINT32_MAX);
     /* Native short writes (opcode40, data at 31:24) reach no RTC field: NACK,
      * one header, failed write ACK, and no change to either offset field. */
     uint64_t rejected=state.pmu_rtc.rejected;

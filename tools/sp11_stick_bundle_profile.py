@@ -3,9 +3,10 @@
 
 The base board j700ap-26A428 is the board of every bundle so far and stays the default: a build without the option makes the call it always made and the same bytes. The
 other eight are virtual board descriptions of probes/guestprofile_m1.py (the base board and a fixed union of whole root sets): they change the device tree and the one
-boot_args word that holds its length, and nothing else. What this module adds to a build is a closed list (a name outside it is GUEST_PROFILE_REFUSED), a mark per profile
-for the pinned label (a record names its profile, and the PIN.DAT of one profile is not that of another), a check that a registered profile is whole root sets
-(GUEST_PROFILE_SPLIT) and a read-back of the device tree that the loader built (GUEST_PROFILE_READBACK)."""
+boot_args word that holds its length, and nothing else. A ninth, quiet-rtc, is the quiet board with the PMU's real-time clock bound (RTC_MENU): the same device tree, and three
+words of one device model of the PARAMS chunk (the model is seeded at RTC_EPOCH_US, the constant of the menu). What this module adds to a build is a closed list (a name outside it is
+GUEST_PROFILE_REFUSED), a mark per profile for the pinned label (a record names its profile, and the PIN.DAT of one profile is not that of another), a check that a registered
+profile is whole root sets (GUEST_PROFILE_SPLIT) and a read-back of the device tree and of the device models that the loader built (GUEST_PROFILE_READBACK)."""
 import contextlib
 import hashlib
 import io
@@ -15,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'probes'))
 import sp11_stick_bundle_chunks as ch  # noqa: E402
+import devicemodel  # noqa: E402
 import guestprofile as gp  # noqa: E402
 import guestprofile_m1 as menu  # noqa: E402
 import sp11_stick_bundle_windows as win  # noqa: E402
@@ -24,11 +26,11 @@ ch.KNOWN_REFUSALS.update(REFUSALS)
 menu.register()         # the loader's configure_guest looks a profile up in guestprofile.PROFILES
 DEFAULT = ch.GUEST_PROFILE_DEFAULT
 assert DEFAULT == menu.BASE.name        # the literal of sp11_stick_bundle_chunks.py is the loader's own default, which this file does not import
-NAMES = (DEFAULT, *menu.MENU)           # the whole list: nothing that probes/guestprofile.py registers for the A16 route is admitted
+NAMES = (DEFAULT, *menu.MENU, *menu.RTC_MENU)    # the whole list: nothing that probes/guestprofile.py registers for the A16 route is admitted
 # What a pinned label carries for each profile, after the marker of the guest's other choices (m1.pinned_label): two characters, so that M1RUN-LETPANIC- (15) and the mark
 # leave a facts label of six (RUNG10). Every non-default profile is the quiet board and what it adds: Q quiet, A +aop, D +dcp (with dcpext), V +ave, C +clpc, U +usb,
-# S +smc (the smc/btm unit with the three sets it needs), X all of them but clpc and usb.
-MARKS = dict(zip(NAMES, ('', 'Q-', 'A-', 'D-', 'V-', 'C-', 'U-', 'S-', 'X-')))
+# S +smc (the smc/btm unit with the three sets it needs), X all of them but clpc and usb, R quiet and the PMU's real-time clock (RTC_MENU).
+MARKS = dict(zip(NAMES, ('', 'Q-', 'A-', 'D-', 'V-', 'C-', 'U-', 'S-', 'X-', 'R-')))
 assert len(set(MARKS.values())) == len(MARKS) == len(NAMES)
 MARK_CHARS = 2
 QUIET = NAMES[1]                        # j700ap-26A428-m1-quiet: the one profile that a record is written for (RUNG7_PROFILES)
@@ -82,8 +84,9 @@ def read_back(xb, built, name):
     and the declarations of its deferred functions, and nothing else. For a profile other than the default (the default is the bundle of every earlier record and is
     not touched; it returns None), GUEST_PROFILE_READBACK when: a pin is not the digest of its subtree before deferral; a withdrawn root or a node under one is still published; a node
     that is not under a withdrawn root is not; a property or a child list of a retained node differs from the tree before deferral, but for the declarations withdrawn; or the
-    chunk is not the serialisation of the tree it parses to; for the profile quiet, the windows of the withdrawn nodes are not the table of tools/sp11_stick_bundle_windows.py, which the
-    record of rung 7 names in four places. Returns the number of nodes of the published tree."""
+    chunk is not the serialisation of the tree it parses to; the device models are not the loader's own (with the clock model seeded at RTC_EPOCH_US for a profile of RTC_MENU and
+    with no clock model for any other) or the PARAMS chunk is not their serialisation; for the profile quiet, the windows of the withdrawn nodes are not the table of
+    tools/sp11_stick_bundle_windows.py, which the record of rung 7 names in four places. Returns the number of nodes of the published tree."""
     if name == DEFAULT:
         return
     from appledt import DeviceTree
@@ -92,12 +95,16 @@ def read_back(xb, built, name):
     def fail(detail):
         raise ch.Refused('GUEST_PROFILE_READBACK', f'{name}: {detail}')
     blob = built.get('chunks', {}).get(xb.DEVICETREE_PA)
+    configured = xb.GUEST_PROFILE
     try:
         published = DeviceTree(bytes(blob))
+        xb.GUEST_PROFILE = profile      # the tree and the models before deferral are those of the profile read back, whatever the loader was last configured for
         with contextlib.redirect_stdout(io.StringIO()):
             before = xb.build_devicetree(include_deferred=True)
     except (Exception, SystemExit) as error:
         fail(f'the published tree or the tree before deferral cannot be read ({type(error).__name__})')
+    finally:
+        xb.GUEST_PROFILE = configured
     roots = [spec.node for spec in profile.deferred_subtrees]
     for spec in profile.deferred_subtrees:
         if spec.node not in before.nodes:
@@ -124,6 +131,25 @@ def read_back(xb, built, name):
             fail(f'the children of {node} are not those of the generated tree without the withdrawn roots')
     if published.serialize() != bytes(blob):
         fail('the chunk is not the serialisation of the tree it parses to')
+    # The device models: the loader's own, with the clock model seeded at RTC_EPOCH_US in a profile of RTC_MENU and with none in any other (a clock that is unseeded is refused by the
+    # monitor at start; one that is bound where the profile does not say so is a guest that no record describes), and the PARAMS chunk is their serialisation.
+    expected = tuple(before.device_models)
+    if name in menu.RTC_MENU:
+        try:
+            expected = tuple(menu.seed(expected))
+        except ValueError as error:
+            fail(f'the clock model of the loader cannot be seeded: {error}')
+    models = tuple(built.get('device_models', ()))
+    if any(m.kind == devicemodel.SPMI_PMU_RTC_V1 for m in models) != (name in menu.RTC_MENU):
+        fail('the real-time clock is ' + ('not bound' if name in menu.RTC_MENU else 'bound') + ' in the device models, and the profile says the opposite')
+    if models != expected:
+        fail('the device models are not the loader\'s own' + (' with the clock seeded at RTC_EPOCH_US' if name in menu.RTC_MENU else ''))
+    try:
+        params = xb.params_blob(built)
+    except (Exception, SystemExit) as error:
+        fail(f'the PARAMS chunk cannot be made again from the device models ({type(error).__name__})')
+    if bytes(built.get('chunks', {}).get(xb.PARAMS_PA, b'')) != bytes(params):
+        fail('the PARAMS chunk is not the serialisation of the device models')
     if name == QUIET:
         base_roots = [spec.node for spec in gp.get_profile(DEFAULT).deferred_subtrees]
         base_gone = {n for n in before.nodes if any(n == r or n.startswith(r + '/') for r in base_roots)}
