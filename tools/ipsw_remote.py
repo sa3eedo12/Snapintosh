@@ -498,6 +498,22 @@ def open_zip(source):
         raise NotAZipError(f'not a readable zip archive: {error}') from error
 
 
+def open_ipsw(source, *, max_fetch=DEFAULT_MAX_FETCH, factory=None):
+    """(zipfile.ZipFile, RangeFile or None): an IPSW given as a path, or as an http(s):// URL read in place.
+
+    A path opens as before and has no RangeFile. A URL opens over Range requests under the fetch cap (factory replaces
+    RangeFile, as tools/extract-firmware.py's tests do). The caller closes both.
+    """
+    if not str(source).lower().startswith(('http://', 'https://')):
+        return zipfile.ZipFile(source), None
+    remote = (factory or RangeFile)(str(source), max_fetch=max_fetch)
+    try:
+        return open_zip(remote), remote
+    except BaseException:
+        remote.close()
+        raise
+
+
 def describe(source):
     """The member table (name, compressed size, local header offset) from the central directory alone.
 

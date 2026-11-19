@@ -13,6 +13,7 @@ stated otherwise.
 | Python 3 | For every host tool. The Surface Pro 11 board-descriptor, boot-contract and ACPI-check suites need 3.10 or newer |
 | Homebrew `llvm`, `meson`, `ninja` | For the air2ir3 shader compiler and its Mesa build. The scripts expect LLVM at `/opt/homebrew/opt/llvm` |
 | Homebrew `lzfse` | `tools/extract-firmware.py` unwraps the restore image's compressed IM4P payloads with `lzfse -decode` |
+| Optional: the Python `cryptography` package with `hazmat.primitives.hpke` | Only for `tools/extract-basesystem.py`, which opens the BaseSystem archive's wrapped key with HPKE. `cryptography` 48.0.0 has the module (VERIFIED on the host that wrote the tool); install it into the interpreter that runs the tool, and note that a shell that has put Homebrew's `python3` first in `PATH` may not be the interpreter that has it |
 | Optional: Homebrew `lld` (`lld-link`) and QEMU with the EDK2 AArch64 images | The Surface Pro 11 EFI probe and X2 test image build with `clang` and `lld-link` and nothing else; QEMU is needed only for the emulator half of their tests, which print SKIP without it. See [the EFI probe subsection](#efi-state-probe-for-the-surface-pro-11-x1) of section 7 |
 | Submodules | Clone with `git clone --recurse-submodules`, or run `git submodule update --init` in an existing checkout. The kext, plug-in, shader compiler and two drivers live in their own repositories (see the README's Repositories section) |
 | q1n1 | A checkout of [q1n1](https://github.com/Snapintosh/q1n1) next to this repository, at `../q1n1`. Several tools import its proxy client and helpers from there |
@@ -52,6 +53,45 @@ CDN honoured Range for the macOS 27.0 (26A428) image on 2026-11-16 (OBSERVED,
 one run: 24 requests and 67,054,724 bytes, 0.25% of the archive, for the J700
 boot set); the unwrapped kernelcache, device tree, TXM and SPTM digests equal
 the ones this repository pins. The local-path form behaves as before.
+
+### The BaseSystem root (optional: the RAM-root route)
+
+The RAM-root route boots Apple's BaseSystem (recoveryOS) from a raw APFS image. The guest profile pins three inputs
+(`probes/guestprofile.py`): the raw image `basesystem-26A428.apfs` by SHA-256, its 208-byte root-hash payload
+`basesystem-26A428.root-hash` and its trust cache `basesystem-26A428.trustcache`. They come from the same restore image, again
+without storing it, and land beside the boot set:
+
+```sh
+python3 tools/extract-basesystem.py <ipsw-url>           # plan only: about 6 MB of public metadata, no root bytes, no key request
+python3 tools/extract-basesystem.py <ipsw-url> --fetch   # the root; stops at the first failure (see below)
+python3 tools/extract-root-hash.py <ipsw-url> --output downloads/extracted/j700ap/basesystem-26A428.root-hash   # URL form of the small extractors
+python3 tools/prepare-trust-cache.py <ipsw-url>
+python3 tools/test-extract-basesystem.py                 # host tests on synthetic data; no network
+```
+
+`--fetch` reads three small members and the BaseSystem member (`022-20292-673.dmg.aea`, 1,308,622,848 bytes, stored in the zip)
+over Range requests (hard cap `--max-fetch-mib`, default 1300), makes ONE unauthenticated request to the key URL named in the
+member (host `wkms-public.apple.com`, no retry, no other source; `--key-redirects N` is the operator's explicit allowance for N
+redirect hops, default 0), opens the wrapped key with HPKE, streams the member to disk checking its SHA-384 against the manifest,
+runs `aea decrypt` with the key in a 0600 file under `build/`, converts the UDIF image to the raw container with `hdiutil convert
+-format UDTO` and checks it against the profile pin (size a multiple of 16 KiB, `NXSB` at byte 32, 4096-byte blocks, SHA-256).
+Each intermediate is deleted the moment the next stage is verified, no stage runs that would leave less than
+`--min-free-gib` (default 25) free, and the key is never printed. Without `--fetch` it stops after the plan. Disk (INFERRED from the
+sizes): the member is 1.22 GiB, and while the unwrapped image is converted it sits beside the raw image (1,776 MiB in the A16
+history), so the flow needs at most about 28.5 GiB free at the start to keep the default 25 GiB floor. A stop never loses the one
+key request: the 0600 key file stays until the decrypt has succeeded and a stop after the decrypt keeps the unwrapped image, so a
+re-run continues from what is on disk (a key file is validated and reused, an archive is re-checked against the manifest, an
+unwrapped image goes straight to the conversion). A leftover it cannot continue from (an archive without its key file, an archive
+beside an unwrapped image) is refused and never deleted; deleting the key file to start over makes a new key request a new decision.
+
+Evidence, 2026-11-19. VERIFIED (read on the host): the member names, the root-hash payload (208 bytes) and the trust cache
+(26,496 bytes, 1,103 entries) of the 26A428 image match the profile pins; the AEA header is profile 1 with the key URL, a 65-byte
+encapsulation and a 48-byte wrapped key; the tool's tests (`tools/test-extract-basesystem.py`) pass on synthetic archives, with
+the real `aea` and `hdiutil` and a local HPKE key. OBSERVED (one run): the key URL answered HTTP 301 to a request that did not
+follow redirects, so no key was obtained and the root was never fetched; the redirect's Location was not recorded. UNKNOWN:
+whether following the redirect returns the key, the HPKE parameters for the real archive (the tool uses empty info, as the public
+blacktop/ipsw client does), the unwrapped image's format and whether its raw form equals the pin. A partition-mapped image is
+refused, not sliced (UNIMPLEMENTED). Everything this writes is Apple's and stays under git-ignored `downloads/`.
 
 Install the 26A428 KDK from Apple's developer downloads.
 

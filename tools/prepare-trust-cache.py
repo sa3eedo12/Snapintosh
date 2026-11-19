@@ -1,29 +1,40 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Extract the profile's BaseSystem trust cache after checking its manifest."""
+"""Extract the profile's BaseSystem trust cache after checking its manifest.
+
+The IPSW is a path or an https:// URL; a URL is read in place with Range requests (tools/ipsw_remote.py), a few MB for this member.
+"""
 import argparse
+import contextlib
 import hashlib
 from pathlib import Path
 import plistlib
+import runpy
 import sys
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'probes'))
 from guestprofile import get_profile
 
 
-def main():
+def main(argv=None, remote_factory=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('ipsw', type=Path)
+    ap.add_argument('ipsw', help='the restore IPSW: a path, or an https:// URL read in place with Range requests')
     ap.add_argument('--guest-profile', default='j700ap-26A428-no-clpc')
     ap.add_argument('--output', type=Path)
-    args = ap.parse_args()
+    ap.add_argument('--max-fetch-mib', type=int, default=None,
+                    help='URL only: refuse to fetch more than this many MiB in total (default 16)')
+    args = ap.parse_args(argv)
+    firmware = runpy.run_path(str(ROOT / 'tools/extract-firmware.py'))
+    ipsw_remote = firmware['load_remote']()
+    if args.max_fetch_mib is not None and (not firmware['is_url'](args.ipsw) or args.max_fetch_mib < 1):
+        ap.error('--max-fetch-mib must be at least 1 and applies only to an http(s):// IPSW')
     profile = get_profile(args.guest_profile)
     spec = profile.trust_cache
     if spec is None or profile.root_hash is None:
         raise ValueError('selected guest has no audited BaseSystem trust cache')
-    with zipfile.ZipFile(args.ipsw) as archive:
+    archive, remote = ipsw_remote.open_ipsw(args.ipsw, max_fetch=(args.max_fetch_mib or 16) << 20, factory=remote_factory)
+    with archive, (remote if remote is not None else contextlib.nullcontext()):
         manifest = plistlib.loads(archive.read('BuildManifest.plist'))
         if manifest['ProductBuildVersion'] != profile.root_hash.build_id:
             raise ValueError('IPSW build does not match guest profile')
