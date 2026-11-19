@@ -26,8 +26,8 @@ this note: they belong to the run that made them.
 ## 2. The five files
 
 The bundle is the manifest of q1n1's stick runner: at most 5 files of at most 256 MiB, called in manifest order, the first a payload,
-a name `<stem>.BIN` marking a payload and every other file data that is never called (`#define Q1N1_PAYLOAD_MAX_FILES`[q1n1:platform/uefi/sp11-payload.h:71],
-`#define Q1N1_PAYLOAD_MAX_FILE_BYTES`[q1n1:platform/uefi/sp11-payload.h:76]; VERIFIED). The position in the manifest is the role.
+a name `<stem>.BIN` marking a payload and every other file data that is never called (`#define Q1N1_PAYLOAD_MAX_FILES`[q1n1:platform/uefi/sp11-payload.h:78],
+`#define Q1N1_PAYLOAD_MAX_FILE_BYTES`[q1n1:platform/uefi/sp11-payload.h:112], its value with the big-file gate off; VERIFIED). The position in the manifest is the role.
 
 | Index | File | Kind | Content | Size rule |
 | --- | --- | --- | --- | --- |
@@ -289,7 +289,7 @@ A wrapper that never returns (a hang or a fault) is not followed by SNAPREP: the
 ## 7. The gate `SNAP_SP11_STICK`
 
 The wrapper, loader and reporter sources are built only under `-DSNAP_SP11_STICK=1`. It is off by default, needs `-DSNAP_PLATFORM_SP11=1` (an `#error` otherwise, the form of
-`#error "Q1N1_SP11_PAYLOAD=1 needs SNAP_PLATFORM_SP11=1`[q1n1:platform/uefi/sp11-payload.h:46]) and accepts no value but 0 and 1. The sources enter the link through the `OPTIONAL` table of `probes/run.py`, whose rule is
+`#error "Q1N1_SP11_PAYLOAD=1 needs SNAP_PLATFORM_SP11=1`[q1n1:platform/uefi/sp11-payload.h:53]) and accepts no value but 0 and 1. The sources enter the link through the `OPTIONAL` table of `probes/run.py`, whose rule is
 `Units linked only when their opt-in define is in FLAGS`[probes/run.py:129]. `probes/sp11-stick-bundle.h` itself has no gate: it declares a contract and no existing build includes it (the test checks the build files).
 
 With the gate off the A16 monitor is byte-identical: `tools/monitor_baseline.py` compares the size, the binary and the linked ELF for its four flag sets (`SETS = ('bare', 'base', 'control', 'fast')`[tools/monitor_baseline.py:40]) and must say IDENTICAL.

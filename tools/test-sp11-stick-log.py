@@ -2635,7 +2635,7 @@ class Document(unittest.TestCase):
     @classmethod
     def section_24_problems(cls, text):
         """What is wrong with section 24, boot 26 (the sixth run of the SP11 monitor entry, M1 rung 6: guest timer interrupts delivered, the stop at the scaler's registers), or with the places that count on it; an empty list is a pass."""
-        body = text.split('## 24. Result of boot 26', 1)[1].split('## Appendix A.', 1)[0]
+        body = text.split('## 24. Result of boot 26', 1)[1].split('## 25. Result of boot 27', 1)[0].split('## Appendix A.', 1)[0]
         flat = ' '.join(body.split())
         problems = []
         pages = re.findall(r'```text\n(.*?)```', body, re.S)
@@ -2786,9 +2786,174 @@ class Document(unittest.TestCase):
             self.assertIn(old, head, f'the seed {old!r} no longer matches the text: fix the seed, not the check')
             self.assertTrue(self.section_24_problems(head.replace(old, new, 1) + marker + rest), f'a seeded fault went unseen: {old!r} -> {new!r}')
 
+    @classmethod
+    def section_25_problems(cls, text):
+        """What is wrong with section 25, boot 27 (the seventh run of the SP11 monitor entry, M1 rung 7: the quiet profile, the kernel waiting for a root device at the box's end), or with the places that count on it; an empty list is a pass."""
+        body = text.split('## 25. Result of boot 27', 1)[1].split('## Appendix A.', 1)[0]
+        flat = ' '.join(body.split())
+        problems = []
+        pages = re.findall(r'```text\n(.*?)```', body, re.S)
+        if [len(page.splitlines()) for page in pages] != [7, 11]:
+            return ['the blocks of boot 27 are not the identity lines (7 lines) and the monitor lines (11 lines)']
+        identity, monitor = pages
+        for line in ('MON IMAGE ... BOX_S=120', 'GUEST.DAT BASE=0XC5D04000 BYTES=118885568', 'CHUNKS TOTAL=46 COPIED=46 HASHED=27', 'PLACE BASE=0X880000000 SIZE=0X2A000000',
+                     'PAYLOAD DONE INDEX=0 ... LOADS=2 FAULTS=0 REFUSED=0 LINES=29 ...', 'PAYLOAD DONE INDEX=1 ... LOADS=1 ... LINES=40 DROPPED=0', 'VERDICTS PIN=OK GUEST=OK'):
+            if line not in identity:
+                problems.append(f'the identity lines lost {line!r}')
+        for line in ('MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=2307553890 STACK=10888/262144', 'MON COUNTS EVENTS=512 TRAPS=195787 ABORTS=0 STEPS=2007 CALLS=65009 DROPPED=129122',
+                     'MON STOP WATCHDOG PC=0XFFFFFE000B8716A8 A=0X96000047 B=0XFFFFFE110E00C040', 'MON STOP C=0XFFFFFE000BA87EA0',
+                     'MON EXIT PC=0XFFFFFE000B8716A8 SPSR=0X604003C4 ESR=0X0 FAR=0X0', 'MON CLK READS=62887 AFTER=2305631249 FIRST=0X34C3B41C LAST=0XBE30B526',
+                     'MON TIM IRQS=1560 ASSERTS=3134 CLEARS=3134 VECTORS=1519 CTL=0X1 CVAL=0XEDFD7657', 'MON TIM WRITES=5679 IRQPC=0XFFFFFE000BA7D070 READS=2014',
+                     'MON CNT MAPS=61035 MAPFAIL=0 DISP=0 PANIC=0 UNDEF=0 MAPOUT=56922 LOGDROP=129122', 'MON CNT CONDROP=0 RNGDROP=816 MAPDEV=995 MMIORD=10 MMIOWR=10 UARTTX=0',
+                     'MON ACK COUNT=15 ... MORE=7'):
+            if line not in monitor:
+                problems.append(f'the monitor lines lost {line!r}')
+        for phrase in ('Boot 27 is the seventh run of the SP11 monitor entry and the third with the monitor\'s CPU-start acknowledge',
+                       'this log repeats neither the digest nor the wording',
+                       'its device tree is the profile `quiet`', 'which withdraws 43 nodes (the video decoder, the scaler, the ProRes engine and nine audio roots, with the nodes under them; 395 nodes become 352)',
+                       'and the command line\'s `cpu_boot_timeout_secs` is 120 (boot 26\'s was 90)', 'GUEST.DAT is 118,885,568 bytes',
+                       'It names six results for rung 7 (its section 5d)',
+                       'a machine OCR of 150 frames (9,258 lines) that cannot read the skewed or dim frames',
+                       'so t0 is 26 s of the film, give or take 1 s',
+                       'The record expected `Waiting on <dict>` about 62 s in; the film has it at t0 + 60 s, 2 s earlier (OBSERVED).',
+                       '`TICKS=2307553890` is 120.1851 s, 3,553,890 ticks (0.1851 s) above the box of 120 s (arithmetic)',
+                       'boot 27 made 18,786 more traps and 522 more steps than boot 26 and 1,800 fewer calls, in a call of 58.58 s more',
+                       '`ABORTS=0`, `MAPFAIL=0`, `DISP=0` and `UNDEF=0` say that no monitor-side fault happened',
+                       '`VECTORS=1519` guest FIQ vector entries and `IRQS=1560` monitor timer interrupts in 120.185 s, 12.6 entries a second',
+                       '`CVAL=0XEDFD7657` lies 4,232,167 guest ticks (about 176 ms at 24 MHz) after 1.25 times `LAST`',
+                       'No panic text is on any frame',
+                       'No `RTC did not show up`, no `getGMTTimeOfDay` and no `!BSD` line is on the film',
+                       'and it is not true of the clock driver\'s own start lines: three of them are on the film (OBSERVED, items 2 and 3)',
+                       'is on no frame: the OCR of every frame finds `regist` only in `apfs_sysctl_register`, `ktriage_register` and `done registering sysctls`',
+                       'That the driver\'s start does not reach its publish, because its offset read fails, is INFERRED; whether the failed reads are the cause is UNKNOWN until the host analysis.',
+                       'is the monitor\'s own stop timer ending the run at the box\'s end',
+                       'The PC is boot 25\'s, `0XFFFFFE000B8716A8`: the same address in the same kernelcache',
+                       '`A=` is `ESR_EL1` `0x96000047`: exception class `0x25` (a data abort at the same exception level), a 32-bit instruction, `DFSC` `0x07` (a translation fault at level 3) and `WnR` 1 (a write)',
+                       'A fault of the kernel at that address that the kernel handled is INFERRED (no panic text, `PANIC=0`, `UNDEF=0`); which routine is at `0XFFFFFE000BA87EA0`, and why a kernel write faults there, is UNKNOWN',
+                       'this is the first class that fits, so the film is in it: **RUNG 7 KERNEL WAITING**',
+                       'held by the record\'s own rule: `TICKS=2307553890` is 3,553,890 ticks above the box',
+                       'the only new file is `SP11\\DONE1.TXT` (47 bytes, the Shell\'s marker `AUTORUN M1RUN-ACKPANIC-Q-RUNG7 STEP 1 STARTED`)',
+                       'every file of the staged list is byte-identical to the stage tree on the stick (18 of 18, the host verification exit 0',
+                       'held on the host (the coordinator\'s check; says nothing about hardware): `git diff --stat` of rung 6\'s tree (the commit `0f6174d`) against the committed tree of this record (the commit `5f2f8dd`) over `probes/`, `compat/`, `shadow/`, `config/`, `gpu/` and `drivers/` lists one file, the new builder-side data module `probes/guestprofile_m1.py`',
+                       'so the monitor sources of rungs 6 and 7 are identical and the pair on the stick is rung 6\'s',
+                       'and was not run again on the committed tree, since no monitor source changed between the two (NOT RUN again) | VERIFIED (host, git diff) |',
+                       'M1 PASSED again, by the rows a to e of the page, row f of the stick and row g of the host (a `git diff`, above)',
+                       '`MON REGS RESTORED=YES`, printed twice, as a `SNAPMON` line and as a `SNAPREP` line, and its `GIC RESTORE CLEAN=YES` are OBSERVED',
+                       '`MON REGS RESTORED=YES` and `GIC RESTORE CLEAN=YES`, `STACK=10888/262144`, `ABORTS=0`; f and g below',
+                       'The memory warning of boot 26 is on this film too (a 4K frame; OBSERVED): `memorystatus: System is unhealthy. memorystatus_available_pages: 9094 compressor_size:0`',
+                       '9,094 pages of 16 KiB are about 142 MiB (arithmetic), the kernel noticing a guest of 384 MiB (INFERRED that the size is the cause)',
+                       'The memory warning of boot 26 appears again in boot 27 (OBSERVED, 25.3: `memorystatus_available_pages: 9094`, 9,094 free pages of 16 KiB, about 142 MiB, `wired_mem_exhaustion: 1` and `no victim found (action: 10)`, no panic): a guest of 384 MiB is a warning so far; whether it is enough for anything later is UNKNOWN.',
+                       'Rung 7\'s class is **RUNG 7 KERNEL WAITING**',
+                       'None of the record\'s falsifiers occurred',
+                       'The quiet profile removed the stop at `A=0X291000004`, and no other unmodelled device stopped the run in 120 s',
+                       'Whether those drivers started at all, and whether any of the other 42 withdrawn nodes mattered, is UNKNOWN.',
+                       'is the text that `IOFindBSDRoot` prints before its wait for a root device',
+                       'so the monitor\'s SPMI model\'s parity bits are the suspect (INFERRED)',
+                       'whether the M1 monitor binary carries that model is UNKNOWN',
+                       'It is the first run whose kernel passes `bsd_init` and whose last line names what it waits for',
+                       'The CPU-boot panic at about 122 s: the box ended before it, as designed',
+                       'A root device: the wait is the next stop, and the guest has no storage.',
+                       'Nothing is authorised by this section, and no next step is chosen here',
+                       'Hardware: boot 27 only; every other statement of this section is a reading of its film or of the sources on the host.'):
+            if phrase not in flat:
+                problems.append(f'section 25 lost {phrase[:70]!r}')
+        if re.search(r'[0-9A-Fa-f]{32,}|[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}|e42f451d|d9d79c87|64d87443|67d814f6|749361cf', body):
+            problems.append('a digest, an identifier or an approval prefix in section 25')
+        for context in re.findall(r'VERIFIED.{0,70}', flat):
+            if not re.search(r'host|read|source|arithmetic|chain|code|identity|range|coordinator|check', context):
+                problems.append(f'a VERIFIED in section 25 that is not a host fact: {context!r}')
+        if re.search(r'desktop|userspace boots|is stable|stability is', flat, re.I) or len(re.findall(r'macOS boots', flat)) != 1 or 'and not that macOS boots' not in flat:
+            problems.append('section 25 claims more than a kernel waiting for a root device')
+        for row in body.split('### 25.5', 1)[1].split('### 25.6', 1)[0].splitlines():
+            if row.startswith('| ') and not row.startswith(('| ---', '| Result or row')) and not re.search(r'OBSERVED|VERIFIED|INFERRED|UNKNOWN|NOT RUN', row.rsplit('|', 2)[-2]):
+                problems.append(f'a row of 25.5 has no label: {row[:50]!r}')
+        whole = ' '.join(text.split())
+        for place, needle in (('the top paragraph', 'Boot 27 (section 25) ran rung 7, the same acknowledging monitor and reporter with the `quiet` device-tree profile (43 nodes withdrawn by data) and `cpu_boot_timeout_secs=120`: '
+                                                    'the scaler stop did not return, the kernel ran the whole box of 120 s through `bsd_init` and was waiting for a root device when the monitor\'s own watchdog stopped it '
+                                                    '(`MON STOP WATCHDOG`, 120.185 s;'),
+                              ('the top paragraph', 'the record\'s class for rung 7 is RUNG 7 KERNEL WAITING, and M1 PASSED.'),
+                              ('item 21 of section 1', '21. **Boot 27 (2026-11-20; section 25; on video; OBSERVED, one unit, one boot): M1 rung 7,'),
+                              ('item 21 of section 1', 'No next step is authorised. Hardware: boot 27 only.'),
+                              ('item 20 of section 1', 'the two timeout messages of those waits are serial-only (`kprintf`) and cannot be on the film, while the clock driver\'s own start lines can be (three are on boot 27\'s film, section 25).'),
+                              ('the evidence summary', 'rung 7\'s class is RUNG 7 KERNEL WAITING, M1 PASSED (the coordinator\'s reading) | 25 |'),
+                              ('section 24.6', 'That statement is about those two messages only: the clock driver\'s own start lines are on the film'),
+                              ('section 24.7', 'Boot 27 (section 25) ran after this section was written: the quiet profile (the scaler withdrawn by data) removed this stop, and the kernel went through `bsd_init` to a wait for a root device.')):
+            if needle not in whole:
+                problems.append(f'{place} does not count on boot 27')
+        return problems
+
+    def test_section_25_keeps_the_facts_of_boot_27(self):
+        """Section 25 records boot 27 (M1 rung 7): its page values keep their labels, the class is RUNG 7 KERNEL WAITING, M1 passed, the wait for a root device is a reading of the last line, the clock driver's start lines are on the film and
+        the two timeout messages are not, the root device, the CPU-boot panic and the cause of the failed PMU reads are UNKNOWN; each seeded fault must be found."""
+        self.assertEqual(self.section_25_problems(self.text), [])
+        body_seeds = (('Boot 27 is the seventh run of the SP11 monitor entry and the third', 'Boot 27 is the sixth run of the SP11 monitor entry and the third'),
+                      ('this log repeats neither the digest nor the wording', 'the digest is 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'),
+                      ('and the command line\'s `cpu_boot_timeout_secs` is 120 (boot 26\'s was 90)', 'and the command line\'s `cpu_boot_timeout_secs` is 90 (boot 26\'s was 120)'),
+                      ('GUEST.DAT is 118,885,568 bytes', 'GUEST.DAT is 118,908,480 bytes'),
+                      ('GUEST.DAT BASE=0XC5D04000 BYTES=118885568', 'GUEST.DAT BASE=0XC5D04000 BYTES=118908480'),
+                      ('MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=2307553890', 'MON RET=0X0 STATUS=0X0 ENTERED=1 TICKS=1182753011'),
+                      ('MON STOP WATCHDOG PC=0XFFFFFE000B8716A8 A=0X96000047', 'MON STOP S2_FAULT PC=0XFFFFFE000B8716A8 A=0X96000047'),
+                      ('MON COUNTS EVENTS=512 TRAPS=195787', 'MON COUNTS EVENTS=512 TRAPS=177001'),
+                      ('CLEARS=3134 VECTORS=1519 CTL=0X1', 'CLEARS=3134 VECTORS=0 CTL=0X1'),
+                      ('MON ACK COUNT=15 ... MORE=7', 'MON ACK COUNT=0 ... MORE=7'),
+                      ('so t0 is 26 s of the film, give or take 1 s', 'so t0 is 18.8 s of the film, give or take 1 s'),
+                      ('`TICKS=2307553890` is 120.1851 s, 3,553,890 ticks (0.1851 s)', '`TICKS=2307553890` is 60.1851 s, 3,553,890 ticks (0.1851 s)'),
+                      ('boot 27 made 18,786 more traps', 'boot 27 made 187,860 more traps'),
+                      ('lies 4,232,167 guest ticks (about 176 ms at 24 MHz)', 'lies 42,321 guest ticks (about 1.7 ms at 24 MHz)'),
+                      ('The record expected `Waiting on <dict>` about 62 s in; the film has it at t0 + 60 s, 2 s earlier (OBSERVED).', 'The record expected `Waiting on <dict>` about 62 s in; the film has it at t0 + 62 s, as expected (OBSERVED).'),
+                      ('No panic text is on any frame', 'A panic text is on the last frame'),
+                      ('No `RTC did not show up`, no `getGMTTimeOfDay` and no `!BSD` line is on the film', 'A `RTC did not show up` line is on the film'),
+                      ('and it is not true of the clock driver\'s own start lines: three of them are on the film', 'and it is true of the clock driver\'s own start lines: none of them is on the film'),
+                      ('is on no frame: the OCR of every frame finds `regist` only in', 'is on frame 40: the OCR of every frame finds `regist` also in'),
+                      ('because its offset read fails, is INFERRED;', 'because its offset read fails, is VERIFIED;'),
+                      ('is the monitor\'s own stop timer ending the run at the box\'s end', 'is the guest\'s own panic ending the run before the box\'s end'),
+                      ('The PC is boot 25\'s, `0XFFFFFE000B8716A8`: the same address', 'The PC is boot 26\'s, `0XFFFFFE00095FF9AC`: the same address'),
+                      ('`DFSC` `0x07` (a translation fault at level 3) and `WnR` 1 (a write)', '`DFSC` `0x0F` (a permission fault at level 3) and `WnR` 0 (a read)'),
+                      ('A fault of the kernel at that address that the kernel handled is INFERRED', 'A fault of the kernel at that address that the kernel handled is VERIFIED'),
+                      ('this is the first class that fits, so the film is in it: **RUNG 7 KERNEL WAITING**', 'this is the last class that fits, so the film is in it: **RUNG 7 KERNEL WAITING**'),
+                      ('Rung 7\'s class is **RUNG 7 KERNEL WAITING**', 'Rung 7\'s class is **RUNG 7 NEW STOP**'),
+                      ('(47 bytes, the Shell\'s marker', '(45 bytes, the Shell\'s marker'),
+                      ('(18 of 18, the host verification exit 0', '(17 of 18, the host verification exit 0'),
+                      ('so the monitor sources of rungs 6 and 7 are identical', 'so the monitor sources of rungs 6 and 7 differ'),
+                      ('and was not run again on the committed tree, since no monitor source changed between the two (NOT RUN again) | VERIFIED (host, git diff) |', 'and was run again on the committed tree, since a monitor source changed between the two (IDENTICAL) | VERIFIED (hardware) |'),
+                      ('`MON REGS RESTORED=YES` and `GIC RESTORE CLEAN=YES`, `STACK=10888/262144`', '`MON REGS RESTORED=NO` and `GIC RESTORE CLEAN=YES`, `STACK=10888/262144`'),
+                      ('(INFERRED that the size is the cause); this reading does not place', '(VERIFIED that the size is the cause); this reading does not place'),
+                      ('9,094 free pages of 16 KiB, about 142 MiB,', '9,094 free pages of 16 KiB, about 14 MiB,'),
+                      ('one file, the new builder-side data module `probes/guestprofile_m1.py` (156 lines;', 'three files, the new builder-side data module `probes/guestprofile_m1.py` (156 lines;'),
+                      ('and row g of the host (a `git diff`, above)', 'with row g outside this section\'s sources'),
+                      ('None of the record\'s falsifiers occurred', 'A falsifier of the record occurred'),
+                      ('The quiet profile removed the stop at `A=0X291000004`', 'The quiet profile moved the stop to `A=0X291000004`'),
+                      ('and whether any of the other 42 withdrawn nodes mattered, is UNKNOWN.', 'and whether any of the other 42 withdrawn nodes mattered, is VERIFIED.'),
+                      ('the monitor\'s SPMI model\'s parity bits are the suspect (INFERRED)', 'the monitor\'s SPMI model\'s parity bits are the cause (VERIFIED)'),
+                      ('whether the M1 monitor binary carries that model is UNKNOWN', 'whether the M1 monitor binary carries that model is VERIFIED'),
+                      ('It is the first run whose kernel passes `bsd_init`', 'It is the second run whose kernel passes `bsd_init`'),
+                      ('the box ended before it, as designed', 'the box ended after it, as designed'),
+                      ('A root device: the wait is the next stop, and the guest has no storage.', 'A root device: the guest has storage.'),
+                      ('Nothing is authorised by this section, and no next step is chosen here', 'The next step is authorised by this section and chosen here'),
+                      ('Hardware: boot 27 only; every other statement', 'Hardware: boots 26 and 27; every other statement'),
+                      ('and not that macOS boots', 'and macOS boots'),
+                      ('### 25.6 What', 'Digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\n### 25.6 What'))
+        place_seeds = (('Boot 27 (section 25) ran rung 7, the same acknowledging monitor and reporter', 'Boot 27 (section 25) ran rung 6, the same acknowledging monitor and reporter'),
+                       ('the record\'s class for rung 7 is RUNG 7 KERNEL WAITING, and M1 PASSED.', 'the record\'s class for rung 7 is NEW STOP, and M1 PASSED.'),
+                       ('21. **Boot 27 (2026-11-20; section 25; on video; OBSERVED, one unit, one boot): M1 rung 7,', '21. **Boot 27 (2026-11-20; section 25; on video; VERIFIED, one unit, one boot): M1 rung 7,'),
+                       ('No next step is authorised. Hardware: boot 27 only.', 'A next step is authorised.'),
+                       ('the two timeout messages of those waits are serial-only (`kprintf`) and cannot be on the film, while the clock driver\'s own start lines can be (three are on boot 27\'s film, section 25).', 'the RTC messages of those waits are serial-only and cannot be on the film.'),
+                       ('rung 7\'s class is RUNG 7 KERNEL WAITING, M1 PASSED (the coordinator\'s reading) | 25 |', 'rung 7\'s class is NEW STOP, M1 PASSED (the coordinator\'s reading) | 25 |'),
+                       ('That statement is about those two messages only:', 'That statement is about every RTC message:'),
+                       ('Boot 27 (section 25) ran after this section was written: the quiet profile (the scaler withdrawn by data) removed this stop,', 'Boot 27 (section 25) did not run: the quiet profile (the scaler withdrawn by data) removed this stop,'))
+        marker = '## 25. Result of boot 27'
+        head, rest = self.text.split(marker, 1)
+        limit = rest.index('## Appendix A.') + len('## Appendix A.')
+        for old, new in body_seeds:
+            self.assertIn(old, rest[:limit], f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.section_25_problems(head + marker + rest.replace(old, new, 1)), f'a seeded fault went unseen: {old!r} -> {new!r}')
+        for old, new in place_seeds:
+            self.assertIn(old, head, f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.section_25_problems(head.replace(old, new, 1) + marker + rest), f'a seeded fault went unseen: {old!r} -> {new!r}')
+
     @staticmethod
     def kernel_stops_problems(note):
-        """What is wrong with docs/SP11-KERNEL-STOPS.md, the reference for the host analyses of the stops of boots 20, 21, 23, 24, 25 and 26 (a note that is not a hardware result); an empty list is a pass."""
+        """What is wrong with docs/SP11-KERNEL-STOPS.md, the reference for the host analyses of the stops of boots 20, 21, 23, 24, 25 and 26 and the reading of boot 27's wait (a note that is not a hardware result); an empty list is a pass."""
         problems = []
         if not note.startswith('<!-- SPDX-License-Identifier: MIT -->\n'):
             problems.append('the first line is not the MIT SPDX line')
@@ -2796,11 +2961,23 @@ class Document(unittest.TestCase):
             problems.append('the note is 50 KiB or more, or not ASCII')
         if re.search(r'[0-9A-Fa-f]{32,}|[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}', note) or any(prefix in note for prefix in ('/' + 'Users' + '/', '/' + 'Volumes' + '/', '/' + 'home' + '/')):
             problems.append('a digest, an identifier or a machine path')
-        headings = re.findall(r'^## (\d+A?)\. ', note, re.M)
-        if headings != [str(n) for n in range(1, 8)] + ['7A'] + [str(n) for n in range(8, 12)]:
+        headings = re.findall(r'^## (\d+[A-Z]?)\. ', note, re.M)
+        if headings != [str(n) for n in range(1, 8)] + ['7A', '7B'] + [str(n) for n in range(8, 12)]:
             problems.append(f'section numbers are {headings}')
         flat = ' '.join(note.split())
-        for phrase in ('the monitor entry ran six times on the unit, in boots 20, 21, 23, 24, 25 and 26',
+        for phrase in ('the monitor entry ran seven times on the unit, in boots 20, 21, 23, 24, 25, 26 and 27',
+                       '| 27 | rung 7: as rung 6 with the `quiet` device tree (43 nodes withdrawn by data) and `cpu_boot_timeout_secs=120`, 120 s box | `MON STOP WATCHDOG` at 120.185 s, `PC=0XFFFFFE000B8716A8`, `A=0X96000047`;',
+                       'Boot 27, the last row, is not a seventh stop at a device',
+                       'the monitor\'s own watchdog ended the run at the box\'s end (section 7B)',
+                       '## 7B. Boot 27: the kernel\'s first wait, for a root device',
+                       '**Not a stop at a device (OBSERVED).** No `S2_FAULT` of any address came in 120.185 s',
+                       'The monitor ended the run because its box ended, as in boot 25.',
+                       'The earlier sentence that the RTC messages cannot be on the film holds for those two messages only.',
+                       'no host analysis of boot 27 was done',
+                       'held, 2 s early: the burst ends in `Waiting on <dict ...>`',
+                       'NOT TESTED: the box ended first, as designed; no panic text inside it',
+                       'held: none is on the film (the clock driver\'s start lines are: section 7B)',
+                       'The correction is about those two messages only: the clock driver\'s own start lines are on the film (OBSERVED in boots 26 and 27)',
                        'This note records them with their labels and does not re-derive them: its author did not re-read the kernelcache, so each VERIFIED is the analysis\'s own.',
                        '| 26 | rung 6: as rung 5 with `cpu_boot_timeout_secs=90`, 120 s box, timer words printed | `MON STOP S2_FAULT` at 61.60 s, `PC=0XFFFFFE00095FF9AC`, `A=0X291000004`, a 32-bit write of 1 |',
                        '| 25 | rung 5: six CPUs, CPU-start stores acknowledged, `let_panic`, 60 s box | `MON STOP WATCHDOG` at 60.18 s, `PC=0XFFFFFE000B8716A8` |',
@@ -2827,19 +3004,30 @@ class Document(unittest.TestCase):
         if re.search(r'desktop|macOS boots|is stable|stability is', flat, re.I):
             problems.append('the note claims more than a host analysis')
         rows = [line for line in note.split('## 8.', 1)[1].split('## 9.', 1)[0].splitlines() if line.startswith('| ') and not line.startswith(('| ---', '| # |'))]
-        if len(rows) != 17:
-            problems.append(f'section 8 has {len(rows)} rows, not 17')
+        if len(rows) != 23:
+            problems.append(f'section 8 has {len(rows)} rows, not 23')
         for target in re.findall(r'\]\(([^)#:]+\.md)\)', note):
             if not (ROOT / 'docs' / target).is_file():
                 problems.append(f'the link {target} does not resolve')
         return problems
 
     def test_the_kernel_stops_note_keeps_its_labels_and_its_six_stops(self):
-        """docs/SP11-KERNEL-STOPS.md is a reference for the host analyses of the stops of boots 20, 21, 23, 24, 25 and 26: SPDX line, under 50 KiB, ASCII, its links resolve, the stops and the tested predictions keep their labels,
-        the idle of boot 25 stays a reading and boot 26's silence and stop stay readings from code, the RTC messages stay off the film; each seeded fault below must be found."""
+        """docs/SP11-KERNEL-STOPS.md is a reference for the host analyses of the stops of boots 20, 21, 23, 24, 25 and 26 and the reading of boot 27's wait: SPDX line, under 50 KiB, ASCII, its links resolve, the stops and the tested predictions keep their labels,
+        the idle of boot 25 stays a reading, boot 26's silence and stop and boot 27's wait stay readings, the two timeout messages of the clock waits stay off the film; each seeded fault below must be found."""
         note = (ROOT / 'docs' / 'SP11-KERNEL-STOPS.md').read_text(encoding='utf-8')
         self.assertEqual(self.kernel_stops_problems(note), [])
-        seeds = (('the monitor entry ran six times on the unit, in boots 20, 21, 23, 24, 25 and 26', 'the monitor entry ran four times on the unit, in boots 20, 21, 23 and 24'),
+        seeds = (('the monitor entry ran seven times on the unit, in boots 20, 21, 23, 24, 25, 26 and 27', 'the monitor entry ran four times on the unit, in boots 20, 21, 23 and 24'),
+                 ('Boot 27, the last row, is not a seventh stop at a device', 'Boot 27, the last row, is a seventh stop at a device'),
+                 ('the monitor\'s own watchdog ended the run at the box\'s end (section 7B)', 'the monitor\'s own fault ended the run before the box (section 7B)'),
+                 ('`MON STOP WATCHDOG` at 120.185 s, `PC=0XFFFFFE000B8716A8`, `A=0X96000047`;', '`MON STOP S2_FAULT` at 120.185 s, `PC=0XFFFFFE000B8716A8`, `A=0X96000047`;'),
+                 ('**Not a stop at a device (OBSERVED).** No `S2_FAULT` of any address came in 120.185 s', '**Not a stop at a device (OBSERVED).** An `S2_FAULT` came in 120.185 s'),
+                 ('The monitor ended the run because its box ended, as in boot 25.', 'The monitor ended the run because the kernel panicked, as in boot 24.'),
+                 ('The earlier sentence that the RTC messages cannot be on the film holds for those two messages only.', 'The earlier sentence that the RTC messages cannot be on the film holds for every RTC message.'),
+                 ('and no host analysis of boot 27 was done', 'and a host analysis of boot 27 was done'),
+                 ('held, 2 s early: the burst ends in `Waiting on <dict ...>`', 'held, 20 s early: the burst ends in `Waiting on <dict ...>`'),
+                 ('NOT TESTED: the box ended first, as designed; no panic text inside it', 'held: the panic fell at about 122 s; no panic text inside it'),
+                 ('held: none is on the film (the clock driver\'s start lines are: section 7B)', 'did NOT hold: all are on the film (the clock driver\'s start lines are: section 7B)'),
+                 ('The correction is about those two messages only: the clock driver\'s own start lines are on the film (OBSERVED in boots 26 and 27)', 'The correction is about every RTC message: the clock driver\'s own start lines are not on the film (OBSERVED in boots 26 and 27)'),
                  ('its author did not re-read the kernelcache, so each VERIFIED is the analysis\'s own.', 'its author re-read the kernelcache, so each VERIFIED is a run.'),
                  ('`MON STOP S2_FAULT` at 61.60 s, `PC=0XFFFFFE00095FF9AC`, `A=0X291000004`, a 32-bit write of 1 |', '`MON STOP WATCHDOG` at 61.60 s, `PC=0XFFFFFE00095FF9AC`, `A=0X291000004`, a 32-bit write of 1 |'),
                  ('`MON STOP WATCHDOG` at 60.18 s, `PC=0XFFFFFE000B8716A8` |', '`MON STOP WATCHDOG` at 5.04 s, `PC=0XFFFFFE000B8716A8` |'),
@@ -2873,7 +3061,7 @@ class Document(unittest.TestCase):
         problems = []
         for where, text, needles in (
                 ('STATUS.md', status, (
-                    'SP11 monitor entry: ran six times. Boot 20: the stock kernel executed on one vCPU for 5 s and printed its banner, then spun in an early console loop (INFERRED). '
+                    'SP11 monitor entry: ran seven times. Boot 20: the stock kernel executed on one vCPU for 5 s and printed its banner, then spun in an early console loop (INFERRED). '
                     'Boot 21, with the panel as its console: it ran on one vCPU for 2.04 s through the I/O Kit start-up and the platform-driver matching and stopped at a stage-2 fault at what is INFERRED, by address, to be its first CPU-start write. '
                     'Boot 23, with `cpus=1` added to the guest\'s command line: the kernel honoured it (one processor line) and ran on one vCPU for 2.17 s, further than boot 21, without the CPU-start stop, and the monitor stopped it at an exception it took at EL1 '
                     '(`MON STOP GUEST_EXC`), INFERRED to be the kernel\'s own debugger trap (the cause is UNKNOWN); the rung 3 record\'s own verdict is NOT PASSED (c) by its letter, M1\'s PASSED. '
@@ -2884,15 +3072,20 @@ class Document(unittest.TestCase):
                     'Boot 26, with the CPU-start wait of the guest set to 90 s and a box of 120 s: the timer counters showed guest timer interrupts delivered (`MON TIM` `VECTORS=969`: the counter is OBSERVED, the delivery INFERRED from it), the kernel ran 61.60 s into the start of its BSD layer '
                     'and the monitor stopped it at a stage-2 fault in the scaler\'s registers (`MON STOP S2_FAULT`, `A=0X291000004`); the rung 6 record\'s class is NEW STOP, M1\'s PASSED '
                     '(why the real-time clock driver\'s start stops and what follows the scaler are UNKNOWN; the host analyses of the stops: [SP11-KERNEL-STOPS.md](SP11-KERNEL-STOPS.md)). '
-                    'Hardware status per gate X4: kernel executes: PARTIAL (one vCPU, 61.60 s, into bsd_init).',
-                    'the gate passed with it on the unit in boot 20 (OBSERVED, one boot; the SP11 monitor entry row below) and again in boot 21 (OBSERVED, one boot) and in boots 23, 24, 25 and 26 (OBSERVED, one boot each)',
-                    'the monitor\'s own guest regime ran six times, in boots 20, 21, 23, 24, 25 and 26, with the guards passed (`STATUS=0X0`; the SP11 monitor entry row below)',
-                    'the GUEST.DAT files it built ran on the unit, in boots 20, 21, 23, 24, 25 and 26 (the SP11 monitor entry row below), hardware NOT RUN beyond the dry run and those runs.',
-                    'The guest of boot 20 was, INFERRED (high), stuck in a loop of the kernel\'s I/O Kit start-up that a withheld panel makes endless', 'hardware NOT RUN beyond those six runs',
-                    'the monitor entry\'s six runs in the rows below', '| SP11 monitor entry (work item 4b; M1 rungs 1 to 6) |', '(the opt-in monitor entry ran six times: the row below)',
-                    'Host tests, and six runs on the unit on 2026-11-18 and 19 (boot 20, plan `M1RUN-RUNG1`, rung 1; boot 21, plan `M1RUN-CONSOLE-RUNG2`, rung 2; boot 23, plan `M1RUN-CPUS1-RUNG3`, rung 3; boot 24, plan `M1RUN-LETPANIC-RUNG4`, rung 4; boot 25, plan `M1RUN-ACKPANIC-RUNG5`, rung 5; and boot 26, plan `M1RUN-ACKPANIC-RUNG6`, rung 6; OBSERVED, one unit, one boot each',
-                    '`MON STOP S2_FAULT`, 43,133,334 ticks, in boot 24; `MON STOP WATCHDOG`, 1,155,520,917 ticks, in boot 25; `MON STOP S2_FAULT`, 1,182,753,011 ticks, in boot 26), returned', 'in all six boots (its regime is not recorded); `ABORTS=0` in all six.',
-                    '(in boot 24 the start-up ended in a kernel panic, in boot 25 in an idle wait-for-interrupt, in boot 26 at the scaler\'s registers)',
+                    'Boot 27, with the `quiet` device tree (43 nodes withdrawn by data) and a 120 s CPU-start wait: the scaler\'s stop did not return, the kernel ran the whole box of 120 s through `bsd_init` to a wait for a root device '
+                    '(INFERRED from its last line, `Waiting on <dict ...>`) and the monitor\'s own watchdog stopped it (`MON STOP WATCHDOG`, 120.185 s); no panic text; the rung 7 record\'s class is RUNG 7 KERNEL WAITING, M1\'s PASSED '
+                    '(a root device, the CPU-boot panic at about 122 s and why the PMU\'s reads fail the parity check are UNKNOWN). '
+                    'Hardware status per gate X4: kernel executes: PARTIAL (one vCPU, 120.185 s, through bsd_init to a root-device wait).',
+                    'the gate passed with it on the unit in boot 20 (OBSERVED, one boot; the SP11 monitor entry row below) and again in boot 21 (OBSERVED, one boot) and in boots 23, 24, 25, 26 and 27 (OBSERVED, one boot each)',
+                    'the monitor\'s own guest regime ran seven times, in boots 20, 21, 23, 24, 25, 26 and 27, with the guards passed (`STATUS=0X0`; the SP11 monitor entry row below)',
+                    'the GUEST.DAT files it built ran on the unit, in boots 20, 21, 23, 24, 25, 26 and 27 (the SP11 monitor entry row below), hardware NOT RUN beyond the dry run and those runs.',
+                    'The guest of boot 20 was, INFERRED (high), stuck in a loop of the kernel\'s I/O Kit start-up that a withheld panel makes endless', 'hardware NOT RUN beyond those seven runs',
+                    'the monitor entry\'s seven runs in the rows below', '| SP11 monitor entry (work item 4b; M1 rungs 1 to 7) |', '(the opt-in monitor entry ran seven times: the row below)',
+                    'Host tests, and seven runs on the unit on 2026-11-18 to 20 (boot 20, plan `M1RUN-RUNG1`, rung 1; boot 21, plan `M1RUN-CONSOLE-RUNG2`, rung 2; boot 23, plan `M1RUN-CPUS1-RUNG3`, rung 3; boot 24, plan `M1RUN-LETPANIC-RUNG4`, rung 4; boot 25, plan `M1RUN-ACKPANIC-RUNG5`, rung 5; boot 26, plan `M1RUN-ACKPANIC-RUNG6`, rung 6; and boot 27, plan `M1RUN-ACKPANIC-Q-RUNG7`, rung 7; OBSERVED, one unit, one boot each',
+                    '`MON STOP S2_FAULT`, 43,133,334 ticks, in boot 24; `MON STOP WATCHDOG`, 1,155,520,917 ticks, in boot 25; `MON STOP S2_FAULT`, 1,182,753,011 ticks, in boot 26; `MON STOP WATCHDOG`, 2,307,553,890 ticks, in boot 27), returned', 'in all seven boots (its regime is not recorded); `ABORTS=0` in all seven.',
+                    '(in boot 24 the start-up ended in a kernel panic, in boot 25 in an idle wait-for-interrupt, in boot 26 at the scaler\'s registers, in boot 27 in the wait for a root device after bsd_init)',
+                    'and the seventh run (2026-11-20, boot 27, M1 rung 7, the `quiet` device tree with 43 nodes withdrawn by data and a 120 s CPU-start wait: the scaler\'s stop did not return and the kernel ran the whole box of 120 s through `bsd_init` to a wait for a root device, '
+                    'INFERRED from its last line, when the monitor\'s own watchdog stopped it; the same row)',
                     'and the sixth run (2026-11-19, boot 26, M1 rung 6, the same monitor and guest with a 90 s CPU-start wait and a box of 120 s: the timer counters showed guest timer interrupts delivered (INFERRED), the kernel ran 61.60 s to the start of its BSD layer, '
                     'and the monitor stopped it at a stage-2 fault in the scaler\'s registers; the same row)',
                     'and the fifth run (2026-11-19, boot 25, M1 rung 5, the CPU-start stores acknowledged and dropped: the kernel ran the whole box of 60 s and was idle in a wait-for-interrupt when the monitor\'s own watchdog stopped it, 60.18 s into the call; the same row)',
@@ -2915,15 +3108,27 @@ class Document(unittest.TestCase):
                     'Gate X4\'s "kernel executes" stands at PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start).',
                     'The X5 exit names guest kernel text on the OLED: this boot is evidence for it (OBSERVED, one boot), and this record changes no gate row.',
                     'Nothing is shown about CPU bring-up, SMP, a root device, storage, userspace, stability or performance, nor that the SPMI and PMU errors are harmless beyond this run (UNKNOWN)',
-                    'the monitor\'s own guest regime ran six times, in boots 20, 21, 23, 24, 25 and 26 (E71, E72, E74, E75, E76, E77), and the conversion to 24 MHz is NOT RUN',
+                    'the monitor\'s own guest regime ran seven times, in boots 20, 21, 23, 24, 25, 26 and 27 (E71, E72, E74, E75, E76, E77, E78), and the conversion to 24 MHz is NOT RUN',
                     'The third run (2026-11-18, boot 23, M1 rung 3, `cpus=1`; E74,', 'The fourth run (2026-11-18, boot 24, M1 rung 4, the monitor\'s `let_panic` word set; E75,',
                     'The fifth run (2026-11-19, boot 25, M1 rung 5, the CPU-start stores acknowledged and dropped, six CPUs, a box of 60 s; E76,',
                     'The sixth run (2026-11-19, boot 26, M1 rung 6, the same monitor and guest with a 90 s CPU-start wait and a box of 120 s, and a reporter that prints the guest timer\'s words; E77,',
-                    'the monitor entry ran six times, in boots 20, 21, 23, 24, 25 and 26 (2026-11-18 and 19, M1 rungs 1 to 6; OBSERVED, one boot each, E71, E72, E74, E75, E76 and E77): '
-                    'gate X4, kernel executes: PARTIAL (one vCPU, 61.60 s, into bsd_init).',
+                    'The seventh run (2026-11-20, boot 27, M1 rung 7, the same monitor and reporter with the `quiet` device tree, 43 nodes withdrawn by data, and a 120 s CPU-start wait; E78,',
+                    'the monitor entry ran seven times, in boots 20, 21, 23, 24, 25, 26 and 27 (2026-11-18 to 20, M1 rungs 1 to 7; OBSERVED, one boot each, E71, E72, E74, E75, E76, E77 and E78): '
+                    'gate X4, kernel executes: PARTIAL (one vCPU, 120.185 s, through bsd_init to a root-device wait).',
                     'In boot 24, with the monitor\'s `let_panic` word set, the kernel\'s own handler ran and printed a panic text, an ApplePMGR assertion, then nested panics, and the monitor stopped the run at a stage-2 fault (`MON STOP S2_FAULT`, 2.25 s into the call), '
-                    'with the registers and the GIC restored; the cause of the assertion is UNKNOWN.', '(WS-B, E70 to E72 and E74 to E77)',
+                    'with the registers and the GIC restored; the cause of the assertion is UNKNOWN.', '(WS-B, E70 to E72 and E74 to E78)',
                     'In boot 26, with a 90 s CPU-start wait and a box of 120 s, the timer counters showed guest timer interrupts delivered (`MON TIM` `VECTORS=969`: the counter is OBSERVED, one boot; the delivery INFERRED)',
+                    'In boot 27, with the `quiet` device tree (43 nodes withdrawn by data) and a 120 s CPU-start wait, the scaler\'s stop did not return, the kernel ran the whole box of 120 s through `bsd_init` to a wait for a root device (INFERRED from its last line)',
+                    '| E78 | The seventh run of the SP11 monitor entry (work item 11, M1 rung 7, plan `M1RUN-ACKPANIC-Q-RUNG7`, 2026-11-20, boot 27; the record was named by the operator by its SHA-256 for that boot, and its text is from the commit `5f2f8dd`):',
+                    'ended the run itself at the box\'s end, 120.185 s into the call (`MON STOP WATCHDOG`, `PC=0XFFFFFE000B8716A8`, `A=0X96000047`; 2,307,553,890 ticks for the whole call)',
+                    'the timer counters were `MON TIM IRQS=1560 ASSERTS=3134 CLEARS=3134 VECTORS=1519 CTL=0X1` and the acknowledge took 15 CPU-start stores (`MON ACK COUNT=15`); no panic text;',
+                    'NOT RUN (symbolication, which needs the KDK; the A16 baseline comparison of row g on the committed tree): rung 7\'s class is RUNG 7 KERNEL WAITING, M1 PASSED (the coordinator\'s reading); gate X4, kernel executes: PARTIAL (one vCPU, 120.185 s, through bsd_init to a root-device wait)',
+                    'row g: `git diff` shows the monitor sources of rungs 6 and 7 identical but for the builder-side data module `probes/guestprofile_m1.py`',
+                    'with the registers and the GIC restored; there was no panic text.',
+                    '**Boot 27 (2026-11-20; OBSERVED on video, one unit, one boot; E78;',
+                    'What is now shown for gate X4 (one boot): the stock kernel runs through `bsd_init` under the monitor to its wait for a root device (INFERRED from its last line), with the guest\'s own timers (`MON TIM` `VECTORS=1519`: the counters are OBSERVED).',
+                    'the two timeout messages of the clock waits cannot be on it (VERIFIED: they are `kprintf` lines)',
+                    'Gate X4\'s "kernel executes" stays at PARTIAL (one vCPU, 120.185 s, through bsd_init to a root-device wait)',
                     '| E77 | The sixth run of the SP11 monitor entry (work item 11, M1 rung 6, plan `M1RUN-ACKPANIC-RUNG6`, 2026-11-19, boot 26; the record was named by the operator by its SHA-256 for that boot, and its text is from the commit `0f6174d`):',
                     'ended the run itself 61.60 s into the call (`MON STOP S2_FAULT`, `A=0X291000004`, a 32-bit write of 1 in the first register window of the device tree\'s `scaler0` node; 1,182,753,011 ticks for the whole call, the box being 120 s)',
                     'the timer counters were `MON TIM IRQS=1010 ASSERTS=2036 CLEARS=2036 VECTORS=969 CTL=0X1` (guest timer interrupts delivered: INFERRED from them) and the acknowledge took 15 CPU-start stores (`MON ACK COUNT=15`); no panic text;',
@@ -2970,9 +3175,9 @@ class Document(unittest.TestCase):
                     '(a stop that none of its results names), M1\'s own verdict PASSED. Gate X4\'s "kernel executes" stands at PARTIAL (one vCPU, 2.17 s, further than boot 21). '
                     'Nothing is shown about CPU bring-up, SMP, a root device, userspace, stability or performance, nor that any driver started; nothing further is authorised.'))):
             problems += [f'{where} lost {needle[:60]!r}' for needle in needles if needle not in text]
-        row = status.split('| SP11 monitor entry (work item 4b; M1 rungs 1 to 6) |', 1)[-1].split(' | SP11 ', 1)[0]
+        row = status.split('| SP11 monitor entry (work item 4b; M1 rungs 1 to 7) |', 1)[-1].split(' | SP11 ', 1)[0]
         paragraph = surface.split('**Boot 20 (2026-11-18; OBSERVED on video', 1)[-1].split('**Stick payload runner', 1)[0]
-        for where, text in (('the STATUS.md row of the monitor entry', row), ('the SURFACE-PRO-11.md paragraphs of boots 20, 21, 23, 24, 25 and 26', paragraph)):
+        for where, text in (('the STATUS.md row of the monitor entry', row), ('the SURFACE-PRO-11.md paragraphs of boots 20, 21, 23, 24, 25, 26 and 27', paragraph)):
             if re.search(r'desktop|macOS boots|kernel executes: PASS|kernel executes: DONE', text, re.I):
                 problems.append(f'{where} claims more than a partial boot')
         for where, text in (('STATUS.md', status), ('SURFACE-PRO-11.md', surface)):
@@ -2983,10 +3188,11 @@ class Document(unittest.TestCase):
                 surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 2.17 s, further than boot 21)') != 1 or \
                 surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 2.25 s, to the kernel\'s own panic text)') != 1 or \
                 surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 60.18 s, idle at the box\'s end)') != 1 or \
-                surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 61.60 s, into bsd_init)') != 2:
+                surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 61.60 s, into bsd_init)') != 1 or \
+                surface.count('gate X4, kernel executes: PARTIAL (one vCPU, 120.185 s, through bsd_init to a root-device wait)') != 2:
             problems.append('SURFACE-PRO-11.md: E71 must say kernel executes: PARTIAL (one vCPU, 5 s, early boot only), E72 kernel executes: PARTIAL (one vCPU, 2.04 s, through IOKit platform matching to the first CPU-start), '
                             'E74 kernel executes: PARTIAL (one vCPU, 2.17 s, further than boot 21), E75 kernel executes: PARTIAL (one vCPU, 2.25 s, to the kernel\'s own panic text), '
-                            'E76 kernel executes: PARTIAL (one vCPU, 60.18 s, idle at the box\'s end), and the X4 row and E77 kernel executes: PARTIAL (one vCPU, 61.60 s, into bsd_init)')
+                            'E76 kernel executes: PARTIAL (one vCPU, 60.18 s, idle at the box\'s end), E77 kernel executes: PARTIAL (one vCPU, 61.60 s, into bsd_init), and the X4 row and E78 kernel executes: PARTIAL (one vCPU, 120.185 s, through bsd_init to a root-device wait)')
         return problems
 
     def test_status_and_the_surface_pro_document_carry_boots_20_and_21_with_the_exact_status_words(self):
@@ -2994,16 +3200,16 @@ class Document(unittest.TestCase):
         stay INFERRED, nothing is said about a desktop or that macOS boots, and each seeded fault below must be found."""
         status, surface = (' '.join((ROOT / 'docs' / name).read_text().split()) for name in ('STATUS.md', 'SURFACE-PRO-11.md'))
         self.assertEqual(self.status_problems(status, surface), [])
-        seeds = (('kernel executes: PARTIAL (one vCPU, 61.60 s, into bsd_init). The monitor ended each run',
-                  'kernel executes: PASS (one vCPU, 61.60 s, into bsd_init). The monitor ended each run', 0),
-                 ('then spun in an early console loop (INFERRED). Boot 21', 'then spun in an early console loop (VERIFIED). Boot 21', 0), ('hardware NOT RUN beyond those six runs', 'hardware PASS beyond those six runs', 0),
-                 ('SP11 monitor entry: ran six times.', 'SP11 monitor entry: ran once.', 0), ('the gate passed with it on the unit in boot 20 (OBSERVED, one boot;', 'the gate passed with it on the unit in boot 20 (VERIFIED, one boot;', 0),
+        seeds = (('kernel executes: PARTIAL (one vCPU, 120.185 s, through bsd_init to a root-device wait). The monitor ended each run',
+                  'kernel executes: PASS (one vCPU, 120.185 s, through bsd_init to a root-device wait). The monitor ended each run', 0),
+                 ('then spun in an early console loop (INFERRED). Boot 21', 'then spun in an early console loop (VERIFIED). Boot 21', 0), ('hardware NOT RUN beyond those seven runs', 'hardware PASS beyond those seven runs', 0),
+                 ('SP11 monitor entry: ran seven times.', 'SP11 monitor entry: ran once.', 0), ('the gate passed with it on the unit in boot 20 (OBSERVED, one boot;', 'the gate passed with it on the unit in boot 20 (VERIFIED, one boot;', 0),
                  ('and again in boot 21 (OBSERVED, one boot)', 'and not in boot 21 (OBSERVED, one boot)', 0),
                  ('stopped at a stage-2 fault at what is INFERRED, by address, to be its first CPU-start write.', 'stopped at a stage-2 fault at what is VERIFIED, by address, to be its first CPU-start write.', 0),
                  ('and the kernel was still in its start-up at the stop', 'and the kernel booted macOS: macOS boots', 0),
-                 ('the monitor\'s own guest regime ran six times, in boots 20, 21, 23, 24, 25 and 26, with the guards passed', 'the monitor\'s own guest regime ran once, in boot 20, with the guards passed', 0),
+                 ('the monitor\'s own guest regime ran seven times, in boots 20, 21, 23, 24, 25, 26 and 27, with the guards passed', 'the monitor\'s own guest regime ran once, in boot 20, with the guards passed', 0),
                  ('(gate X4: kernel executes: PARTIAL).', '(gate X4: kernel executes: PASS).', 1),
-                 ('kernel executes: PARTIAL (one vCPU, 61.60 s, into bsd_init). In boot 20,', 'kernel executes: DONE (one vCPU, 61.60 s, into bsd_init). In boot 20,', 1),
+                 ('kernel executes: PARTIAL (one vCPU, 120.185 s, through bsd_init to a root-device wait). In boot 20,', 'kernel executes: DONE (one vCPU, 120.185 s, through bsd_init to a root-device wait). In boot 20,', 1),
                  ('it ran 5 s, then spun in an early console loop (INFERRED, high', 'it ran 5 s, then spun in an early console loop (VERIFIED, high', 1),
                  ('a longer box on the same image only repeats the loop.', 'a longer box on the same image reaches the desktop.', 1),
                  ('stands at PARTIAL (one vCPU, 5 s, early boot only; ran 5 s', 'stands at PASS (one vCPU, 5 s, early boot only; ran 5 s', 1),
@@ -3012,7 +3218,7 @@ class Document(unittest.TestCase):
                  ('which matches the A16\'s first CPU-start write by address only', 'which is the A16\'s first CPU-start write by value', 1),
                  ('this boot is evidence for it (OBSERVED, one boot), and this record changes no gate row.', 'this boot closes it (VERIFIED), and the gate is PASS.', 1),
                  ('Nothing is shown about CPU bring-up, SMP, a root device, storage, userspace, stability or performance, nor that the SPMI', 'Everything is shown about the desktop, nor that the SPMI', 1),
-                 ('the monitor\'s own guest regime ran six times, in boots 20, 21, 23, 24, 25 and 26 (E71, E72, E74, E75, E76, E77), and', 'the monitor\'s own guest regime is NOT RUN (E71, E72, E74, E75, E76, E77), and', 1),
+                 ('the monitor\'s own guest regime ran seven times, in boots 20, 21, 23, 24, 25, 26 and 27 (E71, E72, E74, E75, E76, E77, E78), and', 'the monitor\'s own guest regime is NOT RUN (E71, E72, E74, E75, E76, E77, E78), and', 1),
                  ('the kernel honoured it (one processor line) and ran on one vCPU for 2.17 s, further than boot 21, without the CPU-start stop', 'the kernel ignored it and ran on six vCPUs for 2.17 s, further than boot 21, without the CPU-start stop', 0),
                  ('INFERRED to be the kernel\'s own debugger trap (the cause is UNKNOWN); the rung 3 record\'s own verdict is NOT PASSED (c) by its letter, M1\'s PASSED.',
                   'VERIFIED to be the kernel\'s own debugger trap (the cause is UNKNOWN); the rung 3 record\'s own verdict is PASSED by its letter, M1\'s PASSED.', 0),
@@ -3038,16 +3244,16 @@ class Document(unittest.TestCase):
                  ('there is no second boot, and nothing further is authorised.', 'there is a second boot, and a next run is authorised.', 1),
                  ('Gate X4\'s "kernel executes" stands at PARTIAL (one vCPU, 2.25 s, to the kernel\'s own panic text).', 'Gate X4\'s "kernel executes" stands at PASS (one vCPU, 2.25 s, to the kernel\'s own panic text).', 1),
                  ('In boot 24, with the monitor\'s `let_panic` word set, the kernel\'s own handler ran and printed a panic text', 'In boot 24, with the monitor\'s `let_panic` word set, the kernel\'s own handler ran and booted macOS', 1),
-                 ('(WS-B, E70 to E72 and E74 to E77)', '(WS-B, E70 to E72 and E74 to E75)', 1),
+                 ('(WS-B, E70 to E72 and E74 to E78)', '(WS-B, E70 to E72 and E74 to E75)', 1),
                  ('Boot 24, with the monitor\'s `let_panic` word set: the kernel\'s own handler ran and printed a panic text, an ApplePMGR assertion (`enableCPUComplex`)', 'Boot 24, with the monitor\'s `let_panic` word set: the kernel\'s own handler ran and booted macOS (`enableCPUComplex`)', 0),
                  ('(why the kernel was idle is UNKNOWN; the host analyses', '(why the kernel was idle is known; the host analyses', 0),
-                 ('`MON STOP WATCHDOG`, 1,155,520,917 ticks, in boot 25; `MON STOP S2_FAULT`, 1,182,753,011 ticks, in boot 26), returned', '`MON STOP WATCHDOG`, 96,720,173 ticks, in boot 25; `MON STOP S2_FAULT`, 1,182,753,011 ticks, in boot 26), returned', 0),
-                 ('`MON STOP S2_FAULT`, 1,182,753,011 ticks, in boot 26), returned', '`MON STOP S2_FAULT`, 96,720,173 ticks, in boot 26), returned', 0),
-                 ('in all six boots (its regime is not recorded); `ABORTS=0` in all six.', 'in all six boots (its regime is recorded); `ABORTS=0` in all six.', 0),
-                 ('(in boot 24 the start-up ended in a kernel panic, in boot 25 in an idle wait-for-interrupt, in boot 26 at the scaler\'s registers)', '(in boot 24 the start-up ended in a kernel panic, in boot 25 in an idle wait-for-interrupt, in boot 26 in a desktop)', 0),
-                 ('(the opt-in monitor entry ran six times: the row below)', '(the opt-in monitor entry ran twice: the row below)', 0),
+                 ('`MON STOP WATCHDOG`, 1,155,520,917 ticks, in boot 25; `MON STOP S2_FAULT`, 1,182,753,011 ticks, in boot 26; `MON STOP WATCHDOG`, 2,307,553,890 ticks, in boot 27), returned', '`MON STOP WATCHDOG`, 96,720,173 ticks, in boot 25; `MON STOP S2_FAULT`, 1,182,753,011 ticks, in boot 26; `MON STOP WATCHDOG`, 2,307,553,890 ticks, in boot 27), returned', 0),
+                 ('`MON STOP S2_FAULT`, 1,182,753,011 ticks, in boot 26; `MON STOP WATCHDOG`, 2,307,553,890 ticks, in boot 27), returned', '`MON STOP S2_FAULT`, 96,720,173 ticks, in boot 26; `MON STOP WATCHDOG`, 2,307,553,890 ticks, in boot 27), returned', 0),
+                 ('in all seven boots (its regime is not recorded); `ABORTS=0` in all seven.', 'in all seven boots (its regime is recorded); `ABORTS=0` in all seven.', 0),
+                 ('(in boot 24 the start-up ended in a kernel panic, in boot 25 in an idle wait-for-interrupt, in boot 26 at the scaler\'s registers, in boot 27 in the wait for a root device after bsd_init)', '(in boot 24 the start-up ended in a kernel panic, in boot 25 in an idle wait-for-interrupt, in boot 26 at the scaler\'s registers, in boot 27 in a desktop)', 0),
+                 ('(the opt-in monitor entry ran seven times: the row below)', '(the opt-in monitor entry ran twice: the row below)', 0),
                  ('and the fourth run (2026-11-18, boot 24, M1 rung 4, the monitor\'s `let_panic` word set: the kernel\'s own handler ran and printed a panic text', 'and the fourth run (2026-11-18, boot 24, M1 rung 4, the monitor\'s `let_panic` word set: the kernel\'s own handler ran and printed no text', 0),
-                 ('| SP11 monitor entry (work item 4b; M1 rungs 1 to 6) |', '| SP11 monitor entry (work item 4b; M1 rungs 1 to 3) |', 0),
+                 ('| SP11 monitor entry (work item 4b; M1 rungs 1 to 7) |', '| SP11 monitor entry (work item 4b; M1 rungs 1 to 3) |', 0),
                  # boot 25 (E76, the Boot 25 paragraph, the STATUS row)
                  ('and the fifth run (2026-11-19, boot 25, M1 rung 5,', 'and the fifth run (2026-11-19, boot 25, M1 rung 3,', 0),
                  ('the rung 5 record\'s class is WATCHDOG, NO TEXT, with PROGRESS, M1\'s PASSED', 'the rung 5 record\'s class is PANIC TEXT, M1\'s PASSED', 0),
@@ -3084,7 +3290,7 @@ class Document(unittest.TestCase):
         for where, text, needles in (
                 ('STATUS.md', status, (
                     'and a read-only survey of the SSD\'s link, controller and admin queues and of the PCIe SMMU\'s page (2026-11-18, boot 22: the SMMU\'s page was unmapped at EL2 and nothing of the SMMU was read; the storage row below)',
-                    'the xHCI No-Op test, the storage survey and the monitor entry\'s six runs in the rows below.',
+                    'the xHCI No-Op test, the storage survey and the monitor entry\'s seven runs in the rows below.',
                     '| SP11 storage preparation (adoption wiring, descriptor `storage`, offline provisioning, `nvmesnap`, `smmuprobe`) | EXPERIMENTAL; host tests, and one hardware survey: the read-only payloads '
                     '`nvmesnap` and `smmuprobe` (session 1) ran once, on 2026-11-18 (boot 22; OBSERVED, one unit, one boot, from a film that started late;',
                     'and found the PCIe SMMU\'s page unmapped at EL2\'s stage 1, so no SMMU register was read. Hardware NOT RUN for everything else: every write and every takeover.',
@@ -3106,7 +3312,7 @@ class Document(unittest.TestCase):
                     '(session 1 ran once, in boot 22; sessions 2 and 3 are not authorised)',
                     'ran once, in boot 22 (E73): the SMMU\'s page has no stage-1 mapping at EL2, so no SMMU register was read.',
                     'ran on 2026-11-18 (boot 22, E73) and found that page unmapped at EL2\'s stage 1, so nothing was read: OBSERVED once',
-                    '`M1RUN-CONSOLE-RUNG2` (boot 21), `nvmesnap-s1` (boot 22), `M1RUN-CPUS1-RUNG3` (boot 23) and `M1RUN-LETPANIC-RUNG4` (boot 24), and on 2026-11-19 in the one step each of `M1RUN-ACKPANIC-RUNG5` (boot 25) and `M1RUN-ACKPANIC-RUNG6` (boot 26), OBSERVED, one unit, one boot each',
+                    '`M1RUN-CONSOLE-RUNG2` (boot 21), `nvmesnap-s1` (boot 22), `M1RUN-CPUS1-RUNG3` (boot 23) and `M1RUN-LETPANIC-RUNG4` (boot 24), and on 2026-11-19 in the one step each of `M1RUN-ACKPANIC-RUNG5` (boot 25) and `M1RUN-ACKPANIC-RUNG6` (boot 26), and on 2026-11-20 in the one step of `M1RUN-ACKPANIC-Q-RUNG7` (boot 27), OBSERVED, one unit, one boot each',
                     '(EXPERIMENTAL; hardware NOT RUN, except session 1, a read-only survey, which ran once in boot 22: E73).'))):
             problems += [f'{where} lost {needle[:60]!r}' for needle in needles if needle not in text]
         for where, text in (('STATUS.md', status), ('SURFACE-PRO-11.md', surface)):
@@ -3134,7 +3340,7 @@ class Document(unittest.TestCase):
                  ('found that page unmapped at EL2\'s stage 1, so nothing was read: OBSERVED once', 'is the planned way to read it, NOT RUN', 1),
                  ('and nothing is shown about the Wi-Fi beyond the shared SMMU node;', 'and the Wi-Fi works through the protected SMMU;', 1),
                  ('E73; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 20).** The first run of the storage sessions', 'E73; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 20).** The desktop of the storage sessions', 1),
-                 ('`M1RUN-CONSOLE-RUNG2` (boot 21), `nvmesnap-s1` (boot 22), `M1RUN-CPUS1-RUNG3` (boot 23) and `M1RUN-LETPANIC-RUNG4` (boot 24), and on 2026-11-19 in the one step each of `M1RUN-ACKPANIC-RUNG5` (boot 25) and `M1RUN-ACKPANIC-RUNG6` (boot 26), OBSERVED', '`M1RUN-CONSOLE-RUNG2` (boot 21), `nvmesnap-s1` (boot 22), OBSERVED', 1),
+                 ('`M1RUN-CONSOLE-RUNG2` (boot 21), `nvmesnap-s1` (boot 22), `M1RUN-CPUS1-RUNG3` (boot 23) and `M1RUN-LETPANIC-RUNG4` (boot 24), and on 2026-11-19 in the one step each of `M1RUN-ACKPANIC-RUNG5` (boot 25) and `M1RUN-ACKPANIC-RUNG6` (boot 26), and on 2026-11-20 in the one step of `M1RUN-ACKPANIC-Q-RUNG7` (boot 27), OBSERVED', '`M1RUN-CONSOLE-RUNG2` (boot 21), `nvmesnap-s1` (boot 22), OBSERVED', 1),
                  ('(EXPERIMENTAL; hardware NOT RUN, except session 1, a read-only survey, which ran once in boot 22: E73).', '(EXPERIMENTAL; hardware NOT RUN).', 1))
         for old, new, which in seeds:
             texts = [status, surface]
