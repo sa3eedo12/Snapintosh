@@ -533,7 +533,7 @@ def prepare(a, kind, before_filler=None):
     choice = (getattr(a, 'panel', None) or 'withheld') if m1_path is not None else 'withheld'     # D9's choice, for this kind only: the other kinds are written for the first
     facts = dict(facts, build_label=m1.pinned_label(facts['build_label'], m1_path is not None, choice, boot_arg, let_panic, cpu_start, profile=profile))     # the marker of this kind, PIN.DAT's and the record's
     descriptor, state, board = descriptor_digest(a, facts, kind)
-    monitor, reporter = read_regular(a.monitor, '--monitor', minimum=4), read_regular(a.reporter, '--reporter', minimum=4)
+    monitor, reporter = read_regular(a.monitor, '--monitor', cap=8 << 20, minimum=4), read_regular(a.reporter, '--reporter', cap=8 << 20, minimum=4)      # images: not --bigfile's 2 GiB
     m1.refuse_monitor_reporter(reporter)        # every kind, the M1 kind too: the reporter slot is executed in the same boot
     if m1_path is None:
         m1.refuse_monitor_wrapper(monitor)

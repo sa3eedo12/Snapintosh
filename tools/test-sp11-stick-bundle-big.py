@@ -184,6 +184,9 @@ class Sources(unittest.TestCase):
                 longest = sorted((b - a for a, b in stretches), reverse=True)[:len(zeros)]
                 self.assertEqual(kept, longest)
                 self.assertEqual(b''.join(materialise(c)[3] or bytes(c['size']) for c in chunks), data)
+        twins = src.BufferSource(noisy(random.Random(6), 4096, [(512, 640), (2048, 2176)]))       # equal stretches, room for one: the lower address is kept (a pinned digest depends on it)
+        kept = [(c['dest'] - 0x10000, c['size']) for c in src.split_run(sb.KIND_OTHER, 0x10000, twins, minimum, 4, 1 << 20) if 'source' not in c]
+        self.assertEqual(kept, [(512, 128)])
         with self.assertRaises(src.TableFull):
             src.split_run(sb.KIND_OTHER, 0x10000, src_, minimum, 0)
         pieces = src.split_run(sb.KIND_OTHER, 0x10000, src.BufferSource(noisy(random.Random(1), 1000 * 16)), minimum, 1024, 16 * 100)
@@ -210,6 +213,12 @@ class Writer(unittest.TestCase):
         as_source = chunks[:-1] + [dict(kind=sb.KIND_OTHER, dest=base + 0x70000, size=0x10000, source=src.BufferSource(blob), offset=0x3000)]
         root.write_guest(self.path('b.dat'), base, size, as_source)
         self.assertEqual(self.path('b.dat').read_bytes(), sb.pack_guest(base, size, as_data))
+        # a 64 KiB block with one non-zero byte (first, last, and the last byte of a short last block) is data, not a hole
+        lone = bytearray(3 * 65536 + 96)
+        lone[0] = lone[2 * 65536 - 1] = lone[-1] = 1
+        holes = chunks + [dict(kind=sb.KIND_OTHER, dest=base + 0x80000, data=bytes(lone))]
+        root.write_guest(self.path('e.dat'), base, size, holes)
+        self.assertEqual(self.path('e.dat').read_bytes(), sb.pack_guest(base, size, holes))
 
     def test_pack_guest_refuses_a_chunk_that_is_a_source(self):
         chunk = dict(kind=sb.KIND_OTHER, dest=0x1000, size=16, source=src.BufferSource(bytes(16)), offset=0)
@@ -237,16 +246,17 @@ class Writer(unittest.TestCase):
         table_end = sb.GUEST_HEAD_BYTES + sb.CHUNK_BYTES * written['count']
         pad = next(i for i in range(table_end, len(good)) if good[i - 1:i] == b'\0' and (i % 64) and not good[i])           # a pad byte
         entry3_digest = sb.GUEST_HEAD_BYTES + sb.CHUNK_BYTES * 3 + 32
-        flips = {'CHUNK_DIGEST': table_end + 200, 'INDEX_DIGEST': entry3_digest, 'PAD_NONZERO': pad, 'GUEST_SIZE': None}
-        for name, at in flips.items():
+        tail = sb.unpack_guest(good)[1][-1]         # the last chunk: a loop that stops one entry short never reads it
+        flips = [('CHUNK_DIGEST', table_end + 200), ('INDEX_DIGEST', entry3_digest), ('PAD_NONZERO', pad), ('GUEST_SIZE', None), ('CHUNK_DIGEST', tail['file_offset'] + tail['size'] - 1)]
+        for n, (name, at) in enumerate(flips):
             damaged = bytearray(good)
             if at is None:
                 damaged += b'\0'
             else:
                 damaged[at] ^= 0x40
-            path = self.path(f'd-{name}.dat')
+            path = self.path(f'd-{n}-{name}.dat')
             path.write_bytes(damaged)
-            with self.subTest(name), self.assertRaises(ch.Refused) as caught:
+            with self.subTest(n), self.assertRaises(ch.Refused) as caught:
                 root.verify_guest(path, base, size, written)
             self.assertEqual(caught.exception.name, name)
         short = self.path('d-short.dat')
@@ -516,6 +526,15 @@ class Builder(B.Case):
         self.assertEqual(calls, [{}, {'chunk_cap_kib': 8192}])
         self.assertEqual(B.tree_digests(plain[3] / 'bundle'), B.tree_digests(big[3] / 'bundle'), 'the manifest does not carry the cap: the same bundle')
 
+    def test_a_monitor_or_reporter_over_8_mib_is_refused_also_with_bigfile(self):
+        path = SCRATCH / 'monitor-over-8-mib.bin'
+        with open(path, 'wb') as f:
+            f.truncate(8 * MIB + 1)
+        for key in ('monitor', 'reporter'):
+            for flag in ((), ('--bigfile',)):
+                with self.subTest(key=key, flag=flag):
+                    self.refused('FILE_SIZE', B.cli(['authorisation-template', 'synthetic', *B.opts(**{key: path}), *flag]))
+
     def test_place_check_keeps_the_top_for_the_runners_files(self):
         base = ['place-check', '--base', hex(B.BANK), '--facts', B.FIX['facts'], *[x for d in B.FIX['dumps'] for x in ('--dump', d)]]
         code, out, err = B.cli([*base, '--guest-mib', '6144', '--root-carry'])
@@ -757,7 +776,8 @@ class Pair(unittest.TestCase):
 
 class Hygiene(unittest.TestCase):
     def test_licence_sizes_and_no_machine_text(self):
-        for path in (HERE / 'sp11_stick_bundle_root.py', HERE / 'sp11_stick_bundle_source.py', HERE / 'test-sp11-stick-bundle-big.c', Path(__file__).resolve(), DOC):
+        for path in (HERE / 'sp11_stick_bundle_root.py', HERE / 'sp11_stick_bundle_source.py', HERE / 'test-sp11-stick-bundle-big.c', HERE / 'test-sp11-stick-bundle-big-tables.py',
+                     HERE / 'test-sp11-stick-load-big.py', HERE / 'test-sp11-stick-load-big.c', Path(__file__).resolve(), DOC):
             text = path.read_text()
             self.assertTrue(text.isascii(), path.name)
             self.assertIn('SPDX-License-Identifier: MIT', text[:200], path.name)
