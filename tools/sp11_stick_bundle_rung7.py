@@ -110,6 +110,9 @@ def compare(chunks, table, guest_bytes, nodes):
 
 def with_guest(panel, profile, facts, chunks, table, guest, nodes):
     """`panel` (the dict of read_panel) with what the words of rung 7 read: the profile, the comparison with rung 6's guest and what the page prints of this guest (the 16 capitals of its
-    SHA-256, its size and the label)."""
+    SHA-256, its size and the label). The profile quiet-rtc is rung 8's: its guest is compared with rung 7's own (tools/sp11_stick_bundle_rung8.py)."""
+    if profile == ch.RUNG8_PROFILE:
+        import sp11_stick_bundle_rung8 as r8b
+        return r8b.with_guest(panel, profile, facts, chunks, table, guest, nodes)
     digest = hashlib.sha256(guest).hexdigest()
     return dict(panel, profile=profile, rung7=dict(diff=compare(chunks, table, len(guest), nodes), label=facts['build_label'], guest_sha16=digest[:16].upper(), guest_bytes=len(guest)))

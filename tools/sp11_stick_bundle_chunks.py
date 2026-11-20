@@ -27,18 +27,22 @@ PARAMS_WORDS, PARAMS_WATCHDOG, PARAMS_MEM_LOW, PARAMS_MEM_HIGH = 1154, 24, 30, 3
 AFFINITY = 0xFF00FFFFFF     # Aff3:Aff2:Aff1:Aff0 of MPIDR_EL1, the part ACPI states
 ZERO_MIN = 0x10000      # a shorter zero stretch stays data: every ZERO chunk is a table entry, and a table holds 1024
 KNOWN_REFUSALS = {n for _, n, _ in sb.ERRORS} | {'BUILT_SHAPE', 'PARAMS_MISMATCH', 'TIME_BOX_MISMATCH', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING', 'ROOT_RTC', *src.REFUSALS}   # the builder adds its own
-# (--panel, --boot-arg, --time-box-s) of the records that set the monitor's let_panic PARAMS word (tools/sp11_stick_bundle_m1.py, K12 to K15): rung 4's, with the plain monitor and
-# exactly this box, and the three of the acknowledging monitor, ACK_FORMS, each with exactly its box: rung 5's (a 60 s box, XNU's wait for CPU 1 at 120 s, longer than the box), rung 6's
-# (a 120 s box and a wait of 90 s, which ends inside it) and rung 7's (a 120 s box and the wait of 120 s, which does not, with the guest profile of FORM_PROFILE and with it only).
+# (--panel, --boot-arg, --time-box-s) of the records that set the monitor's let_panic PARAMS word (tools/sp11_stick_bundle_m1.py, K12 to K16): rung 4's, with the plain monitor and
+# exactly this box, and the four of the acknowledging monitor, ACK_FORMS, each with exactly its box: rung 5's (a 60 s box, XNU's wait for CPU 1 at 120 s, longer than the box), rung 6's
+# (a 120 s box and a wait of 90 s, which ends inside it), rung 7's (a 120 s box and the wait of 120 s, which does not, with the guest profile of FORM_PROFILE and with it only) and rung 8's
+# (rung 7's box and word with the profile quiet-rtc, which binds the PMU's clock).
 # The list is closed: no other combination of box, word and profile has a record.
 LET_PANIC_FORM = ('console', 'cpus=1', 5)
 RUNG5_FORM = ('console', 'cpu_boot_timeout_secs=120', 60)
 RUNG6_FORM = ('console', 'cpu_boot_timeout_secs=90', 120)
 RUNG7_FORM = ('console', 'cpu_boot_timeout_secs=120', 120)
-ACK_FORMS = (RUNG5_FORM, RUNG6_FORM, RUNG7_FORM)
 GUEST_PROFILE_DEFAULT = 'j700ap-26A428'      # the loader's own default board and that of every bundle built before --guest-profile (tools/sp11_stick_bundle_profile.py)
 RUNG7_PROFILE = 'j700ap-26A428-m1-quiet'
-FORM_PROFILE = {RUNG7_FORM: RUNG7_PROFILE}   # the guest profile of each form that carries one; every other form has the base board's
+RUNG8_PROFILE = 'j700ap-26A428-m1-quiet-rtc'
+# Rung 8 has rung 7's box and word and differs in its guest profile alone, so its form carries the profile as a fourth element: the closed list of forms is a list of distinct values.
+RUNG8_FORM = (*RUNG7_FORM, RUNG8_PROFILE)
+ACK_FORMS = (RUNG5_FORM, RUNG6_FORM, RUNG7_FORM, RUNG8_FORM)
+FORM_PROFILE = {RUNG7_FORM: RUNG7_PROFILE, RUNG8_FORM: RUNG8_PROFILE}   # the guest profile of each form that carries one; every other form has the base board's
 LET_PANIC_FORMS_TEXT = (f'--panel {LET_PANIC_FORM[0]} --boot-arg {LET_PANIC_FORM[1]} --time-box-s {LET_PANIC_FORM[2]} (the plain monitor) or, with --cpu-start ack, '
                         + ' or '.join(f'--panel {form[0]} --boot-arg {form[1]} --time-box-s {form[2]}' + (f' --guest-profile {FORM_PROFILE[form]}' if form in FORM_PROFILE else '')
                                       for form in ACK_FORMS))

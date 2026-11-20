@@ -104,14 +104,19 @@ class Menu(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'not exactly one SPMI boot spec'):
             menu.bind_rtc(dataclasses.replace(quiet, spmi_boot=quiet.spmi_boot + quiet.spmi_boot[:1]))
 
-    def test_no_form_of_any_record_admits_the_clock_profile_because_no_record_text_exists_for_it(self):
+    def test_the_clock_profile_is_admitted_in_rung_8s_form_and_in_no_other(self):
         form = ('console', ch.RUNG7_FORM[1], True, 'ack')
         self.assertNotIn(RTC, gpb.RUNG7_PROFILES)
-        self.assertEqual(gpb.mark_of(RTC), 'R-')
-        GP.refused(self, 'GUEST_PROFILE_REFUSED', gpb.check_form, RTC, form[1], True, 'ack', 'console', True, 120)
-        GP.refused(self, 'GUEST_PROFILE_REFUSED', m1.pinned_label, 'RUNG7', True, *form, profile=RTC)
-        self.assertNotIn(RTC, ch.FORM_PROFILE.values())
-        self.assertFalse(ch.let_panic_form_ok('console', ch.RUNG7_FORM[1], 120, 'ack', RTC), 'the loader\'s form check refuses the name, so rung 7\'s box and word without the quiet profile are refused too')
+        self.assertEqual((gpb.RUNG8_PROFILES, gpb.mark_of(RTC), ch.RUNG8_FORM[3]), ((RTC,), 'R-', RTC))
+        gpb.check_form(RTC, form[1], True, 'ack', 'console', True, 120)
+        self.assertEqual(m1.pinned_label('RUNG8', True, *form, profile=RTC), 'M1RUN-ACKPANIC-R-RUNG8')
+        for other in ((form[1], True, 'ack', 'console', True, 60), (ch.RUNG6_FORM[1], True, 'ack', 'console', True, 120), (form[1], False, 'ack', 'console', True, 120),
+                      (form[1], True, 'stop', 'console', True, 120), (form[1], True, 'ack', 'handed', True, 120), (form[1], True, 'ack', 'console', False, 120)):
+            with self.subTest(other):
+                GP.refused(self, 'GUEST_PROFILE_REFUSED', gpb.check_form, RTC, *other)
+        self.assertEqual(ch.FORM_PROFILE[ch.RUNG8_FORM], RTC)
+        self.assertTrue(ch.let_panic_form_ok('console', ch.RUNG7_FORM[1], 120, 'ack', RTC))
+        self.assertFalse(ch.let_panic_form_ok('console', ch.RUNG7_FORM[1], 60, 'ack', RTC))
         self.assertEqual(gpb.QUIET, QUIET, 'rung 7\'s record and its profile are not changed by the new name')
 
     def test_the_seed_is_one_fixed_instant_that_the_monitor_accepts_and_a_bundle_is_not_made_from_the_hosts_clock(self):

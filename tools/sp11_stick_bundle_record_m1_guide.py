@@ -89,20 +89,20 @@ def d8_exposure_words(box_s, real=None):
         'makes it (section 0).')
 
 
-def restart_risk_words(box_s):
-    """0b, after the restart risk: with the stock kernel running for longer than the decided box, the risk is untested."""
+def restart_risk_words(box_s, real=None):
+    """0b: the restart risk past the decided box (the panel's `restart` words say what a run showed)."""
     if box_s <= D5_BOX_S:
         return ''
-    return f'Inside a box of {box_s} s with the stock kernel running, whether the Surface restarts is UNTESTED: UNKNOWN (section 4).'
+    return said(real, 'restart') or f'Inside a box of {box_s} s with the stock kernel running, whether the Surface restarts is UNTESTED: UNKNOWN (section 4).'
 
 
-def restart_control_words(box_s):
-    """Section 4, after the argument from the PSCI-only control (docs/SP11-STICK-LOG.md section 14): that control ran no guest, and the one run with the stock kernel was
-    the decided box."""
+def restart_control_words(box_s, real=None):
+    """Section 4, after the PSCI-only control: the panel's `restart_c` words say what a longer run showed."""
     if box_s <= D5_BOX_S:
         return ''
-    return ('That control ran no guest; the one run with the stock kernel (boot 20) went through its 5 s and to the report page without a restart (OBSERVED once). '
-            f'A stock kernel running inside a box of {box_s} s is UNTESTED: whether the Surface restarts there is UNKNOWN, and the argument above does not reach it.')
+    return said(real, 'restart_c') or (
+        'That control ran no guest; the one run with the stock kernel (boot 20) went through its 5 s and to the report page without a restart (OBSERVED once). '
+        f'A stock kernel running inside a box of {box_s} s is UNTESTED: whether the Surface restarts there is UNKNOWN, and the argument above does not reach it.')
 
 
 def long_gic_words(box_s, real=None):
@@ -280,7 +280,7 @@ def hazard_lines(real, box_s, low, high):
               f'{MARKER}, made before the step starts (section 5c).', first=3, rest=5),
         *wrap('- The Surface may restart by itself, during the run or after it (cause UNKNOWN; the earliest datum is about UPTIME 17 s, and boot 20 showed none to the end of '
               'its film at 45 s: section 4). A restart before '
-              'the report is NOT a result (section 5a).' + (f' {restart_risk_words(box_s)}' if box_s > D5_BOX_S else ''), first=3, rest=5),
+              'the report is NOT a result (section 5a).' + (f' {restart_risk_words(box_s, real)}' if box_s > D5_BOX_S else ''), first=3, rest=5),
         *wrap(f'- No thermal guard exists on this path: one CPU is loaded for about {low} to {high} s plus the monitor\'s prepare, {box_s} s of it by the guest (D8, '
               'section 4).' + (f' {d8_exposure_words(box_s, real)}' if box_s > D5_BOX_S else '') + ' AC power is REQUIRED. If the stop timer never fires (the plan\'s second '
               'most likely failure) ' + runaway_words(box_s, real),              first=3, rest=5),
@@ -325,7 +325,7 @@ def outcome_lines(real, box_s):
               + (said(real, 'fault_seen', box_s) or 'INFERRED: no run has stopped that way yet, UNKNOWN') + '). Rows c and d hold for it, and the coordinator reads A= and B= to say which address the kernel touched; A=0 means '
               'that no IPA could be named, '
               'and that is a finding, not this end. A touch outside RAM that stage 2 stops IS this end, not a failure and not a retry.'),
-        *wrap('A run that uses its whole time box ends as MON STOP WATCHDOG, and MON EXIT PC= beside it (OBSERVED once: boot 20, one unit, one boot). The plan\'s own list '
+        *wrap('A run that uses its whole time box ends as MON STOP WATCHDOG, and MON EXIT PC= beside it (' + (said(real, 'wd_exit') or 'OBSERVED once: boot 20, one unit, one boot') + '). The plan\'s own list '
               'of failures to expect, most likely first: the NV2 gate refusing, MON PREPARE FAILED CODE=-90 to -95 (the gate passed with the embedded record in boot 20: '
               'OBSERVED once; the regime that record was built in is still not recorded, INFERRED E2H = 1: section 1b); the stop timer never firing, or '
               'the wrong interrupt arriving, so that the guest runs unbounded and only the operator\'s FORCE OFF ends it (U3: PPI 26 reached EL2 in the GIC dry run, '
@@ -334,7 +334,7 @@ def outcome_lines(real, box_s):
               'PAuth refusal at the first signed return (U5, U8); a restart with no report (U4).'),
         *wrap('A page is one of four things:'),
         *wrap(f'- M1 PASSED: the SNAPREP page shows MON STATUS=OK ENTERED=0X1 and a MON STOP line of kind {ends}, with PC= a kernel address (C= on GUEST_EXC) and A= not 0 on '
-              f'S2_FAULT{said(real, "fault_note", box_s)}; rows a, c, d and e hold, and the coordinator checks f and g. WATCHDOG is the time box ending a run that used all of it (OBSERVED once: boot 20).',
+              f'S2_FAULT{said(real, "fault_note", box_s)}; rows a, c, d and e hold, and the coordinator checks f and g. WATCHDOG is the time box ending a run that used all of it ({said(real, "wd_box") or "OBSERVED once: boot 20"}).',
               first=3, rest=5),
         *wrap('- A FINDING, which the coordinator reads before anything else runs and which neither passes nor fails M1 by itself: MON REGS RESTORED=NO, WINDOW OVERRUN, '
               'STACK FULL or GIC RESTORE CLEAN=NO beside a return (a finding about the monitor, never a refusal of the wrapper); a MON STOP of another kind (PANIC_ENTRY, '

@@ -34,10 +34,13 @@ NAMES = (DEFAULT, *menu.MENU, *menu.RTC_MENU)    # the whole list: nothing that 
 MARKS = dict(zip(NAMES, ('', 'Q-', 'A-', 'D-', 'V-', 'C-', 'U-', 'S-', 'X-', 'R-')))
 assert len(set(MARKS.values())) == len(MARKS) == len(NAMES)
 MARK_CHARS = 2
-QUIET = NAMES[1]                        # j700ap-26A428-m1-quiet: the one profile that a record is written for (RUNG7_PROFILES)
+QUIET = NAMES[1]                        # j700ap-26A428-m1-quiet: the profile of rung 7's record (RUNG7_PROFILES)
+RTC = NAMES[9]                          # j700ap-26A428-m1-quiet-rtc: the profile of rung 8's record, the quiet board with the PMU's clock bound (RUNG8_PROFILES)
 RUNG7_PROFILES = (QUIET,)               # the profiles that the form of rung 7 admits: a profile record carries a prediction and its falsifiers for the roots that the profile withdraws
                                         # (docs/SP11-M1-GUEST-PROFILES.md section 5), and that text exists for this one; the others stay in the menu until theirs does
-assert QUIET == ch.RUNG7_PROFILE and ch.FORM_PROFILE == {ch.RUNG7_FORM: QUIET}      # the form's own constant is the menu's name
+RUNG8_PROFILES = (RTC,)                 # the profiles that the form of rung 8 admits: the same text with the clock's prediction and falsifiers (section 7 of that document)
+FORM_PROFILES = (*RUNG7_PROFILES, *RUNG8_PROFILES)
+assert QUIET == ch.RUNG7_PROFILE and RTC == ch.RUNG8_PROFILE and ch.FORM_PROFILE == {ch.RUNG7_FORM: QUIET, ch.RUNG8_FORM: RTC}      # the forms' own constants are the menu's names
 
 
 def mark_of(name):
@@ -50,16 +53,18 @@ def mark_of(name):
 
 
 def check_form(profile, boot_arg, let_panic, cpu_start, panel, is_m1, box_s=None):
-    """The form of a guest profile, checked before any guest is built: a profile other than the default belongs to the record of rung 7 and to no other (the monitor entry run, the
-    acknowledging monitor, --let-panic, the panel as the console, the word cpu_boot_timeout_secs=120 and the box of 120 s: ch.RUNG7_FORM), and to a profile of RUNG7_PROFILES only.
-    `box_s` None leaves the box out (the label's check). GUEST_PROFILE_REFUSED, naming what is missing. The other direction, rung 7's form without a profile, is m1.check_let_panic's."""
+    """The form of a guest profile, checked before any guest is built: a profile other than the default belongs to the record of rung 7 (quiet) or that of rung 8 (quiet-rtc) and to no other
+    (the monitor entry run, the acknowledging monitor, --let-panic, the panel as the console, the word cpu_boot_timeout_secs=120 and the box of 120 s: ch.RUNG7_FORM and ch.RUNG8_FORM, each with
+    its own profile: let_panic_form_ok), and to a profile of FORM_PROFILES only. `box_s` None leaves the box out (the label's check). GUEST_PROFILE_REFUSED, naming what is missing. The other
+    direction, a form of rungs 7 and 8 without a profile, is m1.check_let_panic's."""
     if profile in (None, DEFAULT):
         return
-    if profile not in RUNG7_PROFILES:
-        raise ch.Refused('GUEST_PROFILE_REFUSED', f'--guest-profile {profile}: the record of rung 7 is written for {QUIET} only, because its prediction and its falsifiers are for the roots that '
-                                                  'quiet withdraws and nothing is predicted for any other set (UNKNOWN); the other names stay in the menu until a record text exists for them')
+    if profile not in FORM_PROFILES:
+        raise ch.Refused('GUEST_PROFILE_REFUSED', f'--guest-profile {profile}: the records of rungs 7 and 8 are written for {QUIET} and {RTC} only, because their predictions and their falsifiers are for '
+                                                  'the roots that quiet withdraws and the clock that quiet-rtc binds, and nothing is predicted for any other set (UNKNOWN); the other names stay in the '
+                                                  'menu until a record text exists for them')
     if not (is_m1 and let_panic and cpu_start == 'ack' and ch.let_panic_form_ok(panel, boot_arg, box_s, cpu_start, profile)):
-        raise ch.Refused('GUEST_PROFILE_REFUSED', f'--guest-profile {profile} is the record of rung 7: --m1-run --panel {ch.RUNG7_FORM[0]} --cpu-start ack --let-panic --boot-arg {ch.RUNG7_FORM[1]} '
+        raise ch.Refused('GUEST_PROFILE_REFUSED', f'--guest-profile {profile} is the record of rung {7 + (profile == RTC)}: --m1-run --panel {ch.RUNG7_FORM[0]} --cpu-start ack --let-panic --boot-arg {ch.RUNG7_FORM[1]} '
                                                   f'--time-box-s {ch.RUNG7_FORM[2]}, and no other form carries a record text that is true of a profile guest (docs/SP11-M1-GUEST-PROFILES.md section 5)')
 
 
@@ -96,7 +101,7 @@ def read_back(xb, built, name, root=None):
     not touched; it returns None), GUEST_PROFILE_READBACK when: a pin is not the digest of its subtree before deferral; a withdrawn root or a node under one is still published; a node
     that is not under a withdrawn root is not; a property or a child list of a retained node differs from the tree before deferral, but for the declarations withdrawn; or the
     chunk is not the serialisation of the tree it parses to; the device models are not the loader's own (with the clock model seeded at RTC_EPOCH_US for a profile of RTC_MENU and
-    with no clock model for any other) or the PARAMS chunk is not their serialisation; for the profile quiet, the windows of the withdrawn nodes are not the table of
+    with no clock model for any other) or the PARAMS chunk is not their serialisation; for the profiles quiet and quiet-rtc, the windows of the withdrawn nodes are not the table of
     tools/sp11_stick_bundle_windows.py, which the record of rung 7 names in four places. Returns the number of nodes of the published tree.
     `root` (the root carry, docs/SP11-STICK-ROOT.md; None for every other build) is dict(extents=(base, size), boot_uuid=str, payload=bytes): the properties that the loader adds for a
     RAM-disk root (probes/xnuboot.py, iokit mode) are then expected with exactly these values, and no other property may differ."""
@@ -165,7 +170,7 @@ def read_back(xb, built, name, root=None):
         fail(f'the PARAMS chunk cannot be made again from the device models ({type(error).__name__})')
     if bytes(built.get('chunks', {}).get(xb.PARAMS_PA, b'')) != bytes(params):
         fail('the PARAMS chunk is not the serialisation of the device models')
-    if name == QUIET:
+    if name in FORM_PROFILES:
         base_roots = [spec.node for spec in gp.get_profile(DEFAULT).deferred_subtrees]
         base_gone = {n for n in before.nodes if any(n == r or n.startswith(r + '/') for r in base_roots)}
         try:

@@ -353,7 +353,7 @@ def m1_time_lines(box_s, place, guest_bytes, panel=None, real=None):
                   'about UPTIME 17 s '
                   '(INFERRED: one boot, in a run that started secondary CPUs; the plan, section 10): every run of this kind is past it by construction, and boot 20 was. On restarts: '
                   'a PSCI-only control was alive at UPTIME 224 s and 268 s (OBSERVED, two boots); the restarts seen went with CPU_ON and CPU_OFF (INFERRED) and this '
-                  'run starts no secondary (x4 = 0).' + (f' {m1g.restart_control_words(box_s)}' if box_s > m1g.D5_BOX_S else ''), first=3, rest=3),
+                  'run starts no secondary (x4 = 0).' + (f' {m1g.restart_control_words(box_s, real)}' if box_s > m1g.D5_BOX_S else ''), first=3, rest=3),
         '   Thermal (D8): no thermal guard exists on this path. The monitor\'s own (compat/a16-thermal.c) only loads, from the',
         '   A16\'s sensor addresses: SROT at 0x0c222000 + n * 0x1000, which compat/hamoa-thermal.c gives as this machine\'s TSENS',
         '   SROT (INFERRED there), and TM at 0x0c22c000 + n * 0x1000, where this machine\'s is UNKNOWN. It is closed by',

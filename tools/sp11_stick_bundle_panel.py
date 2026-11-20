@@ -28,9 +28,8 @@ import sp11_stick_bundle_panel_rung3 as r3  # noqa: E402
 import sp11_stick_bundle_panel_panic as rp  # noqa: E402
 import sp11_stick_bundle_panel_rung5 as r5  # noqa: E402
 import sp11_stick_bundle_panel_rung6 as r6  # noqa: E402
-import sp11_stick_bundle_panel_rung7 as r7  # noqa: E402
 import sp11_stick_bundle_panel_rungs as rungs  # noqa: E402
-ACK = (r5, r6, r7)                  # the rungs of the acknowledging monitor (K13 to K15)
+ACK = rungs.ACK                     # the rungs of the acknowledging monitor (K13 to K16)
 REFUSALS = ('PANEL_MISMATCH',)      # beside m1.REFUSALS: docs/SP11-STICK-MONITOR.md section 20 lists it
 ch.KNOWN_REFUSALS.update(REFUSALS)
 Refused = ch.Refused
@@ -200,7 +199,7 @@ GUIDE_WORDS = {
         decides=r3.DECIDES, hazard=r3.hazard, step7=r2.step7_console, rung=r3.RUNG, why=r3.why_lines, stand=r3.stand_extra, film=r2.FILM_STEP, also_reads=('5d',), evidence_to='3c',
         stand_head=r3.STAND_HEAD, stand_loop=r3.STAND_LOOP, stand_stick=False,
         console=r3.CONSOLE, ran=r3.RAN, stop_seen=r3.STOP_SEEN, fault_seen=r3.FAULT_SEEN, film_until=r3.film_until, **{**r2.SHARED_WORDS, 'step4': r3.step4, 'step6': r3.STEP6, 'row_e': r3.row_e})}
-rungs.extend(GUIDE_WORDS)      # rungs 4 to 7 (K12 to K15): the entries with a let_panic word, each from the one before
+rungs.extend(GUIDE_WORDS)      # rungs 4 to 8 (K12 to K16): the entries with a let_panic word, each from the one before
 
 
 def reading_lines(panel):
@@ -313,9 +312,9 @@ def _row(label, text):
 
 
 def _rung(panel):
-    """The module whose words a record of the console with a word of its own is written in: rung 3's, rung 4's (K12: let_panic) or, with the acknowledging word, rung 5's (K13), rung 6's
-    (K14: the word of 90 s) or rung 7's (K15: a guest profile)."""
-    return ((r7 if panel.get('profile') else r6 if panel['boot_arg'] == r6.WORD else r5) if m1.BOOT_ARG_CPU_START.get(panel.get('boot_arg')) == 'ack' else rp) if panel.get('let_panic') else r3
+    """The module whose words a record of the console with a word of its own is written in (tools/sp11_stick_bundle_panel_rungs.py rung_of): rung 3's, rung 4's (K12: let_panic) or, with
+    the acknowledging word, rung 5's (K13), rung 6's (K14: the word of 90 s), rung 7's (K15: a guest profile) or rung 8's (K16: the profile with the clock)."""
+    return rungs.rung_of(panel)
 
 
 def _in_short(panel):

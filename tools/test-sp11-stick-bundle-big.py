@@ -749,7 +749,7 @@ class Pair(unittest.TestCase):
             self.assertEqual(caught.exception.name, 'OPTIONS_BAD')
         for form in ch.ACK_FORMS:
             self.assertFalse(ch.let_panic_form_ok(form[0], form[1], 300, 'ack', ch.FORM_PROFILE.get(form)))
-        self.assertEqual(sorted(ch.ACK_FORMS, key=lambda f: f[2]), [ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM])
+        self.assertEqual(sorted(ch.ACK_FORMS, key=lambda f: (f[2], len(f))), [ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM])
         import sp11_stick_wrapper_build as wb
         self.assertEqual((wb.ROOT_CARRY_BOX_MAX_S, wb.ROOT_CARRY_FILE_MAX), (m1.ROOT_CARRY_BOX_MAX_S, sb.FILE_MAX_BIG))
         self.assertEqual(wb.ROOT_CARRY_DEFINES, ('-DSNAP_SP11_STICK_ROOT_CARRY=1', '-DSP11_STICK_MONITOR_BOX_MAX_S=1200u'))

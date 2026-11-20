@@ -110,14 +110,14 @@ class Form(unittest.TestCase):
         self.assertEqual(caught.exception.name, name)
         return caught.exception
 
-    def test_the_form_is_the_third_of_a_closed_list_of_three_and_carries_the_one_profile(self):
+    def test_the_form_is_the_third_of_a_closed_list_of_four_and_carries_the_one_profile(self):
         self.assertEqual((ch.RUNG7_FORM, m1.RUNG7_FORM, ch.RUNG7_PROFILE, gpb.QUIET, gpb.RUNG7_PROFILES), (('console', F, 120), ('console', F, 120), 'j700ap-26A428-m1-quiet', Q, (Q,)))
-        self.assertEqual(ch.ACK_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM), 'rung 7 is the third and there is no fourth')
-        self.assertEqual(ch.FORM_PROFILE, {ch.RUNG7_FORM: Q}, 'the profile belongs to rung 7\'s form and to no other')
+        self.assertEqual(ch.ACK_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM), 'rung 7 is the third and rung 8 (K16) the fourth: no fifth')
+        self.assertEqual(ch.FORM_PROFILE, {ch.RUNG7_FORM: Q, ch.RUNG8_FORM: gpb.RTC}, 'each profile belongs to its own form and to no other: rung 7\'s is quiet, rung 8\'s quiet-rtc')
         self.assertEqual((m1.BOOT_ARGS[F], m1.BOOT_ARG_CPU_START[F], m1.RUNG6_BOX_S, m1.BOX_MAX_S), ('ACKPANIC-', 'ack', 120, 120), 'rung 7 asks rung 6\'s box (D5\'\') and rung 5\'s word')
         self.assertEqual(sorted(m1.BOOT_ARGS), sorted([P, F, W90]), 'no boot argument was added: nested_panic_max is in no form')
         self.assertNotIn('nested_panic_max', ' '.join(m1.BOOT_ARGS) + ch.LET_PANIC_FORMS_TEXT + str(gpb.NAMES))
-        self.assertEqual(ch.LET_PANIC_FORMS_TEXT.count('--guest-profile'), 1)
+        self.assertEqual(ch.LET_PANIC_FORMS_TEXT.count('--guest-profile'), 2)
         for form in ((120, 'console', 0, F, True, 'ack', Q), (60, 'console', 0, F, True, 'ack', None), (120, 'console', 0, W90, True, 'ack', None), (5, 'console', 0, P, True, 'stop', None),
                      (5, 'console', 0, P, False, 'stop', None), (5, 'console', 0, None, False, 'stop', None), (5, 'handed', 0, None, False, 'stop', None), (5, 'withheld', 0, None, False, 'stop', None),
                      (60, 'console', 0, F, True, 'ack', BASE)):
@@ -129,7 +129,7 @@ class Form(unittest.TestCase):
                          [True, False, True, False, False, True, True, False, False])
 
     def test_every_other_combination_of_box_word_and_profile_is_a_named_refusal(self):
-        menu = [name for name in gpb.NAMES if name not in (BASE, Q)]
+        menu = [name for name in gpb.NAMES if name not in (BASE, Q, gpb.RTC)]      # quiet-rtc is rung 8's profile in this very form: tools/test-sp11-stick-monitor-rung8.py holds that pair
         G, L, B, O = 'GUEST_PROFILE_REFUSED', 'LET_PANIC_REFUSED', 'BOOT_ARG_REFUSED', 'OPTIONS_BAD'
         bad = {'rung 7\'s box and word without the profile': ((120, 'console', 0, F, True, 'ack', None), G), 'the same with the default board named': ((120, 'console', 0, F, True, 'ack', BASE), G),
                'rung 5\'s box with the profile': ((60, 'console', 0, F, True, 'ack', Q), G), 'rung 6\'s word and box with the profile': ((120, 'console', 0, W90, True, 'ack', Q), G),
@@ -190,7 +190,7 @@ class Form(unittest.TestCase):
 
 class Pair(unittest.TestCase):
     def test_rung_7_uses_rung_6s_pair_by_digest_and_the_table_is_keyed_by_form(self):
-        self.assertEqual(sorted(REAL_PAIRS), [F, W90, Q], 'the pairs are keyed by word, and rung 7\'s by its profile (its word is rung 5\'s)')
+        self.assertEqual(sorted(REAL_PAIRS), [F, W90, Q, gpb.RTC], 'the pairs are keyed by word, and rungs 7\'s and 8\'s by their profiles (their word is rung 5\'s)')
         self.assertEqual(REAL_PAIRS[Q], REAL_PAIRS[W90], 'rung 7 uses rung 6\'s pair')
         self.assertNotEqual(REAL_PAIRS[Q], REAL_PAIRS[F], 'and not rung 5\'s')
         self.assertEqual(REAL_PAIRS[Q], (m1.ACK_MONITOR_SHA256, m1.ACK_REPORTER6_SHA256))
@@ -458,7 +458,7 @@ class Hygiene(unittest.TestCase):
                 self.assertLess(len(text.splitlines()), 1500)
                 self.assertEqual(text.splitlines()[1 if text.startswith('#!') else 0].count('SPDX-License-Identifier: MIT'), 1)
                 self.assertTrue(text.isascii())
-        for rel, cap in (('docs/SP11-STICK-BUILD.md', 37_000), ('docs/SP11-STICK-REAL.md', 33_000), ('docs/SP11-STICK-MONITOR.md', 156_500), ('docs/SP11-M1-GUEST-PROFILES.md', 21_000)):
+        for rel, cap in (('docs/SP11-STICK-BUILD.md', 37_000), ('docs/SP11-STICK-REAL.md', 33_000), ('docs/SP11-STICK-MONITOR.md', 160_500), ('docs/SP11-M1-GUEST-PROFILES.md', 21_000)):
             self.assertLessEqual(len((ROOT / rel).read_bytes()), cap, rel)
 
 

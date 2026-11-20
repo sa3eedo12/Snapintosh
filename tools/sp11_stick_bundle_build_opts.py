@@ -34,7 +34,7 @@ def build_opts(p, kind, template=False):
                                                                                               'the EFI files that run before the wrapper, named in section 1b')),
                      ('--cpu-start', dict(choices=('stop', 'ack'), default='stop', help='with --m1-run: what the monitor of the pair does with the guest\'s first CPU-start write, '
                                                                                        'which must be what the build report says: stop (the default, every record up to rung 4) or '
-                                                                                       'ack (EXPERIMENTAL, the records of rungs 5 to 7 only, with --let-panic: docs/SP11-MONITOR-PROFILE.md section 10)')),
+                                                                                       'ack (EXPERIMENTAL, the records of rungs 5 to 8 only, with --let-panic: docs/SP11-MONITOR-PROFILE.md section 10)')),
                      ('--note', dict(help='a text file (printable ASCII, at most 48 lines of 120 characters) appended to the record as its section 6'))):
         p.add_argument(flag, **kw)
     if kind == 'synthetic':
@@ -44,8 +44,8 @@ def build_opts(p, kind, template=False):
     else:
         p.add_argument('--kernelcache', required=True)
         p.add_argument('--guest-profile', default=gpb.DEFAULT, metavar='NAME',
-                       help=f'EXPERIMENTAL, the record of rung 7 only: the guest\'s device tree (docs/SP11-M1-GUEST-PROFILES.md): one of {", ".join(gpb.NAMES)}; any other name, and the profile '
-                            'in any form but rung 7\'s, is GUEST_PROFILE_REFUSED')
+                       help=f'EXPERIMENTAL, the records of rungs 7 and 8 only: the guest\'s device tree (docs/SP11-M1-GUEST-PROFILES.md): one of {", ".join(gpb.NAMES)}; any other name, and the profile '
+                            'in any form but those of rungs 7 (quiet) and 8 (quiet-rtc), is GUEST_PROFILE_REFUSED')
         p.add_argument('--panel', choices=('handed', 'withheld', 'console'), required=True,
                        help='D9: SNAP_NO_FB; with --m1-run also `console`: the panel handed and serial=2 in the command line (probes/run.py --console panel)')
         p.add_argument('--boot-arg', default=None, metavar='WORD',
@@ -53,9 +53,9 @@ def build_opts(p, kind, template=False):
                             'with --cpu-start ack); any other word is BOOT_ARG_REFUSED')
         p.add_argument('--let-panic', action='store_true',
                        help='with --m1-run --panel console and --boot-arg cpus=1 --time-box-s 5 (rung 4) or --cpu-start ack with --boot-arg cpu_boot_timeout_secs=120 --time-box-s 60 (rung 5), '
-                            '=90 --time-box-s 120 (rung 6) or =120 --time-box-s 120 --guest-profile j700ap-26A428-m1-quiet (rung 7), and no other combination (LET_PANIC_REFUSED): set '
+                            '=90 --time-box-s 120 (rung 6) or =120 --time-box-s 120 --guest-profile j700ap-26A428-m1-quiet (rung 7) or ...-m1-quiet-rtc (rung 8), and no other combination (LET_PANIC_REFUSED): set '
                             'the monitor\'s PARAMS word let_panic (word 23, offset 0xB8), so that a guest EL1 exception that reaches one branch of the monitor runs XNU\'s own handler '
-                            'instead of ending the run (docs/SP11-STICK-MONITOR.md section 20, K12 to K15)')
+                            'instead of ending the run (docs/SP11-STICK-MONITOR.md section 20, K12 to K16)')
         p.add_argument('--sptm-hvc-calls', choices=(0, 1), type=int, required=True, help='D9: the SPTM HVC kernel patch')
         p.add_argument('--seed', default=rec.DEFAULT_SEED, help='label of the guest\'s boot random seed (SNAP_SEED): the same label, the same bytes')
     if not template:

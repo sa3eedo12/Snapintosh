@@ -352,8 +352,9 @@ class Closed(unittest.TestCase):
                 self.assertEqual(m1.pinned_label('RUNG4', True, choice, word, profile=profile), 'M1RUN-' + marker + 'RUNG4')
             refused(self, 'GUEST_PROFILE_REFUSED', m1.pinned_label, 'RUNG4', True, choice, word, profile=P + 'quiet')
         for name in MARKS:
-            if name not in (BASE, P + 'quiet'):
+            if name not in (BASE, P + 'quiet', ch.RUNG8_PROFILE):
                 refused(self, 'GUEST_PROFILE_REFUSED', m1.pinned_label, 'RUNG7', True, *form, profile=name)
+        self.assertEqual(m1.pinned_label('RUNG8', True, *form, profile=ch.RUNG8_PROFILE), 'M1RUN-ACKPANIC-R-RUNG8', 'rung 8\'s form (the same four words as rung 7\'s) has its own profile and mark')
         self.assertEqual(m1.pinned_label('RUNG2', True, 'console'), 'M1RUN-CONSOLE-RUNG2', 'rung 2\'s label is what it was')
         self.assertEqual(m1.pinned_label('RUNG3', True, 'console', 'cpus=1', profile=BASE), 'M1RUN-CPUS1-RUNG3', 'rung 3\'s label is what it was')
         # the budget: M1RUN- and ACKPANIC- are 15, a mark 2 and a facts label of six (RUNG10) is the 23rd character
