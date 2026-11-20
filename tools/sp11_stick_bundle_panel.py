@@ -60,10 +60,11 @@ def command_line(choice, boot_arg=None):
 
 
 def kind_key(real):
-    """The key of the guide's PANEL table for the facts of a real build: its choice, `+word` when its command line has a word of its own, which is a record of its own, `+let_panic`
-    when the monitor's let_panic PARAMS word is set (K12, K13) and `+` the name of the guest profile when the guest has one (read back by the builder into the panel's `profile`, K15)."""
+    """The key of the guide's PANEL table for a real build: its choice, `+word` for a command-line word of its own, `+let_panic`, `+` the guest profile's name (the panel's `profile`, K15)
+    and `+isc` when the guest's RAM disk holds an ISC (rung 10)."""
+    facts = real.get('panel_facts') or {}
     return (real['panel'] + (f'+{real["boot_arg"]}' if real.get('boot_arg') else '') + ('+let_panic' if real.get('let_panic') else '')
-            + (f'+{real["panel_facts"]["profile"]}' if (real.get('panel_facts') or {}).get('profile') else ''))
+            + (f'+{facts["profile"]}' if facts.get('profile') else '') + ('+isc' if facts.get('isc') else ''))
 
 # What section 3c cites and what each citation rests on: (file, first line, last line, fragments that must all be somewhere on those lines). The text below
 # is held to this table by tools/test-sp11-stick-monitor-panel.py in both directions: a path:line in the text that is not here, and an entry whose fragment is

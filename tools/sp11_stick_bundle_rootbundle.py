@@ -37,6 +37,8 @@ def check_args(a, profile, kind):
     the profile without a root are both refused. Nothing for a build that has neither."""
     has = [bool(getattr(a, name, None)) for name in ROOT_INPUTS]
     gpb.check_root(profile, any(has))
+    if getattr(a, 'isc_image', None) and profile != ch.RUNG9_PROFILE:
+        raise Refused('GUEST_PROFILE_REFUSED', f'--isc-image belongs to --guest-profile {ch.RUNG9_PROFILE} (rung 10: the RAM disk of rung 9\'s form with an ISC) and to no other profile')
     if profile != ch.RUNG9_PROFILE:
         return
     if kind != 'real':
@@ -48,6 +50,11 @@ def check_args(a, profile, kind):
         raise Refused('OPTIONS_BAD', 'rung 9\'s guest is over the 256 MiB of the older pairs: give --bigfile (the limits of the pair of this form, 2 GiB, and the manifest tool\'s 8 MiB chunk cap)')
     if a.guest_mib != ch.RUNG9_RAM_MIB:
         raise Refused('OPTIONS_BAD', f'rung 9\'s guest has {ch.RUNG9_RAM_MIB} MiB of RAM (the form is the root with room to run in: docs/SP11-STICK-ROOT.md); got --guest-mib {a.guest_mib}')
+
+
+def isc_of(a):
+    """dict(bytes, sha256, roles) of the ISC image of a rung 10 build, which tools/sp11_stick_bundle_root.py real_guest read before the loader mapped it; None for every other build."""
+    return getattr(a, 'isc_info', None)
 
 
 def guest(a, xb, place, facts, profile):

@@ -561,7 +561,7 @@ class Hygiene(unittest.TestCase):
                 self.assertLess(len(text.splitlines()), 1500)
                 self.assertEqual(text.splitlines()[1 if text.startswith('#!') else 0].count('SPDX-License-Identifier: MIT'), 1)
                 self.assertTrue(text.isascii())
-        for rel, cap in (('docs/SP11-STICK-ROOT.md', 22_500), ('docs/SP11-M1-GUEST-PROFILES.md', 24_500), ('docs/SP11-STICK-MONITOR.md', 166_000)):
+        for rel, cap in (('docs/SP11-STICK-ROOT.md', 29_000), ('docs/SP11-M1-GUEST-PROFILES.md', 24_500), ('docs/SP11-STICK-MONITOR.md', 166_000)):   # ROOT.md: 18,500 for K17, 22,500 for boot 28, raised on purpose to 29,000 for section 11 (rung 10)
             self.assertLessEqual(len((ROOT / rel).read_bytes()), cap, rel)
 
     def test_the_note_has_k17_and_its_test_row_and_the_cap_is_named_in_it(self):

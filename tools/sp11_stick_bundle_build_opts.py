@@ -60,6 +60,8 @@ def build_opts(p, kind, template=False):
                             'the monitor\'s PARAMS word let_panic (word 23, offset 0xB8), so that a guest EL1 exception that reaches one branch of the monitor runs XNU\'s own handler '
                             'instead of ending the run (docs/SP11-STICK-MONITOR.md section 20, K12 to K16)')
         p.add_argument('--sptm-hvc-calls', choices=(0, 1), type=int, required=True, help='D9: the SPTM HVC kernel patch')
+        p.add_argument('--isc-image', default=None, help='EXPERIMENTAL, rung 10 only (docs/SP11-STICK-ROOT.md section 11; needs the options of rung 9): the three-role ISC image '
+                                                          '(tools/make-isc-fixture.py --build-three-role), which makes the RAM disk a GPT medium of the root and the ISC')
         p.add_argument('--seed', default=rec.DEFAULT_SEED, help='label of the guest\'s boot random seed (SNAP_SEED): the same label, the same bytes')
     if not template:
         for flag, kw in (('--out', dict(required=True)), ('--force', dict(action='store_true')), ('--allow-under', dict(action='append', default=[])),

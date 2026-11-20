@@ -15,7 +15,9 @@ and the IOKit RAM-disk mode are passed to it as they are passed on the A16 (prob
 boot-uuid, apfs-preboot-uuid, the root-hash payload, protected-data-access 0 and sepfw-load-at-boot 0). What this module adds is the command-line words for a root that takes
 minutes to mount, `cpu_boot_timeout_secs=<over the box>` and `wdt=-1`, and the RTC seed that the A16 route took at upload, baked at build from an explicit epoch."""
 import bisect
+import contextlib
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -251,13 +253,18 @@ def real_guest(a, xb, place, facts, profile):
     xb.configure_guest(profile)
     check_inputs(a, xb)
     a.root_inputs = dict(ramdisk=str(a.ramdisk), root_hash=str(a.root_hash), ramdisk_mode='iokit')
+    if getattr(a, 'isc_image', None):
+        a.isc_info = check_isc(a.isc_image)
+        a.root_inputs['isc_image'] = str(a.isc_image)
     built = ch.real_built(a, xb, place, facts)
     if (why := seed_rtc_failure(built)):
         raise Refused('ROOT_RTC', why)
     if not built.get('ramdisk_root_range'):
         raise Refused('ROOT_INPUT_BAD', 'the loader built no RAM-disk root')
+    if bool(getattr(a, 'isc_image', None)) != bool(built.get('ramdisk_isc_range')):
+        raise Refused('ROOT_INPUT_BAD', 'the loader built the RAM disk with an ISC partition only when --isc-image was given, and with none otherwise')
     spec = xb.GUEST_PROFILE.root_hash
-    root_range = built['ramdisk_root_range']
+    root_range = built['ramdisk_range']      # the medium that /chosen names: the root alone, or with --isc-image the GPT medium that holds the root and the ISC
     nodes = gpb.read_back(xb, built, profile, dict(extents=root_range, boot_uuid=spec.boot_uuid, payload=Path(a.root_hash).read_bytes()))
     return built, root_range, nodes, spec
 
@@ -291,6 +298,28 @@ def check_inputs(a, xb):
                                         + (f'{spec.filename}' if spec else 'this profile has no trust cache'))
     if xb.GUEST_PROFILE.root_hash is None or xb.GUEST_PROFILE.installed_root is not None:
         raise Refused('ROOT_INPUT_BAD', 'the guest profile is not a RAM-disk root profile (a root hash and no installed root)')
+
+
+def check_isc(path):
+    """ISC_ROLES' image, read before the loader maps it: a regular file, a raw APFS container (probes/ramdisk.py checks the geometry) whose volumes have exactly the roles that
+    tools/cycle_lib/speed_test.py isc_roles demands (xART 256, Preboot 16, Hardware 320; checked from the latest checkpoint, not from names). Returns dict(bytes, sha256), the digest
+    read in 16 MiB windows: the image is a sparse file of 1,025 MiB of which a few MiB are allocated, and the record states its digest."""
+    if not Path(path).is_file():
+        raise Refused('ROOT_INPUT_BAD', '--isc-image is not a regular file')
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):     # cycle_lib warns on stderr that the machine's pins.json is absent: not this build's business
+            from cycle_lib import speed_test
+        roles = speed_test.isc_roles(path)
+    except Exception as error:      # the checker's own refusal type is cycle_lib.common.Refused
+        raise Refused('ROOT_INPUT_BAD', f'--isc-image is not a raw APFS container whose volumes the speed test reads ({error})') from None
+    if sorted(roles) != sorted(speed_test.ISC_ROLES):
+        raise Refused('ROOT_INPUT_BAD', f'--isc-image has the volume roles {sorted(roles)}, and the ISC has {sorted(speed_test.ISC_ROLES)} (xART, Preboot, Hardware)')
+    digest = hashlib.sha256()
+    with open(path, 'rb') as stream:
+        for block in iter(lambda: stream.read(16 << 20), b''):
+            digest.update(block)
+    return dict(bytes=Path(path).stat().st_size, sha256=digest.hexdigest(), roles=sorted(roles))
 
 
 def check_out(a, bb):
@@ -406,7 +435,7 @@ def report_of(a, kind, place, lines, written, checked, chunks, carried, inputs, 
                   ramdisk_range=[f'{v:#x}' for v in (built.get('ramdisk_range') or ())]),
         runner=dict(chunk_cap_kib=CHUNK_CAP_KIB, operations=-(-written['file_size'] // cap), operations_max=256, note='INFERRED from W4: unit time of an 8 MiB op is UNKNOWN'),
         placement={k: f'{v:#x}' for k, v in place.items()}, data_top_reserve=DATA_TOP_BYTES, time_box_s=a.time_box_s, cpu_boot_timeout_s=wait, boot_words=words,
-        panel='console', facts_checked=lines, **({'real': real} if real else {}),
+        panel='console', facts_checked=lines, **({'real': real} if real else {}), **({'isc': a.isc_info} if getattr(a, 'isc_info', None) else {}),
         not_run=['the wrapper, the monitor and the guest', 'the runner with this file', 'any hardware'])
 
 
@@ -434,4 +463,5 @@ def add_options(p, kind):
         p.add_argument('--ramdisk', required=True, help='the raw APFS root image (the profile pins its SHA-256)')
         p.add_argument('--root-hash', required=True, help='the raw 208-byte root-hash payload (the profile pins its SHA-256)')
         p.add_argument('--trust-cache', required=True, help='the profile\'s static trust cache, in the firmware directory the loader reads')
+        p.add_argument('--isc-image', default=None, help='EXPERIMENTAL: the three-role ISC image (tools/make-isc-fixture.py --build-three-role): the RAM disk is then a GPT medium of the root and the ISC')
         p.add_argument('--rtc-epoch-us', type=int, default=None, help='the epoch, in microseconds, that the virtual RTC starts at (the A16 took it at upload); needed when the guest has an RTC')

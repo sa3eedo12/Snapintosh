@@ -581,7 +581,7 @@ def prepare(a, kind, before_filler=None):
                             a.time_box_s, sha(monitor), sha(reporter))   # what the guest is given of the panel, from its bytes
     head, table = sb.unpack_guest(guest)
     if profile != gpb.DEFAULT:      # rung 7: the guest is compared with rung 6's and the comparison is what the record says it differs in
-        panel = r7b.with_guest(panel, profile, facts, chunks, table, guest, nodes)
+        panel = r7b.with_guest(panel, profile, facts, chunks, table, guest, nodes, rb.isc_of(a))
     record = rec.record_text(dict(place=place, stores=stores, time_box_s=a.time_box_s, label=facts['build_label'], monitor=(len(monitor), sha(monitor)),
                                   reporter=(len(reporter), sha(reporter)), note=note, gic_stop=gic_stop, gic_quarantine=gic_quarantine, m1=m1_facts,
                                   guest=dict(size=len(guest), sha256=sha(guest), chunks=len(table), index=head['index_sha256'].hex()),

@@ -108,13 +108,16 @@ def compare(chunks, table, guest_bytes, nodes):
                 dt_length=(RUNG6_DT_LENGTH, int.from_bytes(page[BOOT_ARGS_AT + DT_LENGTH_AT:BOOT_ARGS_AT + DT_LENGTH_AT + 4], 'little')), guest_bytes=(RUNG6_GUEST_BYTES, guest_bytes))
 
 
-def with_guest(panel, profile, facts, chunks, table, guest, nodes):
+def with_guest(panel, profile, facts, chunks, table, guest, nodes, isc=None):
     """`panel` (the dict of read_panel) with what the words of rung 7 read: the profile, the comparison with rung 6's guest and what the page prints of this guest (the 16 capitals of its
     SHA-256, its size and the label).     The profile quiet-rtc is rung 8's: its guest is compared with rung 7's own (tools/sp11_stick_bundle_rung8.py); quiet-rtc-acm is rung 9's, compared with rung 8's (tools/sp11_stick_bundle_rung9.py)."""
     if profile == ch.RUNG8_PROFILE:
         import sp11_stick_bundle_rung8 as r8b
         return r8b.with_guest(panel, profile, facts, chunks, table, guest, nodes)
     if profile == ch.RUNG9_PROFILE:
+        if isc:     # rung 10: rung 9's form with the ISC, compared with rung 9's own guest (tools/sp11_stick_bundle_rung10.py)
+            import sp11_stick_bundle_rung10 as r10b
+            return r10b.with_guest(panel, profile, facts, chunks, table, guest, nodes, isc)
         import sp11_stick_bundle_rung9 as r9b
         return r9b.with_guest(panel, profile, facts, chunks, table, guest, nodes)
     digest = hashlib.sha256(guest).hexdigest()

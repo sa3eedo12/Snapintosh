@@ -488,8 +488,8 @@ class Meaning(unittest.TestCase):
     def test_every_panel_has_its_words_for_the_other_rung_and_a_panel_without_them_is_a_key_error(self):
         for key, entry in m1g.PANEL.items():
             panel, _, word = key.partition('+')         # a record whose guest has a boot-arg word of its own is the panel's key and `+word` (kind_key of tools/sp11_stick_bundle_panel.py)
-            if word.endswith(('+' + ch.RUNG7_PROFILE, '+' + ch.RUNG8_PROFILE, '+' + ch.RUNG9_PROFILE)):
-                continue    # the key of a guest with a profile needs the builder's comparison with the guest before it: tools/test-sp11-stick-monitor-rung7.py (-rung8.py, -rung9.py) builds that record
+            if word.endswith(('+' + ch.RUNG7_PROFILE, '+' + ch.RUNG8_PROFILE, '+' + ch.RUNG9_PROFILE, '+' + ch.RUNG9_PROFILE + '+isc')):
+                continue    # the key of a guest with a profile needs the builder's comparison with the guest before it: tools/test-sp11-stick-monitor-rung7.py (-rung8.py, -rung9.py, -rung10.py) builds that record
             with self.subTest(key):
                 self.assertIn(flat(entry['rung']), flat(text_of(real={**REAL, 'panel': panel, **({'boot_arg': word} if word else {})})))
         short = {key: value for key, value in m1g.PANEL['withheld'].items() if key != 'rung'}

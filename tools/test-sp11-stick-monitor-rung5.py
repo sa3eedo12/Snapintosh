@@ -282,6 +282,7 @@ class Reader(unittest.TestCase):
         self.assertEqual([pn._rung(panel), pn._rung({**panel, 'boot_arg': P}), pn._rung({**panel, 'boot_arg': P, 'let_panic': False})], [r5, rp, r3])
         self.assertEqual(sorted(k for k in m1g.PANEL if 'let_panic' in k), ['console+cpu_boot_timeout_secs=120+let_panic', 'console+cpu_boot_timeout_secs=120+let_panic+j700ap-26A428-m1-quiet',
                                                                           'console+cpu_boot_timeout_secs=120+let_panic+j700ap-26A428-m1-quiet-rtc', 'console+cpu_boot_timeout_secs=360+let_panic+j700ap-26A428-m1-quiet-rtc-acm',
+                                                                          'console+cpu_boot_timeout_secs=360+let_panic+j700ap-26A428-m1-quiet-rtc-acm+isc',
                                                                           'console+cpu_boot_timeout_secs=90+let_panic',
                                                                           'console+cpus=1+let_panic'])
 

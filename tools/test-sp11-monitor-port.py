@@ -409,7 +409,7 @@ boot 27, 120.185 s, one vCPU, through the BSD layer to the kernel's wait for a r
 **Boot 28, rung 9 (2026-11-20, plan `M1RUN-ACKPANIC-M-RUNG9`; OBSERVED, one unit, one boot; rung 8, the clock alone, was skipped by the operator and never run).**
 rung 9's class is RUNG 9 PANIC TEXT (section 14; `docs/SP11-STICK-LOG.md` section 26)
 **What boot 28 showed (rung 9; OBSERVED, one unit, one boot; `docs/SP11-STICK-LOG.md` section 26).**
-the firmware placed it at `0XF8D2A1000` in one descriptor, the wrapper copied it in 26.1 s (`TICKS HZ=19200000 PLACED=40419 COPIED=501263277`)
+the firmware placed it at `0XF8D2A1000` in one descriptor, the wrapper placed, digested and copied it in 26.1 s from its entry (`TICKS HZ=19200000 PLACED=40419 COPIED=501263277`)
 `launchd`'s first boot task `mount-phase-1` found no volume of role 0x10 or 0xC0, waited ten times for an APFS node and failed, and the guest printed `userspace panic: boot task failure: mount-phase-1 - exited due to SIGABRT`
 That the volumes `mount-phase-1` asks for are the ISC container's is INFERRED, strongly.
 Rung 9, the first root-mount form, DECIDED (by the SHA-256 of its own record, which this entry does not repeat;

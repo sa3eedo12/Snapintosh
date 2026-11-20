@@ -2985,7 +2985,7 @@ class Document(unittest.TestCase):
                        'one: no `NOT_IN_ONE_DESCRIPTOR` and no `PAYLOAD REFUSED` line, and the guest ran',
                        'it does: the file was read into a buffer at `0XF8D2A1000` and both digests agree',
                        'no restart and no reset in the carry of about two minutes: the flush operations, the firmware\'s watchdog and the Shell\'s state caused none',
-                       'the copy was 26.1 s at 19.2 MHz and the placement 2.1 ms; the file\'s 1,926,621,440 bytes over 26.1 s are 73.8 MB/s, 70.4 MiB/s',
+                       'the placement, the digests and the copy were 26.1 s together at 19.2 MHz, counted from the wrapper\'s entry, the placement alone 2.1 ms; the file\'s 1,926,621,440 bytes over 26.1 s are 73.8 MB/s, 70.4 MiB/s, a floor for the copy\'s own rate',
                        'NOT TESTED: the run ended at 40.08 s, before the counter\'s wrap at 178.96 s (arithmetic on 24 MHz), and no `MON STOP DEVICE_RESET` came',
                        'The bring-up page appeared at about 57 s of film 1 and stayed unchanged to its end at 95 s, 38 s or more',
                        '`mount_by_role:451: failed to find volume with role = 10 in APFS container with volcnt = 0 for root device /dev/disk1s1 with status 49245`',
@@ -3073,7 +3073,7 @@ class Document(unittest.TestCase):
                       ('one: no `NOT_IN_ONE_DESCRIPTOR` and no `PAYLOAD REFUSED` line, and the guest ran', 'several: `NOT_IN_ONE_DESCRIPTOR` came, and the guest ran'),
                       ('it does: the file was read into a buffer at `0XF8D2A1000` and both digests agree', 'it does not: the file was read below 4 GiB and the digests differ'),
                       ('no restart and no reset in the carry of about two minutes', 'a restart in the carry of about two minutes'),
-                      ('the copy was 26.1 s at 19.2 MHz and the placement 2.1 ms', 'the copy was 2.6 s at 19.2 MHz and the placement 2.1 ms'),
+                      ('the placement, the digests and the copy were 26.1 s together at 19.2 MHz', 'the placement, the digests and the copy were 2.6 s together at 19.2 MHz'),
                       ('73.8 MB/s, 70.4 MiB/s', '73.8 MiB/s, 70.4 MB/s'),
                       ('NOT TESTED: the run ended at 40.08 s, before the counter\'s wrap at 178.96 s (arithmetic on 24 MHz), and no `MON STOP DEVICE_RESET` came', 'held: the run ended at 400 s, after the counter\'s wrap at 178.96 s, and no `MON STOP DEVICE_RESET` came'),
                       ('stayed unchanged to its end at 95 s, 38 s or more', 'went dark at 95 s, 38 s or more'),
@@ -3478,7 +3478,7 @@ class Document(unittest.TestCase):
                     '(INFERRED from its last line, `Waiting on <dict ...>`) and the monitor\'s own watchdog stopped it (`MON STOP WATCHDOG`, 120.185 s); no panic text; the rung 7 record\'s class is RUNG 7 KERNEL WAITING, M1\'s PASSED '
                     '(a root device, the CPU-boot panic at about 122 s and why the PMU\'s reads fail the parity check are UNKNOWN). '
                     'Boot 28, with the root-carry pair, a guest of 6,144 MiB that carries a 1.86 GB RAM-disk root, the `quiet-rtc-acm` device tree and a box of 300 s: the carry of the 1.93 GB file worked (the stick read at about 40 MiB/s, about 46 s; '
-                    'the firmware placed the file at `0XF8D2A1000` in one descriptor; a USB read above 4 GiB works; the copy took 26.1 s; no restart, refusal or firmware-watchdog reset), and the stock kernel mounted the root and ran `launchd`, `dyld` '
+                    'the firmware placed the file at `0XF8D2A1000` in one descriptor; a USB read above 4 GiB works; the wrapper\'s placement, digests and copy took 26.1 s from its entry; no restart, refusal or firmware-watchdog reset), and the stock kernel mounted the root and ran `launchd`, `dyld` '
                     'and the ignition library at EL0 for about 36 s, the first user-mode code under the monitor; the calendar date in `launchd`\'s log is the clock model\'s seed plus 4 s, so the clock took; `launchd`\'s first boot task, `mount-phase-1`, '
                     'found no volume of role 0x10 or 0xC0, waited ten times for an APFS node and failed (INFERRED: the ISC\'s Preboot and Update volumes are not there), the guest panicked in userspace '
                     '(`userspace panic: boot task failure: mount-phase-1 - exited due to SIGABRT`) and the monitor stopped the run at boot 24\'s stop, INFERRED to be the kernel\'s chip-reset read (`MON STOP S2_FAULT`, 40.08 s); '
@@ -3532,7 +3532,7 @@ class Document(unittest.TestCase):
                     'the first user-mode code under the monitor;',
                     '| E79 | The eighth run of the SP11 monitor entry (work item 11, M1 rung 9, the first root-mount form, plan `M1RUN-ACKPANIC-M-RUNG9`, 2026-11-20, boot 28; rung 8, the record for the clock alone, was skipped by the operator and never run, '
                     'and stays committed at `4895ea2`;',
-                    'the firmware placed it at `0XF8D2A1000` (62.2 GiB) in one descriptor, the wrapper copied it in 26.1 s (`TICKS HZ=19200000 PLACED=40419 COPIED=501263277`)',
+                    'the firmware placed it at `0XF8D2A1000` (62.2 GiB) in one descriptor, the wrapper placed, digested and copied it in 26.1 s from its entry (`TICKS HZ=19200000 PLACED=40419 COPIED=501263277`)',
                     'The monitor ended the run at boot 24\'s stop, INFERRED to be the kernel\'s chip-reset read, 40.08 s into the call (`MON STOP S2_FAULT`, `PC=0XFFFFFE0008BA7358`, boot 24\'s, `A=0X3082BC...`; 769,573,015 ticks for the whole call)',
                     'rung 9\'s class is RUNG 9 PANIC TEXT, M1 PASSED (the coordinator\'s reading); gate X4, kernel executes: PARTIAL (one vCPU, 40.08 s, to launchd\'s failed first boot task)',
                     '**Boot 28 (2026-11-20; OBSERVED on two videos that miss the middle of the run, one unit, one boot; E79;',

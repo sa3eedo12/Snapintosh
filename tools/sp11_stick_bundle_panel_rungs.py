@@ -19,12 +19,14 @@ import sp11_stick_bundle_panel_rung6 as r6  # noqa: E402
 import sp11_stick_bundle_panel_rung7 as r7  # noqa: E402
 import sp11_stick_bundle_panel_rung8 as r8  # noqa: E402
 import sp11_stick_bundle_panel_rung9 as r9  # noqa: E402
+import sp11_stick_bundle_panel_rung10 as r10  # noqa: E402
 
-ACK = (r5, r6, r7, r8, r9)  # the modules of the acknowledging monitor's records (K13 to K17)
+ACK = (r5, r6, r7, r8, r9, r10)  # the modules of the acknowledging monitor's records (K13 to K18)
 KEY3, KEY4, KEY5, KEY6 = 'console+cpus=1', 'console+cpus=1+let_panic', 'console+cpu_boot_timeout_secs=120+let_panic', 'console+cpu_boot_timeout_secs=90+let_panic'
 KEY7 = f'console+cpu_boot_timeout_secs=120+let_panic+{ch.RUNG7_PROFILE}'
 KEY8 = f'console+cpu_boot_timeout_secs=120+let_panic+{ch.RUNG8_PROFILE}'
 KEY9 = f'console+cpu_boot_timeout_secs=360+let_panic+{ch.RUNG9_PROFILE}'
+KEY10 = KEY9 + '+isc'
 
 
 def rung_of(panel):
@@ -35,7 +37,7 @@ def rung_of(panel):
     if m1.BOOT_ARG_CPU_START.get(panel.get('boot_arg')) != 'ack':
         return rp
     if panel.get('profile'):
-        return {ch.RUNG8_PROFILE: r8, ch.RUNG9_PROFILE: r9}.get(panel['profile'], r7)
+        return r10 if panel.get('isc') else {ch.RUNG8_PROFILE: r8, ch.RUNG9_PROFILE: r9}.get(panel['profile'], r7)
     return r6 if panel['boot_arg'] == r6.WORD else r5
 
 
@@ -47,15 +49,16 @@ def extend(words):
     words[KEY7] = r7.guide_words(words[KEY6])        # rung 7 (K15): rung 6's words with the quiet profile
     words[KEY8] = r8.guide_words(words[KEY7])        # rung 8 (K16): rung 7's words with the clock bound
     words[KEY9] = r9.guide_words(words[KEY8])        # rung 9 (K17): rung 8's words with a RAM-disk root, the root-carry pair and a box of 300 s
+    words[KEY10] = r10.guide_words(words[KEY9])      # rung 10 (K18): rung 9's words with an ISC in the RAM disk
     return words
 
 
 def pre_call(r, default):
     """Section 5's bullets on the silences before the call: rung 9's own (the carry is minutes long, tools/sp11_stick_bundle_panel_rung9.py PRE_CALL) or `default`, the guide's."""
     panel = ((r.get('real') or {}).get('panel_facts') or {})
-    return r9.pre_call() if panel.get('profile') == ch.RUNG9_PROFILE else default
+    return r10.pre_call(panel) if panel.get('isc') else r9.pre_call() if panel.get('profile') == ch.RUNG9_PROFILE else default
 
 
 def carry_rows(panel):
     """The rows that section 4's table has for the runner's read of the file before the wrapper's first line (rung 9 only, none for any other record)."""
-    return r9.carry_rows() if panel.get('profile') == ch.RUNG9_PROFILE else ()
+    return r10.carry_rows() if panel.get('isc') else r9.carry_rows() if panel.get('profile') == ch.RUNG9_PROFILE else ()
