@@ -30,7 +30,7 @@ a name `<stem>.BIN` marking a payload and every other file data that is never ca
 `#define Q1N1_PAYLOAD_MAX_FILE_BYTES`[q1n1:platform/uefi/sp11-payload.h:112], its value with the big-file gate off; VERIFIED). The position in the manifest is the role. With the runner's own opt-in `Q1N1_SP11_BIGFILE` the limit is 256
 operations of an 8 MiB chunk, 2 GiB (`#define Q1N1_PAYLOAD_MAX_FILE_BYTES`[q1n1:platform/uefi/sp11-payload.h:92]), and the wrapper of the root carry (`SNAP_SP11_STICK_ROOT_CARRY=1`,
 [SP11-STICK-ROOT.md](SP11-STICK-ROOT.md)) accepts the same: every size in this note is then 2 GiB where it says 256 MiB, in the C header (`SP11SB_FILE_MAX`) and in the Python twin
-(`sb.FILE_MAX_BIG`, `with sb.bigfile():`). That is a different pair from the one the records pin: with the gate at 0, the default, nothing below changes.
+(`sb.FILE_MAX_BIG`, `with sb.bigfile():`). That is a different pair from the one the records pin: with the gate at 0, the default, nothing below changes. The big-file runner and the root-carry pair ran once on the unit, in boot 28 (2026-11-20): a 1,926,621,440-byte GUEST.DAT of 339 chunks was read, hashed, placed, copied and called (OBSERVED, one unit, one boot; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 26 and [SP11-STICK-ROOT.md](SP11-STICK-ROOT.md) section 10).
 
 | Index | File | Kind | Content | Size rule |
 | --- | --- | --- | --- | --- |

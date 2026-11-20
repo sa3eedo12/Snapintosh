@@ -458,7 +458,7 @@ class Hygiene(unittest.TestCase):
                 self.assertLess(len(text.splitlines()), 1500)
                 self.assertEqual(text.splitlines()[1 if text.startswith('#!') else 0].count('SPDX-License-Identifier: MIT'), 1)
                 self.assertTrue(text.isascii())
-        for rel, cap in (('docs/SP11-STICK-BUILD.md', 37_000), ('docs/SP11-STICK-REAL.md', 33_000), ('docs/SP11-STICK-MONITOR.md', 166_000), ('docs/SP11-M1-GUEST-PROFILES.md', 23_000)):
+        for rel, cap in (('docs/SP11-STICK-BUILD.md', 37_000), ('docs/SP11-STICK-REAL.md', 33_000), ('docs/SP11-STICK-MONITOR.md', 166_000), ('docs/SP11-M1-GUEST-PROFILES.md', 24_500)):
             self.assertLessEqual(len((ROOT / rel).read_bytes()), cap, rel)
 
 
