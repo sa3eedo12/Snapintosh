@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: MIT -->
-STUDY ONLY - nothing in it is implemented or hardware-validated
+STUDY ONLY - nothing in it is implemented or hardware-validated; the one hardware reading is the read-only survey of section 1.7 (boot 30)
 
 # SP11 GPU study: Adreno X1-85 (gen70500, a7xx) against today's X2 (a8xx) path
 
@@ -55,6 +55,11 @@ Each finding is detailed, with citations, in the section named at its end.
     header, the 48-word protected table and the texture-descriptor layout. (§4)
 12. **Gaps** [UNVERIFIED]. The kext, plug-in and air2ir3 submodules are not initialised in the tree this study used, so
     every statement about their code is UNVERIFIED. (§0.3, §5)
+13. **The first read of the unit (boot 30)** [OBSERVED ON THE UNIT, one boot; the decodes INFERRED]. A read-only payload
+    read the GPU's clock-controller words and the GPUCC words at EL2 with no fault: the CX power domain reads powered
+    down, the GX domain is not up and the GMU, XO, hub and HLOS branch clocks read off, so the payload read nothing
+    behind the CX domain (CX_MISC, GMU, RSCC, the GPU SMMU) and never the GPU's own window. INFERRED: at the hand-off
+    the X1-85 is powered down and a bring-up starts from nothing. (section 1.7)
 
 ## 0. How to read this document
 
@@ -69,7 +74,9 @@ Each finding is detailed, with citations, in the section named at its end.
 | UNVERIFIED | Not checked: sources unavailable or unread, or a property of firmware or of the physical unit. |
 | EXPERIMENTAL | Not used; no experiment was run. |
 
-A label on a heading covers every item under it that carries none of its own. Appendix A describes how the host-computed
+A label on a heading covers every item under it that carries none of its own. In section 1.7 only, OBSERVED ON THE UNIT
+means read on the SP11 in boot 30 (one unit, one boot); everywhere else OBSERVED keeps the meaning in the table above.
+Appendix A describes how the host-computed
 numbers were obtained; the numbers are labelled in the sections that use them.
 
 ### 0.2 Citation keys
@@ -180,9 +187,10 @@ file to come from a `firmware-name` property because such images can be signed p
 when the catalog has no zap name (`LNX adreno/adreno_gpu.c:69-100`); the X1-85 catalog has none. Whether SP11 needs a
 zap image at all at EL2 is UNVERIFIED (§2.7).
 
-### 1.6 Facts a first read-back should establish [UNIMPLEMENTED, NOT RUN]
+### 1.6 Facts a first read-back should establish [UNIMPLEMENTED; NOT RUN except the power-status part of item 4, section 1.7]
 
-Nothing below has been run. Gate X8a of the plan is the place to establish them, with the operator, and each would move
+Nothing below has been run, except that boot 30 read the CX and GX power-status words that the GPU clock controller holds
+(part of item 4; section 1.7). Gate X8a of the plan is the place to establish the rest, with the operator, and each would move
 a statement of this study from VERIFIED-in-text to observed-on-unit:
 
 1. the chip id the device tree and any firmware-reported value give, against `0x43050c01`;
@@ -191,6 +199,35 @@ a statement of this study from VERIFIED-in-text to observed-on-unit:
 4. the GX/CX power-status words, `RBBM_STATUS` and `CP_SQE_CNTL` at their a7xx addresses (§2.1);
 5. whether the RSC is already programmed (§2.3) and whether the SECVID write sticks (§2.7);
 6. which UBWC version the unit's tables report (§2.5).
+
+### 1.7 What boot 30 read [OBSERVED ON THE UNIT, one boot; the decodes INFERRED]
+
+Boot 30 (2026-11-20; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 27) ran the read-only payload `GPUSNAP.BIN` of the q1n1
+fork (v1.2, `q1n1:docs/SP11-PAYLOAD-GPUSNAP.md`) alone, through the stick's payload runner at EL2. It reads the GPU's
+words in the main clock controller (GCC) and in the GPU clock controller (GPUCC) and, only behind the proof that the CX
+domain is on, the CX_MISC, GMU, RSCC and GPU SMMU windows; it never reads the GPU's own window at `0x03d00000`. It wrote
+nothing (by its document and its review). The page is transcribed by eye from one hand-held film, so a digit may be
+misread; the words are in the log, not repeated here. It ran the plan's reads R2 to R4 ([SP11-GPU-PORT-PLAN.md](SP11-GPU-PORT-PLAN.md)
+section 7.1.1), not the plan's X8a tool, which has not run on hardware.
+
+| What this study lists | What boot 30 showed | Label |
+| --- | --- | --- |
+| the GPU's clocks in GCC (the plan's R2) | the GPU configuration AHB clock is on, which is what a GPUCC read needs; the memory-NoC clock word has bit 31 and its enable bit both set (printed `ODD`; INFERRED a hardware-gated clock); the SNOC branch and the `GMIP` word read OFF | OBSERVED ON THE UNIT (the words); INFERRED (the readings) |
+| the CX power-status word (item 4; the plan's R3) | the CX domain's status word reads `0x22F801`: bit 31 (power on) clear and bit 0 (software collapse) set, no hardware control: powered down by request | OBSERVED ON THE UNIT (the word); INFERRED (the reading) |
+| the GX power-status word (item 4) | the GX domain's word reads `0x22F801` too, with `UP=0 DN=1` on the payload's own line: not up | OBSERVED ON THE UNIT (the word); INFERRED (not up) |
+| the clocks the GMU node needs (the plan's R3 and R4) | the GMU, XO, hub and HLOS branch clocks read OFF (bit 31 set); the payload's verdict is `R4 CX=OFF` | OBSERVED ON THE UNIT (the words); INFERRED (the verdict) |
+| items 3 and 5 (the GMU chip-id word; whether the RSC is programmed) | not read: CX_MISC, GMU and RSCC are behind the CX verdict (the payload printed `GATED BY CX=OFF` for each, and for the GPU SMMU), so these stay UNVERIFIED | OBSERVED ON THE UNIT (not read); UNVERIFIED (the values) |
+| items 1, 2 and 6 (the chip id, the speed bin, the UBWC version); `RBBM_STATUS` and `CP_SQE_CNTL` of item 4 | not read: they live in the GPU's own window or behind the CX domain | OBSERVED ON THE UNIT (not read); UNVERIFIED (the values) |
+| two snapshots | no word changed in 8 s (`DRIFT NONE CMP=26`) | OBSERVED ON THE UNIT |
+
+INFERRED consequences; none is a decision and nothing is authorised. At the hand-off the X1-85 is powered down: the CX
+domain is off, the GX domain is not up and the branch clocks that the GMU node names are off, so no GMU firmware is
+running and no GPU register can be read yet. A bring-up has to switch the domain and its clocks on from nothing (the
+plan's stages S1 and S2, [SP11-GPU-PORT-PLAN.md](SP11-GPU-PORT-PLAN.md) section 7.5), and whether EL2 can do that at all
+(through the RPMh and GMU path of section 2.3) is UNVERIFIED. Question 2 of section 5, whether the boot firmware leaves
+the GPU RSC and PDC programmed, cannot be answered while the RSCC is unreadable behind the CX domain: it stays
+UNVERIFIED, and section 2.3's statement that a bring-up must add the programming or prove that the firmware left the RSC
+ready is unchanged. The payload's decodes (the CX verdict, `ODD`, the clock masks) are its own and are INFERRED.
 
 ## 2. What differs between a7xx (X1-85) and a8xx (X2)
 
@@ -798,12 +835,12 @@ document authorizes them.
 | # | Question | Settled by |
 | --- | --- | --- |
 | 1 | Which GMU and SQE firmware versions the unit provides, and whether it accepts the HFI version Linux advertises (§1.5, §2.3) | X8a, on the unit; this study read only the public `WHENCE` text |
-| 2 | Whether the boot firmware leaves the GPU RSC and PDC programmed, or EL2 must program them as Linux does for a7xx (§2.3) | An X8a read-back of that state before any write |
+| 2 | Whether the boot firmware leaves the GPU RSC and PDC programmed, or EL2 must program them as Linux does for a7xx (§2.3) | An X8a read-back of that state before any write; boot 30 could not read it (the RSCC is behind the CX domain, which reads off, section 1.7), so it needs the CX domain on first |
 | 3 | Whether the unit needs the SECVID write, and whether the zap image is needed at EL2 (§2.7) | X8a and X8b observation (PLAN row F2, note N2) |
 | 4 | Whether the unit requires the CP_PROTECT table to equal Linux's, and whether its firmware keeps ranges Linux does not list (§2.6) | A supervised read-back; nothing in this study proves it |
 | 5 | The conservative DVFS ceiling: the device tree's 550, 390 and 300 MHz points are valid for every speed bin (§2.12) | An operator choice; any raise needs explicit authorization (PLAN section 8) and the thermal guard stays on (PLAN H1) |
 | 6 | Which passthrough-window holes the X1-85 needs (§2.1) | Checking the X1-85 block map against the monitor's windows; until then trap everything outside an allowlist |
-| 7 | The register identity of the X1E80100 GPU clock controller | Reading Linux `gpucc-x1e80100.c`, which was not read |
+| 7 | The register identity of the X1E80100 GPU clock controller | Reading Linux `gpucc-x1e80100.c`, which this study did not read (the plan's section 7.1 lists its words, and boot 30 read them on the unit: section 1.7) |
 | 8 | Whether the coherency self-test and PMU event `0x17` behave on this unit (§2.10) | The gated self-test at X8 |
 | 9 | Whether PM4 behaves on the unit as the XML says (§2.14) | The NOP, WFI and bounded-copy steps of F3 |
 | 10 | Which texture-descriptor layout the plug-in emits and the kext expects, and which address kinds the a7xx packages use (§4.4) | Reading SnapMetal and SnapAdreno, whose submodules are empty here |
@@ -811,7 +848,7 @@ document authorizes them.
 | 12 | Whether a driver-level override adjusts the X1-85's compute-constant limit, and whether Mesa's drivers consume the magic-register tables as initial state (§3.4, §3.5) | Reading the Mesa driver code, which was not searched |
 | 13 | Whether the kext bundle id and class keep their X2 names (§4.6) | A decision of the repository owners |
 | 14 | Who owns the IB firewall's profile seam and the chip parameters of the register generator (§4.4, §4.6) | A decision of the repository owners |
-| 15 | The minimum silicon read-back at X8a (§1.6) | The operator, per the plan |
+| 15 | The minimum silicon read-back at X8a (§1.6) | The operator, per the plan; boot 30 read the clock and power-status part (section 1.7), and items 1 to 3, 5 and 6 and the GPU-window registers of item 4 are still unread |
 | 16 | Everything in the kext, plug-in and air2ir3 submodules (§0.3) | Initialising them in the tree used for the follow-up work |
 
 Standing constraints that no answer above relaxes: one hardware client at a time; AC power or at least 50 % battery with

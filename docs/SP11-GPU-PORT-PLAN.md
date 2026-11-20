@@ -8,7 +8,8 @@ This is the planning half of workstream F items F5 (the Adreno kext) and F6 (the
 first-contact safety plan for the gates X8a to X8e (section 7). It builds on
 [SP11-GPU-A7XX-STUDY.md](SP11-GPU-A7XX-STUDY.md) (the a7xx against a8xx delta, called "the study" below) and
 [SP11-GPU-UNIXNU.md](SP11-GPU-UNIXNU.md) (an independent a7xx stack). It was written without hardware: every hardware
-status is NOT RUN, and the ABI checks that need the Apple KDK are SKIP, because the KDK is not on the host that
+status is NOT RUN, except the one read-only payload run of [section 7.1.1](#711-what-boot-30-showed-stage-s0-reads-r2-to-r4-observed-once)
+(boot 30), and the ABI checks that need the Apple KDK are SKIP, because the KDK is not on the host that
 wrote this.
 
 ## Key findings
@@ -260,6 +261,35 @@ between prepare and boot; explicit permission for persistent firmware writes and
 | R5 | Only if R4 holds: CX_MISC (`0x03d9e000`), the GMU window (`0x03d6a000`), the RSCC (`0x03d50000`): the GMU power-status words, the RSC sequencer state, `TCM_RET_CNTL`; the SMMU identity (`0x03da0000`) only if its own four clocks run too (hlos vote, memnoc, snoc dvm, ahb) | The RSC and PDC state decides whether S2 is needed (STUDY 2.3); the SMMU state decides W2 | Any fault: stop |
 | R6 | Never in S0: any GX register (`RBBM_*`, `CP_*`), any write, any reset | The GX-on state comes only from the GMU's own status words (CX side) | A GX request is refused before it is sent |
 
+#### 7.1.1 What boot 30 showed (stage S0, reads R2 to R4; OBSERVED once)
+
+Boot 30 (2026-11-20; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 27) ran the read-only payload `GPUSNAP.BIN` of the q1n1
+fork (v1.2, `q1n1:docs/SP11-PAYLOAD-GPUSNAP.md`) alone, through the stick's payload runner at EL2. It followed R2, R3 and R4 above
+in that order, and its own rule is R4's: nothing behind the CX domain is read before something proves the domain on. It is
+not the X8a tool, which has not run on hardware (NOT RUN), and it is not the S0 record of the cold state that X8a asks for,
+because R5 was not reached. It wrote nothing (by its document and its review). The page is transcribed by eye from one
+hand-held film, so a digit may be misread; the words are in the log, not repeated here. Everything below is OBSERVED
+(one unit, one boot) unless a label says otherwise, and the readings of the words are INFERRED.
+
+| Step | What boot 30 showed | Label |
+| --- | --- | --- |
+| R2 (GCC) | the GCC words answered at EL2, no fault; the GPU configuration AHB branch (`0x71004`) is on, so GPUCC could be read; the memory-NoC word has bit 31 and its enable bit both set (printed `ODD`), the SNOC branch and the `GMIP` word read OFF | OBSERVED (the words); INFERRED (the readings) |
+| R3 (GPUCC) | the first read of GPUCC on the unit answered with no fault and no hang: the CX GDSC word is `0x22F801` (bit 31 clear, bit 0 set, no hardware control: powered down by request); the GX word is the same with `UP=0 DN=1`; the GMU, XO, hub and HLOS branches read OFF, `DMT` reads ON and `AHB` reads 0 (printed `ODD`) | OBSERVED (the words); INFERRED (the readings) |
+| R4 (the gate) | not proven, and the stop rule above is what happened: the payload printed `R4 CX=OFF PWR=0 SC=1 HW=0 CLK=0X58 SM=0X2`, and the survey ended with "CX off", having read nothing behind the GDSC; 52 loads of the nominal 78 | OBSERVED (the line, the count); INFERRED (the verdict) |
+| R5 (CX_MISC, GMU, RSCC, SMMU) | not read: four `GATED BY CX=OFF` lines. The GMU power-status words, the RSC sequencer state, `TCM_RET_CNTL` and the SMMU identity are all still unread | OBSERVED (not read); UNKNOWN (the values) |
+| R6 | not in S0 by design: no GX register, no read of the GPU's own window at `0x03d00000`, no write | OBSERVED (the payload's own lines) |
+| 7.2's first hazard (a block that is powered down or unclocked) | the R2 to R4 ordering held: nothing behind the closed gate was read, and no fault or hang came; that says the ordering is sound here, not that the hazard is real | OBSERVED (no fault); INFERRED (the rest) |
+
+What it settles for the plan (INFERRED; the stage names and their order stay as they are; nothing is authorised).
+
+- R2 and R3 are answered and R4's outcome is "CX off"; R5 and R6 are not, and R5 cannot be read until the CX domain is on.
+  X8a stays open: its closing evidence is the tool's S0 record and the S1 to S5 records (7.6), none of which exists.
+- The cold state is a powered-down GPU: the CX domain off, the GX domain not up, the GMU branches off, and no GMU firmware
+  running at the hand-off. Stage S1 (CX power-on: GDSC and clocks) therefore starts from nothing, and S2 (the RSC and PDC
+  read-back) can only follow a successful S1, because the RSCC lies behind the domain that S1 switches on.
+- Whether the power-on can be made from EL2, and by which votes (the RPMh and GMU path of the study's section 2.3), is UNKNOWN;
+  the S1 stage keeps its own review and its own authorisation record.
+
 ### 7.2 What could hang or damage
 
 | Hazard | Mechanism and evidence | Prevention |
@@ -285,7 +315,10 @@ copy above 1 MiB, or not dword aligned, before a word is written; the plug-in's 
 
 The first vote is the lowest level of the descriptor's table. Candidates valid for every speed bin are 550, 390 and 300 MHz
 (STUDY 2.12); the ceiling is the operator's choice and any raise needs a separate authorisation. The thermal guard of PLAN H1
-stays on; its sensor and trip values are UNKNOWN until read, and S5 does not run without them in the descriptor.
+stays on; its sensor and trip values are UNKNOWN until read, and S5 does not run without them in the descriptor. Boot 29's
+thermal payload ([SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 27.2) read the four temperature controllers at EL2 once (50 sensors enabled; by
+hand the raw words read about 38 C to 43 C, INFERRED to be tenths of a degree); it did not say which sensor belongs to the
+GPU, and the trip values are still unread.
 
 ### 7.5 Quiesce and recovery
 
@@ -349,7 +382,7 @@ Outcomes: PASS, FAIL, SKIP (a missing input), NOT RUN. A skip is not a pass.
 | `A2I tests/regress.py`, `tools/compiler_id.py` | SKIP | The research scratch tree and `build/mesa` are absent |
 | `KEXT`, `PLUG` own checks | none exist; `perf/*` checkers need run captures: SKIP | The kext's only tests are the umbrella's |
 | `q1n1 tools/test-sp11-gpu-x8a.py`, `test-sp11-gpu-x8a-mutants.py` | 164 PASS; 45 of 47 faulty tools caught | Fake device only; the 2 others are rules enforced twice |
-| Hardware | NOT RUN | |
+| Hardware | NOT RUN | The plan's tools and gates have not run on hardware; the one payload reading of boot 30 is in 7.1.1 |
 
 ## Appendix A. Method notes
 

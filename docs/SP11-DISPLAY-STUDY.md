@@ -1,9 +1,11 @@
 # SP11 display study (WS-E, item P1): reuse the firmware pipeline
 
 **Study and host-verified decision logic only. UNIMPLEMENTED on hardware. Hardware status: NOT RUN.** Nothing here
-has run on a Surface Pro 11. Every statement about the SP11 is VERIFIED against a pinned public source (it says what
-that source says, not what the unit does) or INFERRED, and the second kind stays INFERRED until the X2 functional
-test has read a real unit ([SURFACE-PRO-11.md](SURFACE-PRO-11.md), section 6.3). The A16 build and its behaviour are
+has run on a Surface Pro 11, with one exception: boot 31 (2026-11-20) ran a read-only payload of the q1n1 fork that read
+the registers of section 8's list once, and [section 9.1](#91-what-boot-31-showed) records what its page said (OBSERVED,
+one unit, one boot; the decodes are INFERRED). Every other statement about the SP11 is VERIFIED against a pinned public
+source (it says what that source says, not what the unit does) or INFERRED, and the second kind stays INFERRED until
+the X2 functional test has read a real unit ([SURFACE-PRO-11.md](SURFACE-PRO-11.md), section 6.3). The A16 build and its behaviour are
 untouched: nothing in this study is linked by any build.
 
 What the work package delivers:
@@ -35,6 +37,12 @@ The conclusions, each with its label:
 5. **Backlight: leave it as the firmware set it** (section 7).
 6. **Whether the pipeline is active is decided from a short, ordered, side-effect-free register read list** (sections
    5 and 8). Only a complete, consistent snapshot gives ACTIVE.
+7. **One read-only snapshot of the unit (boot 31) read the pipeline as clocked, enabled and 2880x1920** [OBSERVED once;
+   the geometry and the verdict INFERRED]. The display power domain was on, the AHB and MDP clocks ran, the DPU was
+   version 9.2, INTF_5's timing engine was enabled with timing words that work out by hand to 2880x1920 in wide-bus mode,
+   and control path 0 listed INTF_5. The host parse of the page says ACTIVE, which is this study's verdict on the
+   registers and not a statement that frames are scanned out: the frame counter was not enabled. The vertical total of
+   3,904 lines is unexplained (UNKNOWN). (section 9.1)
 
 ## 1. Evidence labels and pinned sources
 
@@ -429,18 +437,62 @@ any interrupt-status register stay off the list until section 9 says what makes 
 
 | Question | Why it is open | Evidence that resolves it |
 | --- | --- | --- |
-| Every register value above | Nothing has read an SP11 | The X2 run |
-| Whether the firmware maps the MDSS, dispcc and GCC pages at EL2 after ExitBootServices | The probe installs no vectors; a missing mapping faults | The X2 faults, recorded with ESR and address |
-| Whether the version register reads 9.2 at `0x0ae00000` | The catalog says 9.2; the register read is unproven | The raw HW_VERSION value |
-| Whether the Windows display driver sets `CTL_INTF_ACTIVE` as Linux does | Same IP, different driver | The six CTL reads; routing is evidence only if one lists INTF_5 |
-| Whether the firmware enables the frame counters | Linux writes `FRAME_LINE_COUNT_EN`; the firmware may not | `INTF_FLC_EN` raw value |
+| Every register value above | Nothing had read an SP11 until boot 31, a read-only payload that read the list once (section 9.1); the X2 run of this study has not happened | The X2 run; the page of boot 31 for the values it read |
+| Whether the firmware maps the MDSS, dispcc and GCC pages at EL2 after ExitBootServices | The probe installs no vectors; a missing mapping faults. Boot 31 read all four (GCC, dispcc, MDSS, the DPU page) at EL2 under the payload runner with no fault: they were mapped there (OBSERVED, one unit, one boot) | The X2 faults, recorded with ESR and address; for boot 31, `FAULTS=0` |
+| Whether the version register reads 9.2 at `0x0ae00000` | The catalog says 9.2; the register read is unproven. Boot 31 read `0x90020000`: major 9, minor 2 (OBSERVED) | The raw HW_VERSION value |
+| Whether the Windows display driver sets `CTL_INTF_ACTIVE` as Linux does | Same IP, different driver. Boot 31: control path 0 reads `0x20` (bit 5, INTF_5; INFERRED from the layout) and paths 1 to 5 read 0 (OBSERVED); what set it is not shown | The six CTL reads; routing is evidence only if one lists INTF_5 |
+| Whether the firmware enables the frame counters | Linux writes `FRAME_LINE_COUNT_EN`; the firmware may not. Boot 31 read `INTF_FLC_EN` as 0: not enabled (OBSERVED), so no frame count was read and no counter word shows frames being scanned out | `INTF_FLC_EN` raw value |
 | Whether `apps_smmu` stream `0x1c00` translates the scanout | Only the device tree is read | A later SMMU read-only survey (X2 item 6 covers the PCIe SMMU, not this stream) |
 | DP controller link state (`MAINLINK_CTRL`, `STATE_CTRL`) and PHY lock | Needs extra clock gates first and PHY status semantics | Public status-register semantics plus the DPTX3 link CBCRs as gates |
 | `INTF_MUX`, SSPP source address, mixer state | Firmware's use unknown | A read-only X5 study |
 | The panel's DPCD brightness capability and EDID | AUX belongs to the firmware | The EDID protocol dump at S0; DPCD only at a later, authorized gate |
-| Which block holds a 120 Hz timing | A base-block descriptor cannot (section 4) | The dumped EDID, read with `sp11_display_mode.py modes` ([SP11-120HZ-STUDY.md](SP11-120HZ-STUDY.md) section 3) |
-| Whether the firmware's mode is 2880x1920 | Product spec is public, the unit's GOP is not | S0 and `tools/sp11_display_mode.py` |
+| Which block holds a 120 Hz timing | A base-block descriptor cannot (section 4). Boot 31's timing words give a line of 1,520 clocks and a frame of 3,904 lines; the pixel clock was not read, so the refresh rate is not known | The dumped EDID, read with `sp11_display_mode.py modes` ([SP11-120HZ-STUDY.md](SP11-120HZ-STUDY.md) section 3) |
+| Why the vertical total is 3,904 lines, about twice the active height of 1,920 | Boot 31's `VP`, `DVS` and `DVE` agree with each other exactly (section 9.1), so a misread digit is unlikely, but nothing in this study explains the long blanking before the active lines | The pixel clock and the refresh rate, the dumped EDID, and a second unit or boot to see whether the totals repeat |
+| Whether the firmware's mode is 2880x1920 | Product spec is public, the unit's GOP is not. Boot 31: the runner's GOP is 2880x1920 (OBSERVED) and the timing words work out by hand to the same size (INFERRED); the EDID was not read | S0 and `tools/sp11_display_mode.py` |
 | Burn-in on a static OLED page | The probe's pages dwell 12 s each | Nothing in this study changes it; `probes/fbconsole.py` has the anti-burn-in grid |
+
+### 9.1 What boot 31 showed (a read-only payload; OBSERVED once; the geometry and the verdict INFERRED)
+
+Boot 31 (2026-11-20; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 27) ran `DISPSNAP.BIN` of the q1n1 fork (v1;
+`q1n1:docs/SP11-PAYLOAD-DISPSNAP.md`) alone, through the stick's payload runner at EL2. It is not the X2 test image that
+this study plans, but it reads the registers of the section 8 list: the first 18 of the 20 (the two frame-count samples, 19
+and 20, are read only when `INTF_FLC_EN` is non-zero) and the six `CTL_INTF_ACTIVE` words, 24 loads, then six words again
+8 s later (the four gate words, `INTF_STATUS` and `INTF_EN`). It wrote nothing (by its document and its review). The page is transcribed by eye from one
+hand-held film, so a digit may be misread; the page is in the log and not repeated here.
+
+| Step of section 8 | What boot 31 showed | Label |
+| --- | --- | --- |
+| S0, the GOP | the runner's `GOP W=2880 H=1920 STRIDE=2880 FMT=1`; no EDID was read by this payload | OBSERVED (the line); UNKNOWN (the EDID) |
+| S1 to S4, the gates | the display AHB clock word reads 1 (bit 31 clear: running); the display power-domain word reads `0xF822F800` (bit 31 set: powered; collapse and hardware-control bits clear); the AHB and MDP clock words read 1 (running) | OBSERVED (the words); INFERRED (the readings, by the layout above) |
+| S5, the version | `0x90020000`: major 9, minor 2, the parameters' own | OBSERVED |
+| S6, the INTF registers | `INTF_STATUS` 1 and `INTF_EN` 1; `INTF_CONFIG` 0 (the two ACTIVE enables, bits 29 and 30, are clear, so the ACT windows read 0 and the geometry comes from the DISPLAY window); `INTF_CONFIG2` `0x101` (bit 0 `DATABUS_WIDEN` set); `HS=0x5F00004`, `VP=0x5A8C00`, `DVS=0x2E0450`, `DVE=0x5A8BFF`, `DHC=0x5EF0050` | OBSERVED (the words); INFERRED (the readings) |
+| S7, the CTL registers | `0x20` on path 0 (bit 5: INTF_5) and 0 on paths 1 to 5 | OBSERVED (the words); INFERRED (bit 5) |
+| S8, the counter sample | `INTF_FLC_EN` 0: the counters are not claimed, so no frame count was read in either snapshot | OBSERVED |
+| the second snapshot, 8.002 s later | the six re-read words are unchanged (`DRIFT NONE CMP=6`) | OBSERVED |
+
+**The geometry by hand (INFERRED; the arithmetic is the author's, not the payload's).** The line is the high half of
+`HS`, `0x5F0` = 1,520 clocks. The active width is `DHC` end `0x5EF` less start `0x50` plus 1 = 1,440 clocks, which is
+2,880 pixels at two pixels a clock (rule 8: `DATABUS_WIDEN` set, the width is half the mode's), the GOP's width. `VP`
+`0x5A8C00` is 5,934,080 clocks, exactly 3,904 lines of 1,520 clocks (rule 7: a whole number of lines). `DVS` `0x2E0450` is
+line 1,984 and 80 clocks and `DVE` `0x5A8BFF` is line 3,903 and clock 1,519, the last clock of the frame: lines 1,984 to
+3,903 are 1,920 lines, the GOP's height; the window is increasing and inside the frame, with 1,984 lines of blanking before it,
+and ends inside the line. The three vertical words each divide by the line period exactly, which a misread digit would probably break.
+
+**The host parse.** `tools/sp11_dispsnap_parse.py` (the page's host parse; `q1n1:docs/SP11-PAYLOAD-DISPSNAP.md`), run by
+the coordinator on the page with this study's tables, answers ACTIVE (why: ok), evidence `0x1f`, complete: the five classes
+`required` names (GATES, VERSION, TIMING, GEOMETRY, ROUTING) were all established, and COUNTERS (optional) added nothing.
+That is this study's verdict on the registers, INFERRED. Its limits, which section 5.2's own text states: ACTIVE means that
+every required class was affirmatively established and nothing contradicts it, not that frames are scanned out. The
+frame counter was not enabled, so rule 10 was not exercised; `INTF_STATUS` and `INTF_EN` say the timing engine is running
+(by the layout), nothing more; the scanout address, the display's SMMU stream, the DisplayPort link, the PHY and the
+panel were not read. The direct evidence that the pipeline runs is the runner's own text, drawn into the firmware's
+framebuffer and shown by the panel before and after the payload (OBSERVED, on the film).
+
+**What stays open from boot 31.** The vertical total of 3,904 lines is about twice the active height: 1,984 lines come before
+the 1,920 active ones and none after. Why is UNKNOWN: a long blanking interval, a refresh choice of the firmware, a timing
+that spans two frames (3,904 is twice 1,952 and 1,984 is 1,952 plus 32, a pattern in the numbers and not an explanation), or
+a misread digit, which the exact agreement above makes unlikely. The refresh rate follows from the pixel clock, which was not
+read. Whether the pipeline survives the guest kernel and the monitor is UNKNOWN: the firmware's resource votes own its clocks.
 
 ## 10. How to run the checks
 

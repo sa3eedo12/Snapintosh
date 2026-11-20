@@ -2955,7 +2955,7 @@ class Document(unittest.TestCase):
     def section_26_problems(cls, text):
         """What is wrong with section 26, boot 28 (the eighth run of the SP11 monitor entry, M1 rung 9, the first root-mount form: the carry worked, the stock kernel ran `launchd` from the RAM-disk root, its first boot task failed, the guest
         panicked in userspace and the monitor stopped the run at the chip-reset read), or with the places that count on it; an empty list is a pass."""
-        body = text.split('## 26. Result of boot 28', 1)[1].split('## Appendix A.', 1)[0]
+        body = text.split('## 26. Result of boot 28', 1)[1].split('## 27. Result of boots 29', 1)[0]
         flat = ' '.join(body.split())
         problems = []
         pages = re.findall(r'```text\n(.*?)```', body, re.S)
@@ -3126,13 +3126,210 @@ class Document(unittest.TestCase):
                        ('no host analysis of boot 27\'s new lines or of boot 28 has been done', 'a host analysis of boot 28 has been done'))
         marker = '## 26. Result of boot 28'
         head, rest = self.text.split(marker, 1)
-        limit = rest.index('## Appendix A.')
+        limit = rest.index('## 27. Result of boots 29')
         for old, new in body_seeds:
             self.assertIn(old, rest[:limit], f'the seed {old!r} no longer matches the text: fix the seed, not the check')
             self.assertTrue(self.section_26_problems(head + marker + rest.replace(old, new, 1)), f'a seeded fault went unseen: {old!r} -> {new!r}')
         for old, new in place_seeds:
             self.assertIn(old, head, f'the seed {old!r} no longer matches the text: fix the seed, not the check')
             self.assertTrue(self.section_26_problems(head.replace(old, new, 1) + marker + rest), f'a seeded fault went unseen: {old!r} -> {new!r}')
+
+    @classmethod
+    def section_27_problems(cls, text):
+        """What is wrong with section 27, boots 29, 30 and 31 (the read-only hardware survey S0a, S0b and S0c: not monitor runs; every first read answered at EL2, the input engines' clocks and the GPU's CX power domain read OFF, the display
+        pipeline read clocked and enabled), or with the places that count on it; an empty list is a pass."""
+        body = text.split('## 27. Result of boots 29', 1)[1].split('## Appendix A.', 1)[0]
+        flat = ' '.join(body.split())
+        problems = []
+        pages = re.findall(r'```text\n(.*?)```', body, re.S)
+        if [len(page.splitlines()) for page in pages] != [9, 32]:
+            return ['the blocks of boots 29 to 31 are not the runner lines of boot 29 (9 lines) and the page of boot 31 (32 lines)']
+        runner, page = pages
+        for line in ('PAYLOAD LOADED INDEX=0 BASE=0XCEA8D000 BYTES=9212 SHA=DC74CD3E2A1D760A', 'PAYLOAD LOADED INDEX=1 BASE=0XCEA8A000 BYTES=10672 SHA=CC35CCB4861FB96E', 'PAYLOAD READY FILES=2 RANGES=5 CODE=2',
+                     'PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=220 FAULTS=0 REFUSED=0 LINES=34 DROPPED=0', 'PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=77 FAULTS=0 REFUSED=0 LINES=30 DROPPED=0'):
+            if line not in runner:
+                problems.append(f'the runner lines of boot 29 lost {line!r}')
+        for line in ('PAYLOAD LOADED INDEX=0 BASE=0XCEAB2000 BYTES=9699 SHA=C64D53CDA28D39E4 TYPE=1', 'PAYLOAD DISPSNAP GOP W=2880 H=1920 STRIDE=2880 FMT=1', 'PAYLOAD DISPSNAP MAP GCC=0X100000 DISPCC=0XAF00000 MDSS=0XAE00000 DPU=0XAE01000',
+                     'PAYLOAD DISPSNAP DISPCC GDSC=0XF822F800.ON SC=0 HW=0', 'PAYLOAD DISPSNAP DG DISP=ON PWR=1 SC=0 HW=0 CLK=0X3', 'PAYLOAD DISPSNAP MDSS VER=0X90020000 MAJ=9 MIN=2',
+                     'PAYLOAD DISPSNAP INTF ST=1 EN=1 CFG=0 CFG2=0X101', 'PAYLOAD DISPSNAP INTF HS=0X5F00004 VP=0X5A8C00 DVS=0X2E0450 DVE=0X5A8BFF', 'PAYLOAD DISPSNAP INTF AVS=0 AVE=0 DHC=0X5EF0050 AHC=0',
+                     'PAYLOAD DISPSNAP INTF FLC=0 FRA=NOFLC', 'PAYLOAD DISPSNAP CTL C0=0X20 C1=0 C2=0', 'PAYLOAD DISPSNAP DRIFT NONE CMP=6', 'PAYLOAD DISPSNAP KEY=RAW WORD .ON/.OFF=BIT 31 .ODD=BIT 31 NOT TRUSTED NO STORE NO AUX NO IRQ STAT',
+                     'PAYLOAD DISPSNAP END LOADS=30 FAULTS=0 SKIPS=0 BLK=0 CUTS=0 GAP_MS=8002 LINES=27', 'PAYLOAD DONE INDEX=0 RETURN=0X0 STACK=OK LOADS=30 FAULTS=0 REFUSED=0 LINES=27 DROPPED=0'):
+            if line not in page:
+                problems.append(f'the page of boot 31 lost {line!r}')
+        for phrase in ('Boots 29, 30 and 31 are not runs of the SP11 monitor entry',
+                       'so the eight runs of the monitor entry counted in sections 25 and 26 do not change',
+                       "That survey is not the stick writer's S0 and S0b of sections 12 and 13",
+                       'THE PAGES ARE TRANSCRIBED BY EYE from hand-held films of the panel',
+                       'this log repeats no digest of an approval',
+                       'All three boots took place on 2026-11-20',
+                       '`TSNAP.BIN` (v2, 9,212 bytes, `dc74cd3e...`; the runner prints `SHA=DC74CD3E2A1D760A`)',
+                       '`INPUTSNP.BIN` (v1, 10,672 bytes, `cc35ccb4...`; `SHA=CC35CCB4861FB96E`)',
+                       '`GPUSNAP.BIN` alone (v1.2, 10,728 bytes, `76907ab3...`; `SHA=76907AB3A3EC66AD`)',
+                       '`DISPSNAP.BIN` alone (v1, 9,699 bytes, `c64d53cd...`; `SHA=C64D53CDA28D39E4`; built from the fork at `9ea1bdc` with the dispsnap patch)',
+                       '`Q1N1-PAYLOAD.EFI` (776,192 bytes, `c2057909...`, the pinned runner of boot 19)',
+                       '`SLBOUNCE-DEVHE-MARK.EFI` (126,360 bytes, `4107c28c...`, the build of boot 19)',
+                       'one film of 37.6 s (3840 x 2160, 60 frames a second)',
+                       'one film of 17.8 s (3840 x 2160, 30 frames a second) that starts after the load and ends on the finished page; the second copy of it is byte-identical',
+                       'one film of 24.9 s (3840 x 2160, 30 frames a second)',
+                       'SURVEY S0a COMPLETE, NOTHING REFUSED, NO HANG',
+                       'SURVEY S0c COMPLETE, NOTHING REFUSED, NO HANG, THE PANEL NEVER WENT DARK',
+                       "Whether a key was pressed on the Type Cover during boot 29's eight-second wait is not recorded",
+                       '`TSNAP.BIN` made 220 loads (the maximum that its review computes) and printed 34 lines',
+                       '`INPUTSNP.BIN` made 77 loads of the at most 132 it can make',
+                       '`VER=0X20080000` on all four',
+                       '`SEN=0X1FFF`, `0X7FF`, `0X7FF`, `0X7FFF`',
+                       'the enabled-sensor words have 13, 11, 11 and 15 bits set, 50 sensors in all (arithmetic)',
+                       'a match of counts, not a mapping of sensors',
+                       'from `0x17D` (lowest, on `T1`) to `0x1AA` (highest, on `T0`): about 38.1 C to 42.6 C',
+                       'tenths of a degree C (the scale is INFERRED',
+                       "the payload's decode marks 60 of 64 cells ODD and accepts 4: INFERRED a false positive of the decode, not a missing reading",
+                       'The VALID bit (21) is set on exactly the 50 sensors that `SEN` names',
+                       '`SUM2 V=4/64 ... CHG=1/4 DMAX=4`',
+                       '`T0.0`, 39.8 C to 40.2 C, four tenths: `DMAX=4`',
+                       'the thermal guard itself stays unwritten',
+                       '`U2 GATED OFF` and `S10 GATED OFF`, again in the second pass',
+                       '(`QUP_0_SE_2`, `0xB88000`)',
+                       '(`QUP_1_SE_2`, `0xA88000`)',
+                       'INFERRED: the firmware switched these engine clocks off before the hand-off',
+                       '`GIC CTL=0X10 TYP=0XF87F051E`',
+                       'interrupts 616 (the keyboard link), 834 (the touch controller) and 240 (the pin controller) are all 0 before and after the wait: not enabled and not pending',
+                       'the first read of the pin controller on the unit: it answered, with no fault',
+                       'UNKNOWN (what they mean)',
+                       '`DRIFT NONE CMP=13`',
+                       '`END LOADS=77 FAULTS=0 SKIPS=0 BLK=0X6C CUTS=0 GAP_MS=8003 LINES=30`',
+                       '`END LOADS=52 FAULTS=0 SKIPS=0 BLK=0X3C CUTS=0 GAP_MS=8003 LINES=23`',
+                       '`DRIFT NONE CMP=26`',
+                       '`GPUCC CXGD=0X22F801 SC=1 HW=0 CXHW=0XDFF4.OFF`',
+                       'its software-collapse bit (bit 0) is set: powered down by request',
+                       '`R4 CX=OFF PWR=0 SC=1 HW=0 CLK=0X58 SM=0X2`',
+                       "the payload's verdict is that the CX power domain is OFF: INFERRED from the status words, and not from the GPU's own window, which this payload never reads",
+                       '`GPUCC GXGD=0X22F801 GXCF=0X4008000 UP=0 DN=1`',
+                       '`CXMISC GATED BY CX=OFF`, `GMU GATED BY CX=OFF`, `RSCC GATED BY CX=OFF`, `SMMU GATED BY CX=OFF`',
+                       "The GPU's own register window, `0x03d00000`, is never read by this payload",
+                       "The page was read in full: 27 lines of the payload, the count that its own `END` line and the runner's `DONE` line give (`LINES=27`)",
+                       "is cut at the film's right edge, so its end is not transcribed",
+                       'transcribed from the film into a text file (32 lines: the four runner lines before the call, 27 lines of the payload',
+                       'The first snapshot holds 24 loads and the second 6',
+                       '`MDSS VER=0X90020000 MAJ=9 MIN=2` | version 9.2',
+                       "the frame counter's enable (`FLC`) is 0, so the counter was not read (`NOFLC`) and no word proves that frames are scanned out",
+                       'control path 0 lists interface 5 only (bit 5 of `0x20`',
+                       'which is 2,880 pixels at two pixels a clock',
+                       'which is 3,904 lines of 1,520 clocks exactly',
+                       "lines 1,984 to 3,903 are 1,920 lines: the GOP's height",
+                       "Why is UNKNOWN: a long blanking interval, a refresh choice of the firmware",
+                       'a pattern in the numbers, not an explanation',
+                       'answers **ACTIVE** (why: ok), evidence `0x1f`, complete',
+                       'and NOT a statement that frames are scanned out: the frame counter was not enabled',
+                       "the per-boot file count and the marker's text were not re-read for this section",
+                       'Six blocks that nobody had read on this unit answered a read at EL2',
+                       'INFERRED: at the hand-off the Adreno X1-85 is powered down and no GMU firmware ran',
+                       "INFERRED: the firmware's eDP and DPU pipeline is clocked, powered, enabled and described at the hand-off",
+                       'Not that the GPU, the keyboard, the touch controller or the display works, and nothing about stability or performance.',
+                       'Nothing is authorised by this section, and no next step is chosen here',
+                       'a clock, power, interrupt, pin or SMMU write is NOT RUN',
+                       'Hardware: boots 1 to 31; only boots 29, 30 and 31 are described in this section'):
+            if phrase not in flat:
+                problems.append(f'section 27 lost {phrase[:70]!r}')
+        if re.search(r'[0-9A-Fa-f]{32,}|[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}|e42f451d|d9d79c87|64d87443|67d814f6|749361cf|2b8ef56c|354b0483|6275eb08|85d6beac|cbf20efa|27ce425e', body):
+            problems.append('a digest, an identifier or an approval prefix in section 27')
+        for context in re.findall(r'VERIFIED.{0,70}', flat):
+            if not re.search(r'host|read|source|arithmetic|chain|code|identity|range|coordinator|check|document', context):
+                problems.append(f'a VERIFIED in section 27 that is not a host fact: {context!r}')
+        if re.search(r'desktop|userspace boots|is stable|stability is|macOS boots', flat, re.I) or re.search(r'VERIFIED on the unit', flat):
+            problems.append('section 27 claims more than a read-only survey')
+        for sub, nxt in (('### 27.2', '### 27.3'), ('### 27.3', '### 27.4'), ('### 27.4', '### 27.5'), ('### 27.5', '### 27.6')):
+            for row in body.split(sub, 1)[1].split(nxt, 1)[0].splitlines():
+                if row.startswith('| ') and row.count('|') >= 4 and not row.startswith(('| ---', '| Item', '| Quantity', '| What', '| Film')) and not re.search(r'OBSERVED|VERIFIED|INFERRED|UNKNOWN|NOT RUN', row.rsplit('|', 2)[-2]):
+                    problems.append(f'a row of {sub[4:]} has no label: {row[:50]!r}')
+        whole = ' '.join(text.split())
+        for place, needle in (('the top paragraph', 'Boots 29, 30 and 31 (2026-11-20, section 27) were not monitor runs: they were the read-only hardware survey S0a, S0b and S0c'),
+                              ('the top paragraph', "the host parse's verdict ACTIVE is the study's verdict on the registers, not a statement that frames are scanned out, because the frame counter was not enabled"),
+                              ('item 23 of section 1', '23. **Boots 29, 30 and 31 (2026-11-20; section 27; one film each, the pages transcribed by eye from hand-held films; OBSERVED, one unit, one boot each)'),
+                              ('item 23 of section 1', 'No next step is authorised and nothing was written. Hardware: boots 1 to 31.'),
+                              ('the evidence summary', 'nothing was written | 27 |'),
+                              ('section 26.7', 'Boots 29, 30 and 31 (section 27) ran after this section was written')):
+            if needle not in whole:
+                problems.append(f'{place} does not count on boots 29 to 31')
+        return problems
+
+    def test_section_27_keeps_the_facts_of_boots_29_30_31(self):
+        """Section 27 records boots 29, 30 and 31 (the read-only survey S0a, S0b and S0c): they are not monitor runs, the pages are transcribed by eye, the decodes (tenths of a degree, the ODD=60 false positive, engine clocks off, the CX
+        domain off, the display geometry by hand, the parse verdict ACTIVE) stay INFERRED, the ACTIVE verdict is not a claim about scan-out, the open questions stay UNKNOWN, no record digest is printed; each seeded fault must be found."""
+        self.assertEqual(self.section_27_problems(self.text), [])
+        body_seeds = (('Boots 29, 30 and 31 are not runs of the SP11 monitor entry', 'Boots 29, 30 and 31 are the ninth, tenth and eleventh runs of the SP11 monitor entry'),
+                      ('so the eight runs of the monitor entry counted in sections 25 and 26 do not change', 'so the eight runs of the monitor entry counted in sections 25 and 26 are now eleven'),
+                      ("That survey is not the stick writer's S0 and S0b of sections 12 and 13", "That survey is the stick writer's S0 and S0b of sections 12 and 13"),
+                      ('THE PAGES ARE TRANSCRIBED BY EYE from hand-held films of the panel', 'THE PAGES ARE CAPTURED BY SOFTWARE from the panel'),
+                      ('this log repeats no digest of an approval', 'the digest of the approval is 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'),
+                      ('All three boots took place on 2026-11-20', 'All three boots took place on 2026-11-18'),
+                      ('`TSNAP.BIN` (v2, 9,212 bytes, `dc74cd3e...`; the runner prints `SHA=DC74CD3E2A1D760A`)', '`TSNAP.BIN` (v2, 9,212 bytes, `dc74cd3e...`; the runner prints `SHA=DC74CD3E2A1D760B`)'),
+                      ('`GPUSNAP.BIN` alone (v1.2, 10,728 bytes', '`GPUSNAP.BIN` alone (v1.2, 10,278 bytes'),
+                      ('`DISPSNAP.BIN` alone (v1, 9,699 bytes, `c64d53cd...`', '`DISPSNAP.BIN` alone (v1, 9,699 bytes, `c64d53ce...`'),
+                      ('`Q1N1-PAYLOAD.EFI` (776,192 bytes, `c2057909...`, the pinned runner of boot 19)', '`Q1N1-PAYLOAD.EFI` (776,192 bytes, `af76e0bf...`, the big-file runner of boot 28)'),
+                      ('one film of 17.8 s (3840 x 2160, 30 frames a second) that starts after the load', 'one film of 17.8 s (3840 x 2160, 30 frames a second) that starts at the Shell'),
+                      ('SURVEY S0c COMPLETE, NOTHING REFUSED, NO HANG, THE PANEL NEVER WENT DARK', 'SURVEY S0c COMPLETE, NOTHING REFUSED, THE PANEL WENT DARK'),
+                      ("Whether a key was pressed on the Type Cover during boot 29's eight-second wait is not recorded", "Keys were pressed on the Type Cover during boot 29's eight-second wait and changed nothing"),
+                      ('`INPUTSNP.BIN` made 77 loads of the at most 132 it can make', '`INPUTSNP.BIN` made 132 loads of the at most 132 it can make'),
+                      ('the enabled-sensor words have 13, 11, 11 and 15 bits set, 50 sensors in all (arithmetic)', 'the enabled-sensor words have 13, 11, 11 and 15 bits set, 64 sensors in all (arithmetic)'),
+                      ('a match of counts, not a mapping of sensors', 'a mapping of sensors, VERIFIED on the unit'),
+                      ('about 38.1 C to 42.6 C', 'about 81.3 C to 62.4 C'),
+                      ('tenths of a degree C (the scale is INFERRED', 'tenths of a degree C (the scale is VERIFIED'),
+                      ("accepts 4: INFERRED a false positive of the decode, not a missing reading", "accepts 4: OBSERVED a missing reading"),
+                      ('The VALID bit (21) is set on exactly the 50 sensors that `SEN` names', 'The VALID bit (21) is set on none of the sensors that `SEN` names'),
+                      ('`T0.0`, 39.8 C to 40.2 C, four tenths: `DMAX=4`', '`T0.0`, 39.8 C to 41.8 C, two degrees: `DMAX=20`'),
+                      ('the thermal guard itself stays unwritten', 'the thermal guard itself is written'),
+                      ('`U2 GATED OFF` and `S10 GATED OFF`, again in the second pass', '`U2 ON` and `S10 ON`, again in the second pass'),
+                      ('(`QUP_0_SE_2`, `0xB88000`)', '(`QUP_0_SE_2`, `0xA88000`)'),
+                      ('INFERRED: the firmware switched these engine clocks off before the hand-off', 'OBSERVED: the firmware switched these engine clocks off before the hand-off'),
+                      ('interrupts 616 (the keyboard link), 834 (the touch controller) and 240 (the pin controller) are all 0 before and after the wait: not enabled and not pending', 'interrupts 616 (the keyboard link), 834 (the touch controller) and 240 (the pin controller) are enabled and pending, before and after the wait'),
+                      ('the first read of the pin controller on the unit: it answered, with no fault', 'the first read of the pin controller on the unit: it faulted'),
+                      ('UNKNOWN (what they mean)', 'OBSERVED (what they mean)'),
+                      ('`END LOADS=52 FAULTS=0 SKIPS=0 BLK=0X3C CUTS=0 GAP_MS=8003 LINES=23`', '`END LOADS=78 FAULTS=0 SKIPS=0 BLK=0X3C CUTS=0 GAP_MS=8003 LINES=23`'),
+                      ('`GPUCC CXGD=0X22F801 SC=1 HW=0 CXHW=0XDFF4.OFF`', '`GPUCC CXGD=0X22F801 SC=0 HW=0 CXHW=0XDFF4.OFF`'),
+                      ('its software-collapse bit (bit 0) is set: powered down by request', 'its software-collapse bit (bit 0) is clear: powered up'),
+                      ('`R4 CX=OFF PWR=0 SC=1 HW=0 CLK=0X58 SM=0X2`', '`R4 CX=ON PWR=1 SC=0 HW=0 CLK=0X7F SM=0X2`'),
+                      ("INFERRED from the status words, and not from the GPU's own window, which this payload never reads", "OBSERVED from the GPU's own window, which this payload reads"),
+                      ('`GPUCC GXGD=0X22F801 GXCF=0X4008000 UP=0 DN=1`', '`GPUCC GXGD=0X22F801 GXCF=0X4008000 UP=1 DN=0`'),
+                      ('`CXMISC GATED BY CX=OFF`, `GMU GATED BY CX=OFF`, `RSCC GATED BY CX=OFF`, `SMMU GATED BY CX=OFF`', '`CXMISC ON`, `GMU ON`, `RSCC ON`, `SMMU ON`'),
+                      ("The GPU's own register window, `0x03d00000`, is never read by this payload", "The GPU's own register window, `0x03d00000`, is read by this payload"),
+                      ("The page was read in full: 27 lines of the payload, the count that its own `END` line and the runner's `DONE` line give (`LINES=27`)", "The page was read in part: 26 lines of the payload, where the count that its own `END` line gives is 27 (`LINES=27`)"),
+                      ("is cut at the film's right edge, so its end is not transcribed", "is complete on the film, so its end is transcribed"),
+                      ('transcribed from the film into a text file (32 lines: the four runner lines before the call, 27 lines of the payload', 'transcribed from the film into a text file (31 lines: the four runner lines before the call, 26 lines of the payload'),
+                      ('The first snapshot holds 24 loads and the second 6', 'The first snapshot holds 25 loads and the second 5'),
+                      ('`MDSS VER=0X90020000 MAJ=9 MIN=2` | version 9.2', '`MDSS VER=0X90020000 MAJ=9 MIN=2` | version 8.1'),
+                      ('so the counter was not read (`NOFLC`) and no word proves that frames are scanned out', 'so the counter was read and frames are scanned out'),
+                      ('which is 2,880 pixels at two pixels a clock', 'which is 1,440 pixels at one pixel a clock'),
+                      ('which is 3,904 lines of 1,520 clocks exactly', 'which is 1,952 lines of 1,520 clocks exactly'),
+                      ("lines 1,984 to 3,903 are 1,920 lines: the GOP's height", "lines 1,984 to 3,903 are 2,000 lines: the GOP's height"),
+                      ("Why is UNKNOWN: a long blanking interval, a refresh choice of the firmware", "Why is VERIFIED: a long blanking interval, a refresh choice of the firmware"),
+                      ('answers **ACTIVE** (why: ok), evidence `0x1f`, complete', 'answers **IDLE** (why: ok), evidence `0x1f`, complete'),
+                      ('and NOT a statement that frames are scanned out: the frame counter was not enabled', 'and a statement that frames are scanned out: the frame counter was enabled'),
+                      ("the per-boot file count and the marker's text were not re-read for this section", "the per-boot file count and the marker's text were re-read for this section"),
+                      ('Six blocks that nobody had read on this unit answered a read at EL2', 'Six blocks that nobody had read on this unit refused a read at EL2'),
+                      ('INFERRED: at the hand-off the Adreno X1-85 is powered down and no GMU firmware ran', 'OBSERVED: at the hand-off the Adreno X1-85 is powered down and a GMU firmware ran'),
+                      ('Not that the GPU, the keyboard, the touch controller or the display works, and nothing about stability or performance.', 'The GPU, the keyboard, the touch controller and the display work, and the desktop is stable.'),
+                      ('Nothing is authorised by this section, and no next step is chosen here', 'The next step is authorised by this section and chosen here'),
+                      ('a clock, power, interrupt, pin or SMMU write is NOT RUN', 'a clock write was VERIFIED on the unit'),
+                      ('Hardware: boots 1 to 31; only boots 29, 30 and 31 are described in this section', 'Hardware: boots 1 to 28; only boots 29, 30 and 31 are described in this section'),
+                      ('### 27.6 What', 'Digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\n### 27.6 What'),
+                      ('PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=77 FAULTS=0 REFUSED=0 LINES=30 DROPPED=0', 'PAYLOAD DONE INDEX=1 RETURN=0X0 STACK=OK LOADS=77 FAULTS=6 REFUSED=0 LINES=30 DROPPED=0'),
+                      ('PAYLOAD DISPSNAP INTF HS=0X5F00004 VP=0X5A8C00 DVS=0X2E0450 DVE=0X5A8BFF', 'PAYLOAD DISPSNAP INTF HS=0X5F00004 VP=0X5A8C00 DVS=0X2E0450 DVE=0X5A8BFE'),
+                      ('PAYLOAD DISPSNAP DISPCC GDSC=0XF822F800.ON SC=0 HW=0', 'PAYLOAD DISPSNAP DISPCC GDSC=0X0022F801.OFF SC=1 HW=0'))
+        place_seeds = (('Boots 29, 30 and 31 (2026-11-20, section 27) were not monitor runs: they were the read-only hardware survey S0a, S0b and S0c', 'Boots 29, 30 and 31 (2026-11-20, section 27) were the ninth to eleventh monitor runs: they were the hardware survey S0a, S0b and S0c'),
+                       ("the host parse's verdict ACTIVE is the study's verdict on the registers, not a statement that frames are scanned out, because the frame counter was not enabled", "the host parse's verdict ACTIVE shows that frames are scanned out"),
+                       ('23. **Boots 29, 30 and 31 (2026-11-20; section 27; one film each, the pages transcribed by eye from hand-held films; OBSERVED, one unit, one boot each)', '23. **Boots 29, 30 and 31 (2026-11-20; section 27; one film each, the pages transcribed by eye from hand-held films; VERIFIED, one unit, one boot each)'),
+                       ('No next step is authorised and nothing was written. Hardware: boots 1 to 31.', 'A next step is authorised. Hardware: boots 1 to 31.'),
+                       ('nothing was written | 27 |', 'a clock was written | 27 |'),
+                       ('Boots 29, 30 and 31 (section 27) ran after this section was written', 'Boots 29, 30 and 31 (section 27) ran before this section was written'))
+        marker = '## 27. Result of boots 29'
+        head, rest = self.text.split(marker, 1)
+        limit = rest.index('## Appendix A.')
+        for old, new in body_seeds:
+            self.assertIn(old, rest[:limit], f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.section_27_problems(head + marker + rest.replace(old, new, 1)), f'a seeded fault went unseen: {old!r} -> {new!r}')
+        for old, new in place_seeds:
+            self.assertIn(old, head, f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            self.assertTrue(self.section_27_problems(head.replace(old, new, 1) + marker + rest), f'a seeded fault went unseen: {old!r} -> {new!r}')
 
     @staticmethod
     def kernel_stops_problems(note):
@@ -3512,13 +3709,68 @@ class Document(unittest.TestCase):
             self.assertTrue(self.status_problems(*texts), f'a seeded fault went unseen: {old!r} -> {new!r}')
 
     @staticmethod
+    def survey_status_problems(status, surface):
+        """What is wrong with the status text of boots 29 to 31 (the read-only hardware survey S0a, S0b and S0c: not monitor runs) in STATUS.md and SURFACE-PRO-11.md (whitespace-collapsed texts); an empty list is a pass."""
+        problems = []
+        for where, text, needles in (
+                ('STATUS.md', status, (
+                    'A read-only hardware survey followed in three boots (2026-11-20, boots 29, 30 and 31;',
+                    'so not runs of the monitor entry;',
+                    'the GPU\'s CX power domain reads powered down, so the blocks behind it were not read (INFERRED: the GPU is powered down at the hand-off)',
+                    'with a timing that works out by hand to 2880x1920 (INFERRED; the parse verdict ACTIVE is not a claim that frames are scanned out)',
+                    'and nothing that writes ran.',
+                    'the storage survey, the read-only hardware survey of boots 29 to 31 and')),
+                ('SURFACE-PRO-11.md', surface, (
+                    '| E80 | The read-only hardware survey S0a (plan `survey-s0a`, 2026-11-20, boot 29; not a run of the monitor entry',
+                    'the payload\'s summary `ODD=60` is a decode false positive (the sensor number sits in status bits 26:22)',
+                    'read OFF, so the engines were not read (`U2 GATED OFF`, `S10 GATED OFF`)',
+                    '| E81 | The read-only hardware survey S0b (plan `survey-s0b`, 2026-11-20, boot 30; not a run of the monitor entry;',
+                    'and the payload\'s verdict is `R4 CX=OFF`; CX_MISC, GMU, RSCC and the GPU SMMU were not read',
+                    'INFERRED (that the CX domain is powered down and the GX domain is not up,',
+                    '| E82 | The read-only hardware survey S0c (plan `survey-disp`, 2026-11-20, boot 31; not a run of the monitor entry;',
+                    'The host parse (`tools/sp11_dispsnap_parse.py`) answers ACTIVE, the study\'s verdict on the registers and not a statement that frames are scanned out.',
+                    'the frame counter is not enabled (`FLC=0`), so none was read;',
+                    'the refresh rate and why the vertical total is 3,904 lines, whether frames are scanned out,'))):
+            problems += [f'{where} lost {needle[:60]!r}' for needle in needles if needle not in text]
+        if re.search(r'kernel executes: (?!PARTIAL)\w+|\bE8[0-2]\b[^|]*monitor entry ran', surface):
+            problems.append('SURFACE-PRO-11.md: a survey row claims a gate or a monitor run')
+        return problems
+
+    def test_status_and_the_surface_pro_document_carry_boots_29_30_31(self):
+        """STATUS.md and SURFACE-PRO-11.md count boots 29 to 31 (the read-only survey): they are not monitor runs, the CX domain and the input engines' clocks are INFERRED off, the display geometry is INFERRED and the ACTIVE parse verdict
+        is not a claim that frames are scanned out, nothing that writes ran; each seeded fault below must be found."""
+        status, surface = (' '.join((ROOT / 'docs' / name).read_text().split()) for name in ('STATUS.md', 'SURFACE-PRO-11.md'))
+        self.assertEqual(self.survey_status_problems(status, surface), [])
+        seeds = (('A read-only hardware survey followed in three boots (2026-11-20, boots 29, 30 and 31;', 'The monitor entry ran in three more boots (2026-11-20, boots 29, 30 and 31;', 0),
+                 ('so not runs of the monitor entry;', 'so runs of the monitor entry;', 0),
+                 ('the GPU\'s CX power domain reads powered down, so the blocks behind it were not read (INFERRED: the GPU is powered down at the hand-off)', 'the GPU\'s CX power domain reads powered up, so the blocks behind it were read (VERIFIED: the GPU runs at the hand-off)', 0),
+                 ('with a timing that works out by hand to 2880x1920 (INFERRED; the parse verdict ACTIVE is not a claim that frames are scanned out)', 'with a timing that works out by hand to 2880x1920 (VERIFIED; the parse verdict ACTIVE shows that frames are scanned out)', 0),
+                 ('and nothing that writes ran.', 'and a clock write ran.', 0),
+                 ('the storage survey, the read-only hardware survey of boots 29 to 31 and', 'the storage survey and', 0),
+                 ('| E80 | The read-only hardware survey S0a (plan `survey-s0a`, 2026-11-20, boot 29; not a run of the monitor entry', '| E80 | The read-only hardware survey S0a (plan `survey-s0a`, 2026-11-20, boot 29; the ninth run of the monitor entry', 1),
+                 ('the payload\'s summary `ODD=60` is a decode false positive (the sensor number sits in status bits 26:22)', 'the payload\'s summary `ODD=60` is a missing reading (the sensors are unpopulated)', 1),
+                 ('read OFF, so the engines were not read (`U2 GATED OFF`, `S10 GATED OFF`)', 'read ON, so the engines were read (`U2 ON`, `S10 ON`)', 1),
+                 ('| E81 | The read-only hardware survey S0b (plan `survey-s0b`, 2026-11-20, boot 30; not a run of the monitor entry;', '| E81 | The read-only hardware survey S0b (plan `survey-s0b`, 2026-11-20, boot 30; a run of the monitor entry;', 1),
+                 ('and the payload\'s verdict is `R4 CX=OFF`; CX_MISC, GMU, RSCC and the GPU SMMU were not read', 'and the payload\'s verdict is `R4 CX=ON`; CX_MISC, GMU, RSCC and the GPU SMMU were read', 1),
+                 ('INFERRED (that the CX domain is powered down and the GX domain is not up,', 'VERIFIED (that the CX domain is powered down and the GX domain is not up,', 1),
+                 ('| E82 | The read-only hardware survey S0c (plan `survey-disp`, 2026-11-20, boot 31; not a run of the monitor entry;', '| E82 | The read-only hardware survey S0c (plan `survey-disp`, 2026-11-20, boot 31; a run of the monitor entry;', 1),
+                 ('The host parse (`tools/sp11_dispsnap_parse.py`) answers ACTIVE, the study\'s verdict on the registers and not a statement that frames are scanned out.', 'The host parse (`tools/sp11_dispsnap_parse.py`) answers ACTIVE, which shows that frames are scanned out.', 1),
+                 ('the frame counter is not enabled (`FLC=0`), so none was read;', 'the frame counter is enabled (`FLC=1`) and counts;', 1),
+                 ('the refresh rate and why the vertical total is 3,904 lines, whether frames are scanned out,', 'the refresh rate, which is 120 Hz,', 1))
+        for old, new, which in seeds:
+            texts = [status, surface]
+            self.assertIn(old, texts[which], f'the seed {old!r} no longer matches the text: fix the seed, not the check')
+            texts[which] = texts[which].replace(old, new, 1)
+            self.assertTrue(self.survey_status_problems(*texts), f'a seeded fault went unseen: {old!r} -> {new!r}')
+
+    @staticmethod
     def storage_survey_status_problems(status, surface):
         """What is wrong with the status text of boot 22 (the S1 storage survey) in STATUS.md and SURFACE-PRO-11.md (whitespace-collapsed texts); an empty list is a pass."""
         problems = []
         for where, text, needles in (
                 ('STATUS.md', status, (
                     'and a read-only survey of the SSD\'s link, controller and admin queues and of the PCIe SMMU\'s page (2026-11-18, boot 22: the SMMU\'s page was unmapped at EL2 and nothing of the SMMU was read; the storage row below)',
-                    'the xHCI No-Op test, the storage survey and the monitor entry\'s eight runs in the rows below.',
+                    'the xHCI No-Op test, the storage survey, the read-only hardware survey of boots 29 to 31 and the monitor entry\'s eight runs in the rows below.',
                     '| SP11 storage preparation (adoption wiring, descriptor `storage`, offline provisioning, `nvmesnap`, `smmuprobe`) | EXPERIMENTAL; host tests, and one hardware survey: the read-only payloads '
                     '`nvmesnap` and `smmuprobe` (session 1) ran once, on 2026-11-18 (boot 22; OBSERVED, one unit, one boot, from a film that started late;',
                     'and found the PCIe SMMU\'s page unmapped at EL2\'s stage 1, so no SMMU register was read. Hardware NOT RUN for everything else: every write and every takeover.',
@@ -3560,7 +3812,7 @@ class Document(unittest.TestCase):
                  ('and found the PCIe SMMU\'s page unmapped at EL2\'s stage 1, so no SMMU register was read.', 'and found the PCIe SMMU in bypass.', 0),
                  ('Hardware NOT RUN for everything else: every write and every takeover.', 'Hardware PASS for everything else.', 0),
                  ('stay UNKNOWN and are not authorised', 'stay UNKNOWN and are authorised', 0), ('(OBSERVED in two boots with its provenance;', '(VERIFIED with its provenance;', 0),
-                 ('the xHCI No-Op test, the storage survey and', 'the xHCI No-Op test and', 0), ('the storage row below)', 'the storage row below; session 1, NOT RUN)', 0),
+                 ('the xHCI No-Op test, the storage survey, the read-only hardware survey of boots 29 to 31 and', 'the xHCI No-Op test and', 0), ('the storage row below)', 'the storage row below; session 1, NOT RUN)', 0),
                  ('UNKNOWN (the SMMU\'s mode, D7;', 'VERIFIED (the SMMU\'s mode, D7;', 1),
                  ('NOT RUN (any write to the controller, the SSD or the SMMU; any read of an SMMU register): no gate changes', 'PASS (a write to the controller): a gate closes', 1),
                  ('they ran once, in boot 22: E73)', 'they have never run)', 1), ('(session 1 ran once, in boot 22; sessions 2 and 3 are not authorised)', '(none authorised, NOT RUN)', 1),

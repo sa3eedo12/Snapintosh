@@ -1,6 +1,6 @@
 # Surface Pro 11 input study: the Surface Aggregator link, the G1 spike plan and the G2 decision
 
-**Evidence study only. UNIMPLEMENTED; hardware status NOT RUN.** Nothing here ran on a Surface Pro. The one piece of
+**Evidence study only. UNIMPLEMENTED; hardware status NOT RUN for the spike, the codec and the driver; one read-only payload run (boot 29, [section 5.4](#54-what-boot-29-showed)) read the engines' clock words, the interrupt words and the pin controller on one unit.** Apart from that one run, nothing here ran on a Surface Pro. The one piece of
 code that backs it is host-side: the frame codec `compat/sam-frame.{h,c}` with its tests
 (`python3 tools/test-sam-frames.py`). It is not linked into any build, so the A16 monitor is unchanged.
 
@@ -295,6 +295,43 @@ sources enabled is a separate unknown.
 (a later phase reads them), hot-plug behaviour, behaviour after a guest reboot, the effect on Windows, and
 everything about touch and pen.
 
+### 5.4 What boot 29 showed (a read-only payload; OBSERVED once; the decodes are INFERRED)
+
+Boot 29 (2026-11-20; [SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 27) ran `INPUTSNP.BIN` of the q1n1 fork
+(`q1n1:docs/SP11-PAYLOAD-INPUTSNP.md`) behind a thermal payload, through the stick's payload runner at EL2, with no X3
+proxy session and no Type Cover step. It is a read-only payload, not phase 1 as written above: it reads the clock
+words, the interrupt controller and the pin controller, and it reads an engine's window only when that engine's own
+clock words read ON. It wrote nothing (by its document and its review). The page is transcribed by eye from one hand-held film, so a digit may be
+misread; the page's words are in the log, not repeated here. Hardware status of everything else in this study stays
+NOT RUN.
+
+| What phase 1 asks | What boot 29 showed | Label |
+| --- | --- | --- |
+| the engine clock and the wrapper clocks (the GCC halt-status reads) | the other clock words of the two wrappers (`MA0 SA0 CR0 C20` and `MA1 SA1 CR1 C21`) read ON; the engine clock word `SE0` (a gate word of the UART engine), `SE1` and the QSPI clock `QS1` (gate words of the SPI engine) read OFF (bit 31 set: `0X80004000`, `0X80004000`, `0X80000000`); the three vote words read `0X810223D0`, `0X400002BF` and `0XA61400`, raw and not decoded here | OBSERVED (the words); INFERRED (what the names are) |
+| the engine registers `B+0x68`, `+0x40`, `+0x258`, `+0x908` and the rest of the table above (`B` is `0x00b88000`; the touch engine is `QUP_1_SE_2` at `0x00a88000`) | not read: the payload printed `U2 GATED OFF` and `S10 GATED OFF` (again in its second pass) because the clock words say OFF. So the firmware revision and protocol, the mode, the flow control and the receive FIFO count are all still UNKNOWN | OBSERVED (not read); UNKNOWN (the values) |
+| GIC INTID 616 and 240 (and 834 for the touch engine) | the distributor words are the same as in boots 12 to 14; the enable, pending and third words of interrupts 616, 834 and 240 are all 0 before and after an 8 s wait in the coordinator's reading: not enabled, not pending | OBSERVED |
+| TLMM pin control, gpio8 to gpio11, gpio91 and the touch pins | the pin controller answered at EL2 for the first time, with no fault; the raw words are `F8=0X205 F9=0X207 F10=0X207 F11=0X205` (levels `L8=0 L9=1 L10=1 L11=1`) and `F91=1 L91=0 N91=0XE2 S91=0`, with more words for gpio2, 40 to 43, 48, 51 and 64 on the page (the payload's pin numbers); none changed in 8 s | OBSERVED (that it answered; the words) |
+| the pins as functions | not decoded by the coordinator. If `F8` to `F11` are the pins' control words (the payload's document names the fields), this table's layout (function in bits 5:2) reads function 1 on all four and `F91=1` reads function 0 with the pin an input, which is what the table above expects (arithmetic by the author of this note, not a reading of the page) | INFERRED, at most (needs the payload document's field names) |
+| two snapshots | `DRIFT NONE CMP=13`: no word changed in 8.003 s; no key press is recorded, and with the engines off a press would not show on any word the payload reads | OBSERVED (no change) |
+
+**Consequences for the link (INFERRED; none is a decision, nothing is authorised).**
+
+- In the table of "Reading the result", the row "clock halt bits are set" is the one that applies: the engine's clock is
+  off, so the link is not readable without a clock write, and that is "stop and ask the owner". The two "not feasible"
+  tests are not met: (a) says no UART firmware and (b) says the window cannot be read with the clocks reported on; here
+  the clocks are off and the window was not read, so neither is shown. The page cannot tell a clock that the firmware
+  switched off from one that was never on at this point.
+- Phase 2 (observing receive data) cannot start until a clock-on write exists and is authorised: a GCC write, and
+  possibly the RPMh and interconnect votes of [section 5.1](#51-phase-1-read-only-snapshot), which no read can show.
+  That is the input path's own bring-up item, not a fault of the plan. A native driver (option A1 or A2 of
+  [section 6](#6-g2-the-options-and-a-recommended-default)) has to switch the engine clock on itself, whichever way it
+  reaches the engine.
+- The condition that this study gives for the fallback (option B, if G1 says the link is not reachable) is not
+  established either: what was learned is "clocked off at the hand-off", not "unreadable once clocked". Whether the
+  engine registers read once their clocks are on, what protocol the engine holds, and what the Type Cover does after the
+  firmware's shutdown of the link, are UNKNOWN. The touch engine's answer is the same and the touch path stays stretch
+  scope.
+
 ## 6. G2: the options and a recommended default
 
 Option A is a *native* SAM driver. A1 puts it at EL2 in the monitor, which then presents a virtual HID to the guest;
@@ -395,11 +432,11 @@ The Microsoft HID-over-SPI specification that [T2] cites was not read. Nothing i
 
 | Unknown | Measured by |
 | --- | --- |
-| the engine's protocol, mode, clock and pin state after ExitBootServices | G1 phase 1 |
+| the engine's protocol, mode, clock and pin state after ExitBootServices (boot 29: the clock words read OFF, INFERRED; the protocol and mode were not read because the engine was gated off; the pins were read raw: [section 5.4](#54-what-boot-29-showed)) | G1 phase 1, after a clock-on write that nothing authorises yet |
 | this unit's baud, format, flow control and GPIOs | G1 step 0 (the DSDT `MSHW0084` resource) |
 | whether the CRC, framing and policy match real frames | G1 phase 2 (first valid frame) |
 | whether the EC answers a host that skipped the Windows initialization | G1 phase 3 |
-| whether firmware's RPMh, interconnect and power-domain votes survive the hand-off | indirectly, by the clock and register reads |
+| whether firmware's RPMh, interconnect and power-domain votes survive the hand-off (boot 29: the engine clocks read OFF and the vote words were read raw; INFERRED: nothing kept these clocks on at that point, and why is UNKNOWN) | indirectly, by the clock and register reads |
 | keyboard and touchpad report descriptors; hot-plug behaviour | after G1, by a descriptor read |
 | the pen digitizer transport and the touchscreen details | a separate stretch spike, not before G1 closes |
 | the effect of any of this on Windows' next boot | an owner-supervised check after phase 2 |

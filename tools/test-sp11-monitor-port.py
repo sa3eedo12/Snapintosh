@@ -420,6 +420,8 @@ Reached again in boot 28 (OBSERVED once), after `launchd`'s first boot task fail
 nor in boot 28 (the report page was drawn, and film 2 ends 5 s after it appeared).
 Boot 28's first panic is a userspace panic (`userspace panic: boot task failure: mount-phase-1 - exited due to SIGABRT`), the text of the panic that follows `launchd`'s failed boot task and not a platform assertion
 boot 28, 40.08 s, one vCPU, through the root mount to `launchd`'s failed first boot task, the guest's userspace panic and the monitor's stop at boot 24's address (INFERRED: the kernel's chip-reset read)
+29 = plan survey-s0a, 30 = plan survey-s0b and 31 = plan survey-disp, the read-only hardware survey of the thermal, input, GPU and display blocks (2026-11-20; read-only payloads through the stick's runner, no monitor stage, section 27 of the log, so the runs of the monitor entry counted in this document stay eight)
+The monitor still reads no TSENS word; a read-only survey payload (boot 29, not a monitor run; section 27 of the log) has since read the four Hamoa temperature controllers at EL2 once: all answered, 50 sensors were enabled
 '''.splitlines()
 
 
@@ -1264,6 +1266,8 @@ rung 7's class is RUNG 7 KERNEL WAITING (section 14; => rung 7's class is NEW ST
 `A=0X96000047`, `B=0XFFFFFE110E00C040` => `A=0X9600004F`, `B=0XFFFFFE110E00C040`
 after 2,307,553,890 ticks (120.185 s, the box's end) => after 2,307,553,890 ticks (12.185 s, the box's end)
 Not reached in boot 27: with the scaler withdrawn by data => Reached in boot 27: with the scaler withdrawn by data
+no monitor stage, section 27 of the log, so the runs of the monitor entry counted in this document stay eight => a monitor stage, section 27 of the log, so the runs of the monitor entry counted in this document are now eleven
+all answered, 50 sensors were enabled => all answered, 64 sensors were enabled
 and g held on the host (VERIFIED, `git diff`: the monitor sources of rungs 6 and 7 are identical => and g is a host check that the reading of the film does not report (the monitor sources of rungs 6 and 7 are identical
 '''
 
