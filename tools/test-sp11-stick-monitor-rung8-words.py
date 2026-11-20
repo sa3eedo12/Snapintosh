@@ -363,7 +363,8 @@ class Anchors(unittest.TestCase):
         self.assertIn(key, m1g.PANEL)
         self.assertEqual([pn._rung(panel), pn._rung({k: v for k, v in panel.items() if k != 'profile'}), pn._rung({**panel, 'profile': M8.Q}), pn._rung({**panel, 'boot_arg': M7.W90, 'profile': None})],
                          [r8, r5, r7, r6])
-        self.assertEqual((r8.NUMBER, pn.ACK), (8, (r5, r6, r7, r8)))
+        self.assertEqual((r8.NUMBER, pn.ACK), (8, (r5, r6, r7, r8, pn.ACK[4])))
+        self.assertEqual(pn.ACK[4].NUMBER, 9, 'rung 9 (K17) is the fifth of the acknowledging monitor\'s records')
         self.assertIn('counts as a result of rung 8.', flat(STATE['r8']))
         new = {'stand', 'why', 'decides', 'hazard', 'rung', 'step4', 'idle', 'console', 'ran', 'restart', 'restart_c', 'stand_head', 'stop_seen', 'wd_exit', 'wd_box'}
         self.assertTrue(new <= set(m1g.PANEL[key]))
@@ -373,7 +374,7 @@ class Anchors(unittest.TestCase):
         self.assertEqual({k: v for k, v in seen.items() if k != 'WATCHDOG'}, {k: v for k, v in seen7.items() if k != 'WATCHDOG'}, 'the stop words are rung 7\'s but for the count of the watchdog')
         self.assertNotEqual(seen['WATCHDOG'], seen7['WATCHDOG'])
         self.assertEqual(sorted(k for k in m1g.PANEL if 'let_panic' in k), sorted([f'console+{M8.F}+let_panic', f'console+{M7.W90}+let_panic', 'console+cpus=1+let_panic',
-                                                                                      f'console+{M8.F}+let_panic+{M8.Q}', key]))
+                                                                                      f'console+{M8.F}+let_panic+{M8.Q}', key, 'console+cpu_boot_timeout_secs=360+let_panic+j700ap-26A428-m1-quiet-rtc-acm']))
 
     def test_the_profile_paragraphs_are_checked_on_the_finished_record_and_a_seeded_false_sentence_is_found(self):
         text, panel = STATE['r8'], STATE['r8-panel']

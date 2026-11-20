@@ -14,6 +14,7 @@ The guest is built by the loader that built the guests of rungs 1 to 7 (probes/x
 and the IOKit RAM-disk mode are passed to it as they are passed on the A16 (probes/run.py), and it adds the /chosen properties of the RAM root (boot-ramdmg-size and -extents,
 boot-uuid, apfs-preboot-uuid, the root-hash payload, protected-data-access 0 and sepfw-load-at-boot 0). What this module adds is the command-line words for a root that takes
 minutes to mount, `cpu_boot_timeout_secs=<over the box>` and `wdt=-1`, and the RTC seed that the A16 route took at upload, baked at build from an explicit epoch."""
+import bisect
 import hashlib
 import json
 import os
@@ -89,52 +90,102 @@ def _emit(out, piece, block=1 << 16):
         at = end
 
 
-def write_guest(path, load_base, load_size, chunks):
-    """GUEST.DAT written to a new file `path` in the one canonical layout of sb.pack_guest (the tests compare the bytes), chunk by chunk and window by window: a chunk is
-    dict(kind, dest, data=bytes), dict(kind, dest, size) (ZERO) or dict(kind, dest, size, source=<Source>, offset=<into it>). The head and the table are written last, when the digests of
-    the data are known. Returns dict(file_size, count, index_sha256)."""
-    count = len(chunks)
-    if not 1 <= count <= sb.CHUNKS_MAX:
-        raise Refused('GUEST_COUNT', f'{count} chunks: the table holds 1 to {sb.CHUNKS_MAX}')
-    table_end = sb.GUEST_HEAD_BYTES + sb.CHUNK_BYTES * count
-    entries, expect = [], table_end
-    with open(path, 'xb') as out:
-        out.seek(table_end)
+class VirtualGuest:
+    """GUEST.DAT as a sized object that is sliced and never held: the one canonical layout of sb.pack_guest (the tests compare the bytes), made from chunks that are
+    dict(kind, dest, data=bytes), dict(kind, dest, size) (ZERO) or dict(kind, dest, size, source=<Source>, offset=<into it>). Building it reads each data chunk once, in windows, for
+    its digest (the table needs them, and the file's head comes first); a slice is then made from the head, the table, the zero padding and the chunks' own bytes, so that every check of
+    tools/sp11_stick_bundle.py that takes anything with len() and slices (check_guest, check_digests, guest_pin_fields, sha256_range) runs on it as it runs on the file, and the record
+    can state the file's size and SHA-256 before one byte of it is written. Chunks must stay alive and unchanged while the object is used."""
+
+    def __init__(self, load_base, load_size, chunks):
+        count = len(chunks)
+        if not 1 <= count <= sb.CHUNKS_MAX:
+            raise Refused('GUEST_COUNT', f'{count} chunks: the table holds 1 to {sb.CHUNKS_MAX}')
+        table_end = sb.GUEST_HEAD_BYTES + sb.CHUNK_BYTES * count
+        entries, spans, expect = [], [], table_end
         for c in chunks:
             if c.get('data') is None and 'source' not in c:
                 entries.append(struct.pack('<QQQHHI32s', c['dest'], c['size'], 0, c['kind'], sb.CHUNK_ZERO, 0, bytes(32)))
                 continue
+            size = len(c['data']) if c.get('data') is not None else c['size']
+            if 'source' in c and c['offset'] + size > len(c['source']):
+                raise Refused('CHUNK_EOF', 'a chunk reaches past the end of its source')
             offset = (expect + sb.DATA_ALIGN - 1) & ~(sb.DATA_ALIGN - 1)
-            out.seek(offset - expect, os.SEEK_CUR)
             digest = hashlib.sha256()
-            if c.get('data') is not None:
-                size = len(c['data'])
-                for at in range(0, size, sb.WINDOW):
-                    piece = bytes(c['data'][at:at + sb.WINDOW])
-                    digest.update(piece)
-                    _emit(out, piece)
-            else:
-                size = c['size']
-                if c['offset'] + size > len(c['source']):
-                    raise Refused('CHUNK_EOF', 'a chunk reaches past the end of its source')
-                for at in range(0, size, sb.WINDOW):
-                    piece = c['source'].read_at(c['offset'] + at, min(sb.WINDOW, size - at))
-                    digest.update(piece)
-                    _emit(out, piece)
+            for at in range(0, size, sb.WINDOW):
+                digest.update(self._piece(c, at, min(sb.WINDOW, size - at)))
             entries.append(struct.pack('<QQQHHI32s', c['dest'], size, offset, c['kind'], 0, 0, digest.digest()))
+            spans.append((offset, offset + size, c))
             expect = offset + size
-        out.truncate(expect)
-        table = b''.join(entries)
+        self.table = b''.join(entries)
         head = bytearray(sb.GUEST_HEAD_BYTES)
         for name, value in (('magic', b'SNAPBGST'), ('version', sb.VERSION), ('head_size', sb.GUEST_HEAD_BYTES), ('entry_size', sb.CHUNK_BYTES), ('entry_count', count),
                             ('table_offset', sb.GUEST_HEAD_BYTES), ('data_offset', table_end), ('file_size', expect), ('load_base', load_base), ('load_size', load_size),
-                            ('index_sha256', sb.sha256(table))):
+                            ('index_sha256', sb.sha256(self.table))):
             sb.put(head, sb.GUEST_LAYOUT, name, value)
-        out.seek(0)
-        out.write(bytes(head) + table)
-        out.flush()
-        os.fsync(out.fileno())
-    return dict(file_size=expect, count=count, index_sha256=sb.sha256(table).hex())
+        self.count, self.size, self.load_base, self.load_size = count, expect, load_base, load_size
+        self.index_sha256 = sb.sha256(self.table)
+        self._front, self._spans, self._starts, self._sha256 = bytes(head) + self.table, spans, [s[0] for s in spans], None
+
+    @staticmethod
+    def _piece(chunk, at, n):
+        """`n` bytes of a data chunk from its offset `at`."""
+        if chunk.get('data') is not None:
+            return bytes(chunk['data'][at:at + n])
+        return chunk['source'].read_at(chunk['offset'] + at, n)
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, key):
+        if not isinstance(key, slice):
+            raise TypeError('a VirtualGuest is sliced, not indexed')
+        start, stop, step = key.indices(self.size)
+        if step != 1:
+            raise ValueError('a VirtualGuest slice has no step')
+        out, at = bytearray(), start
+        while at < stop:
+            if at < len(self._front):
+                end = min(stop, len(self._front))
+                out += self._front[at:end]
+            else:
+                i = bisect.bisect_right(self._starts, at) - 1
+                if i >= 0 and at < self._spans[i][1]:
+                    lo, end, chunk = self._spans[i]
+                    end = min(stop, end)
+                    out += self._piece(chunk, at - lo, end - at)
+                else:       # the pad that aligns the next chunk (or the end of the file): zeros
+                    end = min(stop, self._starts[i + 1] if i + 1 < len(self._starts) else stop)
+                    out += bytes(end - at)
+            at = end
+        return bytes(out)
+
+    def sha256(self):
+        """The hex SHA-256 of the whole file, by one pass over it (cached)."""
+        if self._sha256 is None:
+            self._sha256 = sb.sha256_range(self).hex()
+        return self._sha256
+
+    def written(self):
+        """What the writer reports and verify_guest binds to: dict(file_size, count, index_sha256)."""
+        return dict(file_size=self.size, count=self.count, index_sha256=self.index_sha256.hex())
+
+    def write_to(self, path):
+        """The file at `path` (a new file), window by window, sparse where the guest is zero, length set at the end and the bytes on the disk."""
+        with open(path, 'xb') as out:
+            for at in range(0, self.size, sb.WINDOW):
+                _emit(out, self[at:at + sb.WINDOW])
+            out.truncate(self.size)
+            out.flush()
+            os.fsync(out.fileno())
+
+
+def write_guest(path, load_base, load_size, chunks):
+    """GUEST.DAT written to a new file `path` in the one canonical layout of sb.pack_guest (the tests compare the bytes), chunk by chunk and window by window (VirtualGuest).
+    Returns dict(file_size, count, index_sha256)."""
+    guest = VirtualGuest(load_base, load_size, chunks)
+    guest.write_to(path)
+    return guest.written()
 
 
 def verify_guest(path, load_base, load_size, written):
@@ -176,6 +227,39 @@ def boot_arg(box_s, wait_s):
     if not box_s < wait_s <= 86400:
         raise Refused('ROOT_BOOT_ARG', f'cpu_boot_timeout_secs {wait_s} must be over the box ({box_s} s) and at most 86400')
     return ' '.join((f'cpu_boot_timeout_secs={wait_s}', *ROOT_WORDS))
+
+
+def form_boot_arg(box_s, wait_s):
+    """The one --boot-arg word of rung 9's form (ch.RUNG9_FORM): the loader's own command line already ends in `wdt=-1`, so unlike boot_arg this adds nothing after the wait. The box and the
+    wait are the form's, and no other (the closed list of tools/sp11_stick_bundle_chunks.py)."""
+    word = f'cpu_boot_timeout_secs={wait_s}'
+    if (box_s, word) != (ch.RUNG9_FORM[2], ch.RUNG9_FORM[1]):
+        raise Refused('ROOT_BOOT_ARG', f'rung 9\'s form is a box of {ch.RUNG9_FORM[2]} s and {ch.RUNG9_FORM[1]}; got a box of {box_s} s and {word}')
+    return word
+
+
+def is_form(a):
+    """True when the build `a` is the one of rung 9 (its guest profile): then its guest is the form's (let_panic data, the acknowledging monitor, the form's word, the clock seeded by the profile)."""
+    return getattr(a, 'guest_profile', None) == ch.RUNG9_PROFILE
+
+
+def real_guest(a, xb, place, facts, profile):
+    """The real guest with its RAM-disk root, as root-guest and the bundle of rung 9 build it: the loader is configured for `profile`, the inputs are checked, the loader is called with the root,
+    the clock is seeded by the profile (a second seed would refuse), and the guest is read back against the profile and the root's own /chosen properties. Returns (built, (base, size) of the
+    root, number of published nodes, the profile's root-hash spec)."""
+    import sp11_stick_bundle_profile as gpb
+    xb.configure_guest(profile)
+    check_inputs(a, xb)
+    a.root_inputs = dict(ramdisk=str(a.ramdisk), root_hash=str(a.root_hash), ramdisk_mode='iokit')
+    built = ch.real_built(a, xb, place, facts)
+    if (why := seed_rtc_failure(built)):
+        raise Refused('ROOT_RTC', why)
+    if not built.get('ramdisk_root_range'):
+        raise Refused('ROOT_INPUT_BAD', 'the loader built no RAM-disk root')
+    spec = xb.GUEST_PROFILE.root_hash
+    root_range = built['ramdisk_root_range']
+    nodes = gpb.read_back(xb, built, profile, dict(extents=root_range, boot_uuid=spec.boot_uuid, payload=Path(a.root_hash).read_bytes()))
+    return built, root_range, nodes, spec
 
 
 def synthetic_root(size, label='synthetic-root'):
@@ -249,7 +333,7 @@ def run(a, kind):
     import sp11_stick_bundle_build as bb      # the builder imports this module: the cycle is broken here
     gate()
     wait = a.cpu_boot_timeout_s if a.cpu_boot_timeout_s is not None else a.time_box_s + 60
-    words = boot_arg(a.time_box_s, wait)
+    words = form_boot_arg(a.time_box_s, wait) if kind == 'real' and is_form(a) else boot_arg(a.time_box_s, wait)
     out = check_out(a, bb)
     facts, dumps = bb.load_facts(a.facts), bb.find_dumps(a.dump)
     lines = bb.facts_check(facts, dumps)
@@ -272,18 +356,13 @@ def run(a, kind):
     else:
         import sp11_stick_bundle_profile as gpb
         profile = gpb.resolve(a)
-        xb.configure_guest(profile)
-        check_inputs(a, xb)
-        a.panel, a.sptm_hvc_calls, a.boot_arg, a.let_panic, a.cpu_start = 'console', 0, words, False, 'stop'
-        a.root_inputs = dict(ramdisk=str(a.ramdisk), root_hash=str(a.root_hash), ramdisk_mode='iokit')
-        built = ch.real_built(a, xb, place, facts)
-        if (why := seed_rtc_failure(built)):
-            raise Refused('ROOT_RTC', why)
-        if not built.get('ramdisk_root_range'):
-            raise Refused('ROOT_INPUT_BAD', 'the loader built no RAM-disk root')
-        root_range = built['ramdisk_root_range']
-        spec = xb.GUEST_PROFILE.root_hash
-        nodes = gpb.read_back(xb, built, profile, dict(extents=root_range, boot_uuid=spec.boot_uuid, payload=Path(a.root_hash).read_bytes()))
+        if is_form(a):      # rung 9's guest: the form's own words (let_panic is a data word of PARAMS, the acknowledge is the pair's), and the clock is the profile's
+            if a.rtc_epoch_us is not None:
+                raise Refused('ROOT_RTC', f'--guest-profile {profile} seeds its own clock (the menu\'s RTC_EPOCH_US): a second seed would leave no unseeded clock to seed (--rtc-epoch-us)')
+            a.panel, a.sptm_hvc_calls, a.boot_arg, a.let_panic, a.cpu_start = 'console', 0, words, True, 'ack'
+        else:
+            a.panel, a.sptm_hvc_calls, a.boot_arg, a.let_panic, a.cpu_start = 'console', 0, words, False, 'stop'
+        built, root_range, nodes, spec = real_guest(a, xb, place, facts, profile)
         lay = ch.layout_of(xb)
         inputs = dict(root_bytes=Path(a.ramdisk).stat().st_size, root_sha256=spec.image_sha256, root_hash_sha256=spec.payload_sha256,
                       trust_cache_sha256=xb.GUEST_PROFILE.trust_cache.payload_sha256)

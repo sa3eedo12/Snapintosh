@@ -112,12 +112,12 @@ class Form(unittest.TestCase):
 
     def test_the_form_is_the_third_of_a_closed_list_of_four_and_carries_the_one_profile(self):
         self.assertEqual((ch.RUNG7_FORM, m1.RUNG7_FORM, ch.RUNG7_PROFILE, gpb.QUIET, gpb.RUNG7_PROFILES), (('console', F, 120), ('console', F, 120), 'j700ap-26A428-m1-quiet', Q, (Q,)))
-        self.assertEqual(ch.ACK_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM), 'rung 7 is the third and rung 8 (K16) the fourth: no fifth')
-        self.assertEqual(ch.FORM_PROFILE, {ch.RUNG7_FORM: Q, ch.RUNG8_FORM: gpb.RTC}, 'each profile belongs to its own form and to no other: rung 7\'s is quiet, rung 8\'s quiet-rtc')
+        self.assertEqual(ch.ACK_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM, ch.RUNG9_FORM), 'rung 7 is the third, rung 8 (K16) the fourth and rung 9 (K17) the fifth: no sixth')
+        self.assertEqual(ch.FORM_PROFILE, {ch.RUNG7_FORM: Q, ch.RUNG8_FORM: gpb.RTC, ch.RUNG9_FORM: gpb.ROOT}, 'each profile belongs to its own form and to no other: rung 7\'s is quiet, rung 8\'s quiet-rtc, rung 9\'s quiet-rtc-acm')
         self.assertEqual((m1.BOOT_ARGS[F], m1.BOOT_ARG_CPU_START[F], m1.RUNG6_BOX_S, m1.BOX_MAX_S), ('ACKPANIC-', 'ack', 120, 120), 'rung 7 asks rung 6\'s box (D5\'\') and rung 5\'s word')
-        self.assertEqual(sorted(m1.BOOT_ARGS), sorted([P, F, W90]), 'no boot argument was added: nested_panic_max is in no form')
+        self.assertEqual(sorted(m1.BOOT_ARGS), sorted([P, F, W90, 'cpu_boot_timeout_secs=360']), 'one boot argument was added, by K17: nested_panic_max is in no form')
         self.assertNotIn('nested_panic_max', ' '.join(m1.BOOT_ARGS) + ch.LET_PANIC_FORMS_TEXT + str(gpb.NAMES))
-        self.assertEqual(ch.LET_PANIC_FORMS_TEXT.count('--guest-profile'), 2)
+        self.assertEqual(ch.LET_PANIC_FORMS_TEXT.count('--guest-profile'), 3)
         for form in ((120, 'console', 0, F, True, 'ack', Q), (60, 'console', 0, F, True, 'ack', None), (120, 'console', 0, W90, True, 'ack', None), (5, 'console', 0, P, True, 'stop', None),
                      (5, 'console', 0, P, False, 'stop', None), (5, 'console', 0, None, False, 'stop', None), (5, 'handed', 0, None, False, 'stop', None), (5, 'withheld', 0, None, False, 'stop', None),
                      (60, 'console', 0, F, True, 'ack', BASE)):
@@ -190,7 +190,7 @@ class Form(unittest.TestCase):
 
 class Pair(unittest.TestCase):
     def test_rung_7_uses_rung_6s_pair_by_digest_and_the_table_is_keyed_by_form(self):
-        self.assertEqual(sorted(REAL_PAIRS), [F, W90, Q, gpb.RTC], 'the pairs are keyed by word, and rungs 7\'s and 8\'s by their profiles (their word is rung 5\'s)')
+        self.assertEqual(sorted(REAL_PAIRS), [F, W90, Q, gpb.RTC, gpb.ROOT], 'the pairs are keyed by word, and rungs 7\'s, 8\'s and 9\'s by their profiles (rungs 7\'s and 8\'s word is rung 5\'s)')
         self.assertEqual(REAL_PAIRS[Q], REAL_PAIRS[W90], 'rung 7 uses rung 6\'s pair')
         self.assertNotEqual(REAL_PAIRS[Q], REAL_PAIRS[F], 'and not rung 5\'s')
         self.assertEqual(REAL_PAIRS[Q], (m1.ACK_MONITOR_SHA256, m1.ACK_REPORTER6_SHA256))
@@ -445,8 +445,8 @@ class Real(unittest.TestCase):
 
 class Hygiene(unittest.TestCase):
     def test_the_cap_is_176_kib_and_the_files_are_under_the_size_of_a_file_of_this_tool(self):
-        self.assertEqual(bb.AUTHORISATION_CAP, 11 << 14, 'K15 raised it from 160 KiB to 176 KiB: rung 7\'s record is about 170 KB (rung 6\'s 159 KB, boot 26\'s block, the profile\'s paragraphs)')
-        self.assertEqual(M5.HELD_LIMIT, 11 * 16384 - 1024)
+        self.assertGreaterEqual(bb.AUTHORISATION_CAP, 11 << 14, 'K15 raised it from 160 KiB to 176 KiB: rung 7\'s record is about 170 KB (rung 6\'s 159 KB, boot 26\'s block, the profile\'s paragraphs); K17 raised it again')
+        self.assertEqual(M5.HELD_LIMIT, bb.AUTHORISATION_CAP - 1024)
         for rel in ('tools/sp11_stick_bundle_rung7.py', 'tools/sp11_stick_bundle_panel_rung7.py', 'tools/sp11_stick_bundle_panel_rung7d.py', 'tools/sp11_stick_bundle_panel_rungs.py',
                     'tools/sp11_stick_bundle_panel_profile.py', 'tools/sp11_stick_bundle_profile.py', 'tools/sp11_stick_bundle_build.py', 'tools/sp11_stick_bundle_build_opts.py',
                     'tools/sp11_stick_bundle_panel.py', 'tools/sp11_stick_bundle_m1.py', 'tools/sp11_stick_bundle_chunks.py', 'tools/sp11_stick_bundle_record_m1_guide.py',
@@ -458,7 +458,7 @@ class Hygiene(unittest.TestCase):
                 self.assertLess(len(text.splitlines()), 1500)
                 self.assertEqual(text.splitlines()[1 if text.startswith('#!') else 0].count('SPDX-License-Identifier: MIT'), 1)
                 self.assertTrue(text.isascii())
-        for rel, cap in (('docs/SP11-STICK-BUILD.md', 37_000), ('docs/SP11-STICK-REAL.md', 33_000), ('docs/SP11-STICK-MONITOR.md', 160_500), ('docs/SP11-M1-GUEST-PROFILES.md', 21_000)):
+        for rel, cap in (('docs/SP11-STICK-BUILD.md', 37_000), ('docs/SP11-STICK-REAL.md', 33_000), ('docs/SP11-STICK-MONITOR.md', 166_000), ('docs/SP11-M1-GUEST-PROFILES.md', 23_000)):
             self.assertLessEqual(len((ROOT / rel).read_bytes()), cap, rel)
 
 

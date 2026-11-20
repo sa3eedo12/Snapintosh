@@ -52,8 +52,8 @@ D9_PANELS = tuple(PANEL_MARKS)  # the --panel choices this record is written for
 # monitor's CPU-start (BOOT_ARG_CPU_START): cpus=1 asks XNU for one CPU and goes with the plain monitor (`stop`); cpu_boot_timeout_secs=120 and =90 set XNU's wait for a CPU that was
 # started and go with the acknowledging monitor (`ack`), which starts none: =120 is the word of rung 5 (K13: a wait longer than its 60 s box) and =90 that of rung 6 (K14: a wait that
 # ends inside its 120 s box). Both put ACKPANIC- in the label, and the facts' label tells the two records apart (RUNG5, RUNG6).
-BOOT_ARGS = {'cpus=1': 'CPUS1-', 'cpu_boot_timeout_secs=120': 'ACKPANIC-', 'cpu_boot_timeout_secs=90': 'ACKPANIC-'}
-BOOT_ARG_CPU_START = {'cpus=1': 'stop', 'cpu_boot_timeout_secs=120': 'ack', 'cpu_boot_timeout_secs=90': 'ack'}
+BOOT_ARGS = {'cpus=1': 'CPUS1-', 'cpu_boot_timeout_secs=120': 'ACKPANIC-', 'cpu_boot_timeout_secs=90': 'ACKPANIC-', 'cpu_boot_timeout_secs=360': 'ACKPANIC-'}
+BOOT_ARG_CPU_START = {'cpus=1': 'stop', 'cpu_boot_timeout_secs=120': 'ack', 'cpu_boot_timeout_secs=90': 'ack', 'cpu_boot_timeout_secs=360': 'ack'}
 BOOT_ARG_PANEL = 'console'
 # D5 (2026-11-16) and D8 (2026-11-17) decided a time box of 5 s, DECIDED_BOX_S (tools/test-sp11-stick-monitor-rung5.py holds it to the guide's D5_BOX_S), which every record up to rung 4
 # carries; D5' (2026-11-18, the operator's answer "Yes, up to 60 s") lets rung 5's record, the acknowledging monitor's, carry RUNG5_BOX_MAX_S with AC power; D5'' (2026-11-19, the operator's
@@ -69,7 +69,7 @@ ch.KNOWN_REFUSALS.add('BOOT_ARG_REFUSED')
 # cpu_boot_timeout_secs=120 and a box of RUNG5_BOX_MAX_S s, rung 6's, with cpu_boot_timeout_secs=90 and a box of RUNG6_BOX_S s, and rung 7's, with cpu_boot_timeout_secs=120, the box of
 # RUNG6_BOX_S s and the guest profile quiet (K15), and rung 8's, which is rung 7's with the profile quiet-rtc (K16). No other combination. permissive and skip_undef are the monitor's other diagnostic words of this kind: no record sets them.
 LET_PANIC_FORM = ch.LET_PANIC_FORM
-RUNG5_FORM, RUNG6_FORM, RUNG7_FORM, RUNG8_FORM, ACK_FORMS = ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM, ch.ACK_FORMS
+RUNG5_FORM, RUNG6_FORM, RUNG7_FORM, RUNG8_FORM, RUNG9_FORM, ACK_FORMS = ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM, ch.RUNG9_FORM, ch.ACK_FORMS
 LET_PANIC_MARK = 'LETPANIC-'
 DIAG_WORDS = (('permissive', 21), ('let_panic', 23), ('skip_undef', 28))
 LET_PANIC_AT = 8 * 23
@@ -83,10 +83,13 @@ BOX_MAX_S = 120         # the longest time box that a wrapper built from this tr
 # call the monitor, so a record with a longer box for one of them is refused here and not on the unit (OPTIONS_BAD), and the record's text names 5 s for them; any other pair has BOX_MAX_S.
 LOW_CAP_MONITORS = {'1d32f5071506a00c91be8c7e218a6db9ba6d280c1cf25be31aac41a3c599171c': 5, '54305009c913e74af955d76b83ff99b338541498cf0866d67a33a4c53e0b017a': 5}
 # The pair built with `tools/sp11_stick_wrapper_build.py --root-carry` (docs/SP11-STICK-ROOT.md): its wrapper takes files of up to 2 GiB and a box of up to ROOT_CARRY_BOX_MAX_S s, and it is
-# a different pair from every pair of ACK_PAIRS: no form of this module names it, so every record that exists refuses it (M1_REPORT_MISMATCH) and every box over BOX_MAX_S stays refused
-# (check_options). The digests are those of the build with the monitor of rungs 5 to 7 (053a239f...); a monitor that changes makes a new pair.
+# a different pair from every other pair of ACK_PAIRS: only the form of rung 9 names it (ACK_PAIRS, by its guest profile), so every older record refuses it (M1_REPORT_MISMATCH), the form of
+# rung 9 refuses every other pair, and every box over BOX_MAX_S stays refused for any other form (check_options). The digests are those of the build with the monitor of rungs 5 to 8
+# (053a239f...); a monitor that changes makes a new pair.
 ROOT_CARRY_BOX_MAX_S = 1200
-ROOT_CARRY_PAIRS = {'6af26a840736a7148e8b213ffc5c2e4e57fc4f4e3fbfb271380f382205e0e456': '562b9b6eeaf97b87a4fb844d4368543a2f6ba8c28f5363451ba244a97d50bb80'}
+ROOT_CARRY_MONITOR_SHA256 = '6af26a840736a7148e8b213ffc5c2e4e57fc4f4e3fbfb271380f382205e0e456'
+ROOT_CARRY_REPORTER_SHA256 = '562b9b6eeaf97b87a4fb844d4368543a2f6ba8c28f5363451ba244a97d50bb80'
+ROOT_CARRY_PAIRS = {ROOT_CARRY_MONITOR_SHA256: ROOT_CARRY_REPORTER_SHA256}
 
 
 def box_cap(monitor_sha256):
@@ -107,7 +110,8 @@ ACK_MONITOR_SHA256 = 'bb34b9701d89302f425138b6229fd334ba9ead54699db2a131fc9a99cb
 ACK_REPORTER5_SHA256 = 'ee86676001d89cf653af7bdddd797fef3c54d31b28ee42eb4a2d7aa692ee4b3b'
 ACK_REPORTER6_SHA256 = '533d004c27a11da964048aba34fa5a4a32309f0761c100b0959400d099c40368'
 ACK_PAIRS = {RUNG5_FORM[1]: (ACK_MONITOR_SHA256, ACK_REPORTER5_SHA256), RUNG6_FORM[1]: (ACK_MONITOR_SHA256, ACK_REPORTER6_SHA256),
-             ch.RUNG7_PROFILE: (ACK_MONITOR_SHA256, ACK_REPORTER6_SHA256), ch.RUNG8_PROFILE: (ACK_MONITOR_SHA256, ACK_REPORTER6_SHA256)}
+             ch.RUNG7_PROFILE: (ACK_MONITOR_SHA256, ACK_REPORTER6_SHA256), ch.RUNG8_PROFILE: (ACK_MONITOR_SHA256, ACK_REPORTER6_SHA256),
+             ch.RUNG9_PROFILE: (ROOT_CARRY_MONITOR_SHA256, ROOT_CARRY_REPORTER_SHA256)}
 
 
 def check_pair_form(cpu_start, boot_arg, monitor_sha256, reporter_sha256, profile=None):
@@ -167,8 +171,9 @@ def check_options(stores, gic_stop, time_box_s, panel=None, hvc_calls=None, boot
         raise ch.Refused('OPTIONS_BAD', '--m1-run stores in all three classes: --stores must include ram, el2_sysreg and gic')
     if gic_stop:
         raise ch.Refused('OPTIONS_BAD', '--m1-run and --gic-stop are two kinds of record: give one')
-    if not 1 <= time_box_s <= BOX_MAX_S:
-        raise ch.Refused('OPTIONS_BAD', f'--m1-run: the wrapper refuses a time box outside 1 to {BOX_MAX_S} s before it calls the monitor (SP11_STICK_MONITOR_BOX_MAX_S)')
+    if not 1 <= time_box_s <= (ROOT_CARRY_BOX_MAX_S if profile == ch.RUNG9_PROFILE else BOX_MAX_S):
+        raise ch.Refused('OPTIONS_BAD', f'--m1-run: the wrapper refuses a time box outside 1 to {BOX_MAX_S} s before it calls the monitor (SP11_STICK_MONITOR_BOX_MAX_S), '
+                                        f'{ROOT_CARRY_BOX_MAX_S} s for the root-carry pair of rung 9 (--guest-profile {ch.RUNG9_PROFILE})')
     if panel is not None and (panel not in D9_PANELS or hvc_calls != 0):
         raise ch.Refused('OPTIONS_BAD', f'--m1-run with real: D9 admits --panel withheld (the first choice), --panel handed (the second) or --panel console (the panel '
                                         f'as the kernel\'s console), each with --sptm-hvc-calls 0 (a stock kernel), and this record is written for no other choice; '
@@ -196,8 +201,9 @@ def check_let_panic(let_panic, panel, boot_arg, time_box_s, is_m1=True, cpu_star
                                         f'(docs/SP11-STICK-MONITOR.md section 20, K12); got {time_box_s}')
     if not ch.let_panic_form_ok(panel, boot_arg, time_box_s, cpu_start, profile):
         if ch.let_panic_form_ok(panel, boot_arg, time_box_s, cpu_start, any_profile=True):
-            raise ch.Refused('GUEST_PROFILE_REFUSED', f'--guest-profile {profile or "(none)"} is not the guest profile of this form: only --boot-arg {ch.RUNG7_FORM[1]} --time-box-s '
-                                                      f'{ch.RUNG7_FORM[2]} has one, {ch.RUNG7_PROFILE} (rung 7) or {ch.RUNG8_PROFILE} (rung 8), and it has no other (docs/SP11-M1-GUEST-PROFILES.md section 5)')
+            raise ch.Refused('GUEST_PROFILE_REFUSED', f'--guest-profile {profile or "(none)"} is not the guest profile of this form: only '
+                                                      + ' or '.join(f'--boot-arg {f[1]} --time-box-s {f[2]} has {p}' for f, p in ch.FORM_PROFILE.items())
+                                                      + ', and no form has another (docs/SP11-M1-GUEST-PROFILES.md section 5)')
         raise ch.Refused('LET_PANIC_REFUSED', f'--let-panic is for {ch.LET_PANIC_FORMS_TEXT} and no other combination; '
                                               f'got --panel {panel} --boot-arg {boot_arg} --time-box-s {time_box_s} --cpu-start {cpu_start}')
 
@@ -208,7 +214,7 @@ def check_boot_arg(boot_arg, panel, is_m1=True, cpu_start='stop'):
     monitor without its word), before any guest is built. None is no word, which only the plain monitor takes."""
     if boot_arg is None:
         if cpu_start == 'ack' and is_m1:
-            raise ch.Refused('BOOT_ARG_REFUSED', '--cpu-start ack needs --boot-arg cpu_boot_timeout_secs=120 (rungs 5 and 7) or cpu_boot_timeout_secs=90 (rung 6): the acknowledged guest waits for a CPU '
+            raise ch.Refused('BOOT_ARG_REFUSED', '--cpu-start ack needs --boot-arg cpu_boot_timeout_secs=120 (rungs 5 and 7), cpu_boot_timeout_secs=90 (rung 6) or cpu_boot_timeout_secs=360 (rung 9): the acknowledged guest waits for a CPU '
                                                  'that is never started, and without the word its XNU gives up on that CPU after its own default wait, which is shorter than the box '
                                                  '(docs/SP11-STICK-MONITOR.md section 20, K11)')
         return

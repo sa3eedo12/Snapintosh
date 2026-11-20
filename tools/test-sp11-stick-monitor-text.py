@@ -488,8 +488,8 @@ class Meaning(unittest.TestCase):
     def test_every_panel_has_its_words_for_the_other_rung_and_a_panel_without_them_is_a_key_error(self):
         for key, entry in m1g.PANEL.items():
             panel, _, word = key.partition('+')         # a record whose guest has a boot-arg word of its own is the panel's key and `+word` (kind_key of tools/sp11_stick_bundle_panel.py)
-            if word.endswith(('+' + ch.RUNG7_PROFILE, '+' + ch.RUNG8_PROFILE)):
-                continue    # the key of a guest with a profile needs the builder's comparison with rung 6's (rung 7's) guest: tools/test-sp11-stick-monitor-rung7.py (-rung8.py) builds that record
+            if word.endswith(('+' + ch.RUNG7_PROFILE, '+' + ch.RUNG8_PROFILE, '+' + ch.RUNG9_PROFILE)):
+                continue    # the key of a guest with a profile needs the builder's comparison with the guest before it: tools/test-sp11-stick-monitor-rung7.py (-rung8.py, -rung9.py) builds that record
             with self.subTest(key):
                 self.assertIn(flat(entry['rung']), flat(text_of(real={**REAL, 'panel': panel, **({'boot_arg': word} if word else {})})))
         short = {key: value for key, value in m1g.PANEL['withheld'].items() if key != 'rung'}
@@ -516,7 +516,7 @@ class Provenance(unittest.TestCase):
         self.assertIn(f'NV2 header   sha256 {facts["nv2"]["header_sha256"]}', text_of(facts))
 
     def test_the_approved_text_fits_the_builders_cap_and_a_longer_file_is_refused(self):
-        self.assertEqual(bb.AUTHORISATION_CAP, 11 << 14, 'raised from 64 KiB to 128 KiB, to 144 KiB, to 160 KiB and to 176 KiB on purpose (K13 to K15); docs/SP11-STICK-MONITOR.md section 19, K13 to K15 say why')
+        self.assertEqual(bb.AUTHORISATION_CAP, 13 << 14, 'raised from 64 KiB to 128 KiB, to 144 KiB, to 160 KiB, to 176 KiB and to 208 KiB on purpose (K13 to K15, K17); docs/SP11-STICK-MONITOR.md section 19, K13 to K15 say why')
         size = len(text_of().encode())
         self.assertGreater(size, 1 << 16, 'the record outgrew the old cap: that is why it was raised')
         self.assertLess(size, bb.AUTHORISATION_CAP)

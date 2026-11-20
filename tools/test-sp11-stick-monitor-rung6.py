@@ -91,7 +91,7 @@ class Form(unittest.TestCase):
 
     def test_the_form_is_the_second_of_a_closed_list_of_four_and_nothing_else_is_admitted(self):
         self.assertEqual((ch.RUNG6_FORM, m1.RUNG6_FORM, m1.RUNG6_BOX_S, m1.BOX_MAX_S), (('console', W90, 120), ('console', W90, 120), 120, 120))
-        self.assertEqual(REAL_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM), 'rung 5\'s form is the first, rung 6\'s the second, rung 7\'s (K15, with its guest profile) the third and rung 8\'s (K16) the fourth: no fifth')
+        self.assertEqual(REAL_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM, ch.RUNG9_FORM), 'rung 5\'s form is the first, rung 6\'s the second, rung 7\'s (K15, with its guest profile) the third, rung 8\'s (K16) the fourth and rung 9\'s (K17) the fifth: no sixth')
         self.assertEqual(m1.BOOT_ARG_CPU_START[W90], 'ack')
         self.assertEqual(r6.WORD, W90)
         self.assertEqual(r6.LINE, pn.command_line('console', W90))
@@ -140,7 +140,7 @@ class Form(unittest.TestCase):
 
 class Pair(unittest.TestCase):
     def test_each_form_has_the_pair_that_its_record_is_written_for_by_digest(self):
-        self.assertEqual(sorted(REAL_PAIRS), [F, W90, ch.RUNG7_PROFILE, ch.RUNG8_PROFILE], 'the pairs are keyed by word, and rungs 7\'s and 8\'s by their profiles (their word is rung 5\'s): K15, K16')
+        self.assertEqual(sorted(REAL_PAIRS), [F, W90, ch.RUNG7_PROFILE, ch.RUNG8_PROFILE, ch.RUNG9_PROFILE], 'the pairs are keyed by word, and rungs 7\'s, 8\'s and 9\'s by their profiles (rungs 7\'s and 8\'s word is rung 5\'s): K15 to K17')
         for word, (monitor, reporter) in REAL_PAIRS.items():
             with self.subTest(word):
                 self.assertRegex(monitor, r'^[0-9a-f]{64}$')

@@ -28,9 +28,9 @@ AFFINITY = 0xFF00FFFFFF     # Aff3:Aff2:Aff1:Aff0 of MPIDR_EL1, the part ACPI st
 ZERO_MIN = 0x10000      # a shorter zero stretch stays data: every ZERO chunk is a table entry, and a table holds 1024
 KNOWN_REFUSALS = {n for _, n, _ in sb.ERRORS} | {'BUILT_SHAPE', 'PARAMS_MISMATCH', 'TIME_BOX_MISMATCH', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING', 'ROOT_RTC', *src.REFUSALS}   # the builder adds its own
 # (--panel, --boot-arg, --time-box-s) of the records that set the monitor's let_panic PARAMS word (tools/sp11_stick_bundle_m1.py, K12 to K16): rung 4's, with the plain monitor and
-# exactly this box, and the four of the acknowledging monitor, ACK_FORMS, each with exactly its box: rung 5's (a 60 s box, XNU's wait for CPU 1 at 120 s, longer than the box), rung 6's
-# (a 120 s box and a wait of 90 s, which ends inside it), rung 7's (a 120 s box and the wait of 120 s, which does not, with the guest profile of FORM_PROFILE and with it only) and rung 8's
-# (rung 7's box and word with the profile quiet-rtc, which binds the PMU's clock).
+# exactly this box, and the five of the acknowledging monitor, ACK_FORMS, each with exactly its box: rung 5's (a 60 s box, XNU's wait for CPU 1 at 120 s, longer than the box), rung 6's
+# (a 120 s box and a wait of 90 s, which ends inside it), rung 7's (a 120 s box and the wait of 120 s, which does not, with the guest profile of FORM_PROFILE and with it only), rung 8's
+# (rung 7's box and word with the profile quiet-rtc, which binds the PMU's clock) and rung 9's (the root mount: a box of 300 s, the wait of 360 s and the profile quiet-rtc-acm).
 # The list is closed: no other combination of box, word and profile has a record.
 LET_PANIC_FORM = ('console', 'cpus=1', 5)
 RUNG5_FORM = ('console', 'cpu_boot_timeout_secs=120', 60)
@@ -41,8 +41,13 @@ RUNG7_PROFILE = 'j700ap-26A428-m1-quiet'
 RUNG8_PROFILE = 'j700ap-26A428-m1-quiet-rtc'
 # Rung 8 has rung 7's box and word and differs in its guest profile alone, so its form carries the profile as a fourth element: the closed list of forms is a list of distinct values.
 RUNG8_FORM = (*RUNG7_FORM, RUNG8_PROFILE)
-ACK_FORMS = (RUNG5_FORM, RUNG6_FORM, RUNG7_FORM, RUNG8_FORM)
-FORM_PROFILE = {RUNG7_FORM: RUNG7_PROFILE, RUNG8_FORM: RUNG8_PROFILE}   # the guest profile of each form that carries one; every other form has the base board's
+# Rung 9 is the first root-mount form (docs/SP11-STICK-ROOT.md): the root-carry pair, a box of 300 s, XNU's wait for the CPU that is never started at 360 s (outside the box) and the profile
+# quiet-rtc-acm (the clock bound and the credential manager's software mode). Its guest is the 1.9 GB one of tools/sp11_stick_bundle_root.py, so GUEST.DAT is written as a stream.
+RUNG9_PROFILE = 'j700ap-26A428-m1-quiet-rtc-acm'
+RUNG9_FORM = ('console', 'cpu_boot_timeout_secs=360', 300, RUNG9_PROFILE)
+RUNG9_RAM_MIB = 6144            # the guest's RAM of the form: the proposal of docs/SP11-STICK-ROOT.md, which leaves 4,131 MiB of it free after the 1.86 GiB RAM disk
+ACK_FORMS = (RUNG5_FORM, RUNG6_FORM, RUNG7_FORM, RUNG8_FORM, RUNG9_FORM)
+FORM_PROFILE = {RUNG7_FORM: RUNG7_PROFILE, RUNG8_FORM: RUNG8_PROFILE, RUNG9_FORM: RUNG9_PROFILE}   # the guest profile of each form that carries one; every other form has the base board's
 LET_PANIC_FORMS_TEXT = (f'--panel {LET_PANIC_FORM[0]} --boot-arg {LET_PANIC_FORM[1]} --time-box-s {LET_PANIC_FORM[2]} (the plain monitor) or, with --cpu-start ack, '
                         + ' or '.join(f'--panel {form[0]} --boot-arg {form[1]} --time-box-s {form[2]}' + (f' --guest-profile {FORM_PROFILE[form]}' if form in FORM_PROFILE else '')
                                       for form in ACK_FORMS))

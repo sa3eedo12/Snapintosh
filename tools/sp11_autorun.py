@@ -37,9 +37,11 @@ the pinned Shell under QEMU (tools/test-sp11-autorun-qemu.py). On the unit's own
 `homefilesystem` variable, `echo`, `stall`, the redirect with its `if not exist` check, and the `load` and the run were
 OBSERVED once (2026-11-14, an operator's photograph); ESC at the countdown and a second boot are not yet.
 """
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
+import os
 import re
 import struct
 
@@ -102,6 +104,21 @@ MANIFEST_NAME = 'PAYLOAD.MAN'
 RETENTION_DATA_NAMES = (MANIFEST_NAME, RETENTION_PAYLOAD, RETENTION_CONFIG)
 MAX_PAYLOAD_FILES = 5           # slbounce takes eight declared ranges and the runner's own allocations use three
 DATA_MAX_BYTES = 256 << 20      # slbounce splits a declared range into at most 256 chunks of 1 MiB
+DATA_MAX_BYTES_BIG = 2 << 30    # the root-carry pair's limit (docs/SP11-STICK-ROOT.md: 256 operations of 8 MiB), reached only through `bigfile` or SP11_ROOT_BUILD=1
+if os.environ.get('SP11_ROOT_BUILD') == '1':        # the gate of tools/sp11_stick_bundle_root.py, for the command line too: the stager's verify of a tree that holds the 1.9 GB file
+    DATA_MAX_BYTES = DATA_MAX_BYTES_BIG
+
+
+@contextmanager
+def bigfile(on=True):
+    """Inside the block a data file may have the limit of the root-carry pair (`on`), and outside it the limit is what it was."""
+    global DATA_MAX_BYTES
+    held = DATA_MAX_BYTES
+    DATA_MAX_BYTES = DATA_MAX_BYTES_BIG if on else held
+    try:
+        yield
+    finally:
+        DATA_MAX_BYTES = held
 DATA_NAME_RE = re.compile(r'[A-Z0-9_-]{1,8}\.[A-Z0-9_-]{1,3}')    # capitals and 8.3, so no long-name alias is in question
 # Names under SP11\ that the tool or the base tree owns and that are not application names: a data file may not take them.
 RESERVED_DATA_NAMES = ('PLAN.TXT', 'README.TXT', 'STARTUP.NSH', 'SLTEST.EFI')

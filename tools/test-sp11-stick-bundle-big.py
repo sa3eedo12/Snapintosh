@@ -755,10 +755,11 @@ class Pair(unittest.TestCase):
 
     def test_the_root_carry_pair_is_not_the_pair_of_any_form_and_the_old_boxes_stay_refused(self):
         (monitor, reporter), = m1.ROOT_CARRY_PAIRS.items()
-        self.assertNotIn(monitor, [pair[0] for pair in m1.ACK_PAIRS.values()])
-        self.assertNotIn(reporter, [pair[1] for pair in m1.ACK_PAIRS.values()])
+        self.assertEqual([key for key, pair in m1.ACK_PAIRS.items() if pair[0] == monitor], [ch.RUNG9_PROFILE], 'rung 9 (K17) is the one form that has the root-carry pair')
+        self.assertEqual([key for key, pair in m1.ACK_PAIRS.items() if pair[1] == reporter], [ch.RUNG9_PROFILE])
         self.assertEqual((m1.box_cap(monitor), m1.box_cap(m1.ACK_MONITOR_SHA256), m1.BOX_MAX_S, root.BOX_MAX_S), (1200, 120, 120, 1200))
-        for key in m1.ACK_PAIRS:
+        self.assertIsNone(m1.check_pair_form('ack', ch.RUNG9_FORM[1], monitor, reporter, ch.RUNG9_PROFILE))
+        for key in (k for k in m1.ACK_PAIRS if k != ch.RUNG9_PROFILE):
             with self.subTest(key), self.assertRaises(ch.Refused) as caught:
                 m1.check_pair_form('ack', key if key.startswith('cpu_') else 'cpu_boot_timeout_secs=120', monitor, reporter, key if key.startswith('j700') else None)
             self.assertEqual(caught.exception.name, 'M1_REPORT_MISMATCH')
@@ -766,9 +767,10 @@ class Pair(unittest.TestCase):
             with self.subTest(box), self.assertRaises(ch.Refused) as caught:
                 m1.check_options(sb.STORE_ALL, False, box, 'console', 0, 'cpu_boot_timeout_secs=120', True, 'ack', ch.RUNG7_PROFILE)
             self.assertEqual(caught.exception.name, 'OPTIONS_BAD')
-        for form in ch.ACK_FORMS:
+        for form in ch.ACK_FORMS[:4]:
             self.assertFalse(ch.let_panic_form_ok(form[0], form[1], 300, 'ack', ch.FORM_PROFILE.get(form)))
-        self.assertEqual(sorted(ch.ACK_FORMS, key=lambda f: (f[2], len(f))), [ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM])
+        self.assertTrue(ch.let_panic_form_ok(*ch.RUNG9_FORM[:3], 'ack', ch.RUNG9_PROFILE), 'a box of 300 s is the form of rung 9 (K17) and of no other')
+        self.assertEqual(sorted(ch.ACK_FORMS, key=lambda f: (f[2], len(f))), [ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM, ch.RUNG9_FORM])
         import sp11_stick_wrapper_build as wb
         self.assertEqual((wb.ROOT_CARRY_BOX_MAX_S, wb.ROOT_CARRY_FILE_MAX), (m1.ROOT_CARRY_BOX_MAX_S, sb.FILE_MAX_BIG))
         self.assertEqual(wb.ROOT_CARRY_DEFINES, ('-DSNAP_SP11_STICK_ROOT_CARRY=1', '-DSP11_STICK_MONITOR_BOX_MAX_S=1200u'))

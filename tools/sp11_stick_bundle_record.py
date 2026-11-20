@@ -482,7 +482,7 @@ def record_text(r):
                 [f'4. Time box: {r["time_box_s"]} s of wall time on CNTPCT_EL0, carried in the PARAMS chunk (watchdog_seconds); the stop is the monitor\'s own.']), '',
               '5. Refusal and stop rules (docs/SP11-MONITOR-PORT.md section 14)',
               '   - A wrapper REFUSED line ends the boot: fix the cause, never retry the same bundle.',
-              *(m1g.PRE_CALL_SILENCE if m1 else ()),
+              *(pn.rungs.pre_call(r, m1g.PRE_CALL_SILENCE) if m1 else ()),
               *(m1_silence_rule(r['time_box_s'], *filter(None, [m1g.said(r.get('real'), 'silence_tail')])) if m1 else gq.silence_lines() if r.get('gic_quarantine') else (SILENCE_RULE,)),
               *(m1g.RESTART_AND_STAGE2_RULES if m1 else ('   - Two resets at the same last line stop the series; a touch outside RAM is a finding, not a retry.',)),
               *(m1g.HARDWARE_RULES if m1 else gq.HARDWARE_LINES if r.get('gic_quarantine') else (

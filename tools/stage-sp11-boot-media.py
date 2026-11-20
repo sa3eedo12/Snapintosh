@@ -44,6 +44,7 @@ _TOOLS = Path(__file__).resolve().parent
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 import sp11_autorun as autorun  # noqa: E402
+import sp11_stage_bigdata as bigdata  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PINS = ROOT / 'tools' / 'sp11-boot-media-pins.json'
@@ -131,7 +132,7 @@ SHA256_LINE_RE = re.compile(r'^([0-9a-f]{64})  (.+)$')
 
 
 def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+    return data.sha256 if isinstance(data, bigdata.BigData) else hashlib.sha256(data).hexdigest()
 
 
 def sha256_file(path: Path) -> str:
@@ -213,12 +214,7 @@ class Refusal(Exception):
 
 
 def read_regular_bytes(path: Path, expected, cap: int) -> bytes:
-    """Read `path` once through a descriptor that is checked after it is opened.
-
-    `expected` is the lstat() taken when the path was validated. The open refuses a symbolic link, and the
-    descriptor must still be that regular file at the same size, so a file replaced between the check and the
-    read cannot put other bytes behind the PE validation.
-    """
+    """Read `path` once through a descriptor checked after it is opened against `expected`, the lstat() of the path check: no link, the same regular file at the same size."""
     flags = (os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
              | getattr(os, 'O_CLOEXEC', 0))
     try:
@@ -267,6 +263,8 @@ def read_validated_input(path: Path, role: str):
         raise Refusal('input_empty_file', str(path))
     if st.st_size > cap:
         raise Refusal('input_too_large', f'{path}: {st.st_size} > {cap}')
+    if role == 'data' and st.st_size > bigdata.BIG_MIN:      # gate only (the cap above): hashed in blocks, never held
+        return bigdata.validate(path, st, Refusal)
     data = read_regular_bytes(path, st, cap)
     if role == 'data':      # a file an application reads: no image to check, only its size and hash
         return {'path': str(path), 'size': len(data), 'sha256': sha256_bytes(data)}, data
@@ -365,7 +363,7 @@ def check_destination_safety(dest: Path, must_exist: bool) -> Path:
 
 def write_file_deterministic(path: Path, data: bytes, mode: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
+    data.copy_to(path) if isinstance(data, bigdata.BigData) else path.write_bytes(data)
     os.chmod(path, mode)
     os.utime(path, (DETERMINISTIC_EPOCH, DETERMINISTIC_EPOCH))
 

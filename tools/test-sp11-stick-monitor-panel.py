@@ -145,9 +145,9 @@ def chunks_of(choice='handed', mutate=None, **over):
     got = {}
     real = pn.read_panel
 
-    def keep(chunks, lay, facts, choice, real_, *rest):
+    def keep(chunks, lay, facts, choice, real_, *rest, **kw):
         got.update(chunks=chunks, lay=lay, facts=facts, board=rest[0] if rest else None)
-        return real(chunks, lay, facts, choice, real_, *rest)
+        return real(chunks, lay, facts, choice, real_, *rest, **kw)
     with mock.patch.object(pn, 'read_panel', keep):
         code, text, err = record('chunks', choice, mutate, **over)
     assert code == 0, err

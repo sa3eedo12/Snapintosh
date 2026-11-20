@@ -46,6 +46,7 @@ import sp11_stick_bundle_panel as pn  # noqa: E402
 import sp11_stick_bundle_profile as gpb  # noqa: E402
 import sp11_stick_bundle_rung7 as r7b  # noqa: E402
 import sp11_stick_bundle_root as root  # noqa: E402
+import sp11_stick_bundle_rootbundle as rb  # noqa: E402
 from sp11_stick_bundle_build_opts import build_opts  # noqa: E402,F401  (the options moved there: this file's own size; tests and run() read them from here)
 
 Refused = ch.Refused
@@ -61,7 +62,7 @@ record_text, TOUCHES, GIC_STOP_TOUCHES = rec.record_text, rec.TOUCHES, rec.GIC_S
 TAGS = {'EL2_UNREACHABLE': 1, 'DEVICE_OWNED': 2, 'OPERATOR': 3}
 KIND_NAME = {v: k[12:] for k, v in sb.CONSTANTS.items() if k.startswith('SP11SB_KIND_') and k != 'SP11SB_KIND_MAX'}
 DUMMY = b'\x01' * 32        # a nonzero stand-in digest for the early checks, before GUEST.DAT exists
-AUTHORISATION_CAP = 11 << 14    # the approved record, as a file: 64 KiB, 128 KiB, 144 KiB, 160 KiB, now 176 KiB on purpose (K15: rung 7's record is about 170 KB); nothing was cut
+AUTHORISATION_CAP = 13 << 14    # the approved record, as a file: 64 KiB, 128 KiB, 144 KiB, 160 KiB, 176 KiB, now 208 KiB on purpose (K17: rung 9's record is about 195 KB); nothing was cut
 BUILDER_REFUSALS = (
     'FACTS_BAD', 'FACTS_DISAGREE', 'NO_DUMPS', 'DUMP_INCOMPLETE', 'FB_UNKNOWN', 'DESCRIPTOR_NOT_READY', 'AUTH_RECORD_MISMATCH', 'Q1N1_TREE_ABSENT',
     'STAGE_REFUSED', 'STAGE_VERIFY_FAILED', 'OUT_DIR_REFUSED', 'OUT_NOT_EMPTY', 'PAYLOAD_BAD', 'REPORT_NOT_ZERO', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING',
@@ -70,7 +71,8 @@ ch.KNOWN_REFUSALS.update(BUILDER_REFUSALS)
 
 
 def sha(data):
-    return hashlib.sha256(data).hexdigest()
+    """The hex SHA-256 of bytes, or of a VirtualGuest (the root form's GUEST.DAT, which is never held as bytes)."""
+    return data.sha256() if rb.is_virtual(data) else hashlib.sha256(data).hexdigest()
 
 
 def fmt(value):
@@ -529,6 +531,7 @@ def prepare(a, kind, before_filler=None):
         m1.check_boot_arg(boot_arg, getattr(a, 'panel', None), False)
         m1.check_let_panic(let_panic, getattr(a, 'panel', None), boot_arg, a.time_box_s, False)
     gpb.check_form(profile, boot_arg, let_panic, cpu_start, getattr(a, 'panel', None), m1_path is not None, a.time_box_s)      # a profile is rung 7's form's alone
+    rb.check_args(a, profile, kind)         # rung 9: the root's inputs, the gate and --bigfile; a root with any other profile, or the profile without one, is refused
     efi = m1.read_efi(getattr(a, 'm1_efi', []), getattr(a, 'file', []), m1_path is not None)
     choice = (getattr(a, 'panel', None) or 'withheld') if m1_path is not None else 'withheld'     # D9's choice, for this kind only: the other kinds are written for the first
     facts = dict(facts, build_label=m1.pinned_label(facts['build_label'], m1_path is not None, choice, boot_arg, let_panic, cpu_start, profile=profile))     # the marker of this kind, PIN.DAT's and the record's
@@ -558,20 +561,23 @@ def prepare(a, kind, before_filler=None):
         place_layout(xb, place)
         built = ch.synthetic_built(xb, int(a.image_mib * MIB), int(a.tables_mib * MIB), int(a.sptm_data_mib * MIB), a.seed, a.time_box_s)
     else:
-        built = real_built(a, xb, place, facts)
-        nodes = gpb.read_back(xb, built, profile)       # None for the default board; any other: the loader's tree less its pinned roots
+        if rb.is_form(a):
+            built, nodes = rb.guest(a, xb, place, facts, profile)
+        else:
+            built = real_built(a, xb, place, facts)
+            nodes = gpb.read_back(xb, built, profile)       # None for the default board; any other: the loader's tree less its pinned roots
         real = dict(kernelcache_sha256=sha(built['image'].data), guest_profile=built['guest_profile'], panel=a.panel, sptm_hvc_calls=a.sptm_hvc_calls, seed=a.seed,
                     **({'boot_arg': boot_arg} if boot_arg is not None else {}), **({'let_panic': True} if let_panic else {}))        # the report of every other build keeps its fields
     lay = ch.layout_of(xb)
     chunks = ch.chunks_from_built(built, lay)
-    guest = ch.guest_from_chunks(place, chunks)
+    guest = rb.guest_of(place, chunks)
     if sb.params_dest(guest) != lay.params_pa:
         raise Refused('BUILT_SHAPE', 'x3 of the monitor call, the PARAMS chunk destination, is not PARAMS_PA')
     ch.check_params(chunks, place, a.time_box_s)
     panel = None
     if m1_path is not None:
         m1.check_launch(chunks, xb.params_blob({**built, 'let_panic': False}) if let_panic else None)      # --let-panic: the PARAMS rung 3's guest has, for the read-back of the finished chunk
-        panel = pn.with_run(pn.read_panel(chunks, lay, facts, choice, kind == 'real', board, boot_arg, **({'let_panic': True} if let_panic else {})),
+        panel = pn.with_run(pn.read_panel(chunks, lay, facts, choice, kind == 'real', board, boot_arg, extra=rb.cmd_extra(profile), **({'let_panic': True} if let_panic else {})),
                             a.time_box_s, sha(monitor), sha(reporter))   # what the guest is given of the panel, from its bytes
     head, table = sb.unpack_guest(guest)
     if profile != gpb.DEFAULT:      # rung 7: the guest is compared with rung 6's and the comparison is what the record says it differs in
@@ -619,13 +625,22 @@ def put(out, rel, data):
     if out.resolve() not in path.resolve().parents:
         raise Refused('OUT_DIR_REFUSED', f'{rel} would be written outside the output directory')
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
+    if rb.is_virtual(data):
+        rb.write_checked(path, data)        # the root form's GUEST.DAT: streamed and read back, never held
+    else:
+        path.write_bytes(data)
     os.chmod(path, 0o644)
     os.utime(path, (0, 0))
 
 
 def stage_tree(a, out, p, files, manifest):
-    """The stage tree: --base-tree copied, then the stager's autorun of one step with the six data files; verified before and after."""
+    """The stage tree (stage_tree_in), with the stager's data limit at the 2 GiB of the pair when the guest is the root form's (tools/sp11_autorun.py bigfile)."""
+    with stager().autorun.bigfile(rb.is_virtual(files['GUEST.DAT'])):
+        return stage_tree_in(a, out, p, files, manifest)
+
+
+def stage_tree_in(a, out, p, files, manifest):
+    """The stage tree: --base-tree copied, then the stager's autorun of one step with the six data files, which build() has written under bundle/SP11; verified before and after."""
     st = stager()
     if not a.base_tree or sorted(n for n, _, _ in a.file) != sorted((RUNNER, SLBOUNCE)):
         raise Refused('OPTIONS_BAD', f'--base-tree needs exactly --file {SLBOUNCE} PATH SHA256 and --file {RUNNER} PATH SHA256')
@@ -643,8 +658,6 @@ def stage_tree(a, out, p, files, manifest):
         if (found := st.cmd_verify(argparse.Namespace(dest=dest, **pins)))['status'] != 'COMPLETE':
             raise Refused('STAGE_VERIFY_FAILED', f'the base tree is {found["status"]}: {found["manifest_mismatches"]}')
         data = [('PAYLOAD.MAN', manifest)] + [(n, files[n]) for n in NAMES]
-        for name, blob in data:
-            put(out, f'bundle/SP11/{name}', blob)
         done = st.cmd_autorun(argparse.Namespace(dest=dest, step=[STEP], name=a.plan_name or p['facts']['build_label'], clear=False, remove=False, **pins,
                                                  file=[list(f) for f in a.file], data=[[n, str(out / 'bundle/SP11' / n), sha(b)] for n, b in data]))
         found = st.cmd_verify(argparse.Namespace(dest=dest, **pins))
@@ -652,7 +665,7 @@ def stage_tree(a, out, p, files, manifest):
         raise Refused('STAGE_REFUSED', f'{error.reason}: {error.detail}') from None
     if found['status'] != 'COMPLETE':
         raise Refused('STAGE_VERIFY_FAILED', f'{found["status"]}: {found["manifest_mismatches"]} {found.get("autorun")}')
-    tree = {q.relative_to(dest).as_posix(): sha(q.read_bytes()) for q in sorted(dest.rglob('*')) if q.is_file()}
+    tree = {q.relative_to(dest).as_posix(): st.sha256_file(q) for q in sorted(dest.rglob('*')) if q.is_file()}
     put(out, 'STICK-FILES.TXT', ''.join(f'{digest}  {rel}\n' for rel, digest in sorted(tree.items())).encode('ascii'))
     return dict(status=found['status'], shell_pin=found['shell_pin'], files_written=done['files_written'], tree=tree)
 

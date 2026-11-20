@@ -301,12 +301,12 @@ class Anchors(unittest.TestCase):
         self.assertEqual(pn.kind_key({'panel': 'console', 'boot_arg': F, 'let_panic': True}), f'console+{F}+let_panic', 'rung 5\'s key is what it was')
         self.assertIn(key, m1g.PANEL)
         self.assertEqual([pn._rung(panel), pn._rung({k: v for k, v in panel.items() if k != 'profile'}), pn._rung({**panel, 'boot_arg': M7.W90, 'profile': None})], [r7, r5, r6])
-        self.assertEqual((r7.NUMBER, pn.ACK), (7, (r5, r6, r7, pn.ACK[3])))
+        self.assertEqual((r7.NUMBER, pn.ACK), (7, (r5, r6, r7, pn.ACK[3], pn.ACK[4])))
         self.assertEqual(pn.ACK[3].NUMBER, 8, 'rung 8 (K16) is the fourth of the acknowledging monitor\'s records')
         self.assertIn('counts as a result of rung 7.', flat(STATE['r7']))
         new = {'stand', 'why', 'decides', 'hazard', 'rung', 'step4', 'page', 'idle', 'gic_idle', 'box_decision', 'd8_decision', 'decided', 'fault_seen', 'stop_seen', 'console', 'ran'}
         self.assertTrue(new <= set(m1g.PANEL[key]))
-        self.assertEqual(sorted(k for k in m1g.PANEL if 'let_panic' in k), sorted([f'console+{F}+let_panic', f'console+{M7.W90}+let_panic', 'console+cpus=1+let_panic', key, f'{key}-rtc']))
+        self.assertEqual(sorted(k for k in m1g.PANEL if 'let_panic' in k), sorted([f'console+{F}+let_panic', f'console+{M7.W90}+let_panic', 'console+cpus=1+let_panic', key, f'{key}-rtc', 'console+cpu_boot_timeout_secs=360+let_panic+j700ap-26A428-m1-quiet-rtc-acm']))
 
     def test_the_older_records_say_nothing_of_rung_7_the_quiet_profile_or_the_scaler_decode(self):
         for name in ('r5-60', 'r6-120'):

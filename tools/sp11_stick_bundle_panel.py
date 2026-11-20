@@ -29,7 +29,7 @@ import sp11_stick_bundle_panel_panic as rp  # noqa: E402
 import sp11_stick_bundle_panel_rung5 as r5  # noqa: E402
 import sp11_stick_bundle_panel_rung6 as r6  # noqa: E402
 import sp11_stick_bundle_panel_rungs as rungs  # noqa: E402
-ACK = rungs.ACK                     # the rungs of the acknowledging monitor (K13 to K16)
+ACK = rungs.ACK                     # the rungs of the acknowledging monitor (K13 to K17)
 REFUSALS = ('PANEL_MISMATCH',)      # beside m1.REFUSALS: docs/SP11-STICK-MONITOR.md section 20 lists it
 ch.KNOWN_REFUSALS.update(REFUSALS)
 Refused = ch.Refused
@@ -199,7 +199,7 @@ GUIDE_WORDS = {
         decides=r3.DECIDES, hazard=r3.hazard, step7=r2.step7_console, rung=r3.RUNG, why=r3.why_lines, stand=r3.stand_extra, film=r2.FILM_STEP, also_reads=('5d',), evidence_to='3c',
         stand_head=r3.STAND_HEAD, stand_loop=r3.STAND_LOOP, stand_stick=False,
         console=r3.CONSOLE, ran=r3.RAN, stop_seen=r3.STOP_SEEN, fault_seen=r3.FAULT_SEEN, film_until=r3.film_until, **{**r2.SHARED_WORDS, 'step4': r3.step4, 'step6': r3.STEP6, 'row_e': r3.row_e})}
-rungs.extend(GUIDE_WORDS)      # rungs 4 to 8 (K12 to K16): the entries with a let_panic word, each from the one before
+rungs.extend(GUIDE_WORDS)      # rungs 4 to 9 (K12 to K17): the let_panic entries, each from the one before
 
 
 def reading_lines(panel):
@@ -242,12 +242,12 @@ def bytes_at(chunks, pa, size):
     return None
 
 
-def read_panel(chunks, lay, facts, choice, real, board=None, boot_arg=None, let_panic=False):
+def read_panel(chunks, lay, facts, choice, real, board=None, boot_arg=None, let_panic=False, extra=''):
     """What the guest of the built `chunks` is given of the panel, from its bytes: None for a guest with none, else the dict that the text below is made from.
     PANEL_MISMATCH when it is not what `choice` (withheld, handed or console) says it is: the PARAMS words, boot_args.Video and the command line each must be the
     choice's, and for the console with `boot_arg` (a word of m1.BOOT_ARGS) the line with that word after it and no other. PARAMS is read for every guest of this kind; boot_args only for `real` (the synthetic guest's boot_args is filler). `facts` are the builder's (the
     GOP, PIN.DAT's fb_*), `board` the descriptor that the build used. `let_panic` (--let-panic) is only said in the dict that it returns: the PARAMS word itself is held by m1.check_launch."""
-    wanted_line = command_line(choice, boot_arg)
+    wanted_line = command_line(choice, boot_arg) + extra       # `extra`: what the loader appends after the word (rung 9: the credential manager's argument)
     handed, say = choice in GIVEN_THE_PANEL, SAYS[choice] + (f' and the word {boot_arg} in its command line' if boot_arg else '')
     params = [c for c in chunks if c['kind'] == sb.KIND_PARAMS]
     data = params[0].get('data') if len(params) == 1 else None
@@ -291,9 +291,9 @@ def placement_line(panel):
 
 
 def time_rows(panel):
-    """The row that section 4's table adds, after the monitor's prepare: the monitor reads the range twice (section 3c). For rung 3 boot 21 ran it, inside its call of 2.044 s."""
+    """The rows that section 4's table adds, after the monitor's prepare: the monitor reads the range twice (section 3c); rung 9 adds the runner's read (rungs.carry_rows)."""
     reads = r3.READS_ROW if panel.get('boot_arg') else 'UNKNOWN  never run here: in the prepare, and at the stop'
-    return [f'      {"framebuffer: two reads of the panel":<41}{reads}']
+    return [f'      {"framebuffer: two reads of the panel":<41}{reads}', *rungs.carry_rows(panel)]
 
 
 # The sum of section 4 cannot count the two reads, and the exposure of D8 is CPU time too: each says so on a line of its own, where the first run's text has no room.

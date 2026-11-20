@@ -62,9 +62,11 @@ PROFILE_SETS = {P + 'quiet': ('accel', 'audio'), P + 'quiet-aop': ('accel', 'aud
                 P + 'quiet-ave': ('accel', 'audio', 'ave'), P + 'quiet-clpc': ('accel', 'audio', 'clpc'), P + 'quiet-usb': ('accel', 'audio', 'usb'),
                 P + 'quiet-smc': ('accel', 'audio', 'aop', 'dcpext', 'dcp', 'smcbtm'), P + 'all-quiet': ('accel', 'audio', 'aop', 'dcpext', 'dcp', 'ave', 'smcbtm')}
 MARKS = {BASE: '', P + 'quiet': 'Q-', P + 'quiet-aop': 'A-', P + 'quiet-dcp': 'D-', P + 'quiet-ave': 'V-', P + 'quiet-clpc': 'C-', P + 'quiet-usb': 'U-', P + 'quiet-smc': 'S-',
-         P + 'all-quiet': 'X-', P + 'quiet-rtc': 'R-'}
+         P + 'all-quiet': 'X-', P + 'quiet-rtc': 'R-', P + 'quiet-rtc-acm': 'M-'}
 # The profiles that bind the PMU's real-time clock and the sets they withdraw (tools/test-sp11-m1-rtc-profile.py has their guests).
 RTC_SETS = {P + 'quiet-rtc': ('accel', 'audio')}
+# The profile of the root-mount form (K17): the clock profile's sets and the credential manager's software mode (tools/test-sp11-stick-monitor-rung9.py has its form).
+ROOT_SETS = {P + 'quiet-rtc-acm': ('accel', 'audio')}
 # The nodes of the published tree: the base board's 395 less the nodes under the roots that a profile adds (each count is a host run of the loader on the J700 26A428 kernelcache).
 AFTER = {BASE: 395, P + 'quiet': 352, P + 'quiet-aop': 337, P + 'quiet-dcp': 341, P + 'quiet-ave': 350, P + 'quiet-clpc': 351, P + 'quiet-usb': 345, P + 'quiet-smc': 313,
          P + 'all-quiet': 311}
@@ -226,8 +228,8 @@ class Sets(unittest.TestCase):
 
     def test_the_registry_holds_the_menu_beside_every_earlier_name_and_the_base_entry_is_untouched(self):
         self.assertTrue(set(EARLIER_NAMES) <= set(gp.PROFILES), 'the registration of an earlier profile was lost or renamed')
-        self.assertTrue(set(PROFILE_SETS) | set(RTC_SETS) <= set(gp.PROFILES))
-        self.assertEqual(sorted(n for n in gp.PROFILES if n.startswith(P)), sorted({*PROFILE_SETS, *RTC_SETS}))
+        self.assertTrue(set(PROFILE_SETS) | set(RTC_SETS) | set(ROOT_SETS) <= set(gp.PROFILES))
+        self.assertEqual(sorted(n for n in gp.PROFILES if n.startswith(P)), sorted({*PROFILE_SETS, *RTC_SETS, *ROOT_SETS}))
         self.assertTrue(all(gp.PROFILES[n].name == n for n in gp.PROFILES))
         self.assertIs(gp.get_profile(BASE), gp.J700_26A428)
         self.assertEqual(gp.J700_26A428.deferred_functions[0].node, A + 'pmgr/clpc', 'the base board declares the one function that the clpc set drops')
@@ -269,6 +271,20 @@ class Sets(unittest.TestCase):
             menu.sets_of(dataclasses.replace(gp.get_profile(P + 'quiet'), boot_mpidr=0x123))
         self.assertEqual(caught.exception.kind, 'shape')
 
+    def test_the_credential_layer_is_one_data_flag_on_the_clock_profile_and_a_profile_that_is_more_than_the_layer_is_a_shape_error(self):
+        rtc, acm = gp.get_profile(P + 'quiet-rtc'), gp.get_profile(P + 'quiet-rtc-acm')
+        self.assertEqual({f.name for f in dataclasses.fields(acm) if getattr(acm, f.name) != getattr(rtc, f.name)}, {'name', 'acm_software_mode'}, 'the layer is that one field and nothing else')
+        self.assertEqual((menu.sets_of(acm), menu.acm_of(acm), menu.acm_of(rtc), menu.rtc_of(acm), menu.binds_clock(acm.name), menu.binds_clock(rtc.name)),
+                         (('accel', 'audio'), True, False, True, True, True))
+        self.assertEqual(menu.compose(acm.name, ('audio', 'accel'), rtc=True, acm=True), acm)
+        self.assertFalse(any(menu.acm_of(gp.get_profile(n)) for n in (*PROFILE_SETS, *RTC_SETS, BASE)), 'no other profile of the menu has the layer')
+        for what, seeded in (('the SEP reply transport as well', dataclasses.replace(acm, sep_asc=dataclasses.replace(acm.sep_asc, reply_transport=True))),
+                             ('another field', dataclasses.replace(acm, boot_mpidr=0x123)),
+                             ('a root withdrawn that is no set', dataclasses.replace(acm, deferred_subtrees=acm.deferred_subtrees[:-1]))):
+            with self.subTest(what), self.assertRaises(menu.MenuError) as caught:
+                menu.sets_of(seeded)
+            self.assertIn(caught.exception.kind, ('shape', 'split'), what)
+
     def test_the_clpc_set_drops_the_base_boards_declaration_that_sits_on_its_root(self):
         clpc = gp.get_profile(P + 'quiet-clpc')
         self.assertEqual(clpc.deferred_functions, ())
@@ -290,7 +306,7 @@ class Sets(unittest.TestCase):
 # ---- The closed list, the refusals and the labels: no Apple input ------------------------------------------------------------------------------
 class Closed(unittest.TestCase):
     def test_the_list_is_the_base_board_the_eight_and_the_clock_profile_and_nothing_else_is_refused_by_name(self):
-        self.assertEqual(gpb.NAMES, (BASE, *PROFILE_SETS, *RTC_SETS))
+        self.assertEqual(gpb.NAMES, (BASE, *PROFILE_SETS, *RTC_SETS, *ROOT_SETS))
         self.assertEqual(gpb.DEFAULT, BASE)
         self.assertEqual(gpb.DEFAULT, ch.GUEST_PROFILE_DEFAULT)
         self.assertEqual(gpb.resolve(ns()), BASE, 'absent is the default')
@@ -333,7 +349,7 @@ class Closed(unittest.TestCase):
 
     def test_every_profile_has_a_mark_of_two_characters_that_no_other_marker_starts_with(self):
         self.assertEqual(gpb.MARKS, MARKS)
-        self.assertEqual(len({*MARKS.values()}), 10)
+        self.assertEqual(len({*MARKS.values()}), 11)
         markers = [*m1.PANEL_MARKS.values(), *m1.BOOT_ARGS.values(), m1.LET_PANIC_MARK]
         for name, mark in MARKS.items():
             self.assertEqual(len(mark), 0 if name == BASE else gpb.MARK_CHARS)

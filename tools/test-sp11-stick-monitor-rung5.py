@@ -125,9 +125,9 @@ class Options(unittest.TestCase):
 
     def test_the_acknowledging_monitor_has_two_records_and_every_other_combination_is_a_named_refusal(self):
         self.assertEqual((ch.RUNG5_FORM, m1.RUNG5_FORM, m1.RUNG5_BOX_MAX_S, m1.DECIDED_BOX_S), (('console', F, 60), ('console', F, 60), 60, 5))
-        self.assertEqual((m1.BOOT_ARG_CPU_START, m1.CPU_STARTS), ({P: 'stop', F: 'ack', W90: 'ack'}, ('stop', 'ack')))
-        self.assertEqual((REAL_FORMS, ch.ACK_FORMS, m1.ACK_FORMS), ((('console', F, 60), ('console', W90, 120), ('console', F, 120), ('console', F, 120, ch.RUNG8_PROFILE)),) * 3,
-                         'the closed list: exactly these four forms (rung 8 is rung 7\'s box and word with a profile of its own)')
+        self.assertEqual((m1.BOOT_ARG_CPU_START, m1.CPU_STARTS), ({P: 'stop', F: 'ack', W90: 'ack', 'cpu_boot_timeout_secs=360': 'ack'}, ('stop', 'ack')))
+        self.assertEqual((REAL_FORMS, ch.ACK_FORMS, m1.ACK_FORMS), ((('console', F, 60), ('console', W90, 120), ('console', F, 120), ('console', F, 120, ch.RUNG8_PROFILE), ch.RUNG9_FORM),) * 3,
+                         'the closed list: exactly these five forms (rung 8 is rung 7\'s box and word with a profile of its own, rung 9 the root form of K17)')
         for word, box in ((F, 60), (W90, 120)):
             m1.check_options(7, False, box, 'console', 0, word, True, 'ack')
         m1.check_options(7, False, 5, 'console', 0, P, True, 'stop')        # rung 4's form is what it was
@@ -212,7 +212,7 @@ class Label(unittest.TestCase):
         with self.assertRaises(ch.Refused) as caught:
             m1.pinned_label('x' * 9, True, 'console', F, True, 'ack')
         self.assertEqual(caught.exception.name, 'PIN_STRING')
-        self.assertEqual(sorted(m1.BOOT_ARGS.values()), ['ACKPANIC-', 'ACKPANIC-', 'CPUS1-'], 'the two acknowledging records share the marker, and the facts label (RUNG5, RUNG6) tells them apart')
+        self.assertEqual(sorted(m1.BOOT_ARGS.values()), ['ACKPANIC-', 'ACKPANIC-', 'ACKPANIC-', 'CPUS1-'], 'the acknowledging records share the marker (three words), and the facts label (RUNG5, RUNG6, RUNG9) and the profile mark tell them apart')
         marks = [m for m in m1.PANEL_MARKS.values() if m] + sorted(set(m1.BOOT_ARGS.values())) + [m1.LET_PANIC_MARK]
         self.assertEqual(len(marks), len(set(marks)))
         self.assertFalse([a for a in marks for b in marks if a != b and a.startswith(b)], 'no marker is the start of another: one label, one kind of record')
@@ -281,7 +281,8 @@ class Reader(unittest.TestCase):
         self.assertTrue(panel['let_panic'] and panel['boot_arg'] == F)
         self.assertEqual([pn._rung(panel), pn._rung({**panel, 'boot_arg': P}), pn._rung({**panel, 'boot_arg': P, 'let_panic': False})], [r5, rp, r3])
         self.assertEqual(sorted(k for k in m1g.PANEL if 'let_panic' in k), ['console+cpu_boot_timeout_secs=120+let_panic', 'console+cpu_boot_timeout_secs=120+let_panic+j700ap-26A428-m1-quiet',
-                                                                          'console+cpu_boot_timeout_secs=120+let_panic+j700ap-26A428-m1-quiet-rtc', 'console+cpu_boot_timeout_secs=90+let_panic',
+                                                                          'console+cpu_boot_timeout_secs=120+let_panic+j700ap-26A428-m1-quiet-rtc', 'console+cpu_boot_timeout_secs=360+let_panic+j700ap-26A428-m1-quiet-rtc-acm',
+                                                                          'console+cpu_boot_timeout_secs=90+let_panic',
                                                                           'console+cpus=1+let_panic'])
 
 

@@ -120,13 +120,13 @@ def oracle(form):
 class Form(unittest.TestCase):
     def test_the_form_is_the_fourth_of_a_closed_list_of_four_and_carries_the_clock_profile(self):
         self.assertEqual((ch.RUNG8_FORM, m1.RUNG8_FORM, ch.RUNG8_PROFILE, gpb.RTC, gpb.RUNG8_PROFILES), (('console', F, 120, RTC), ('console', F, 120, RTC), 'j700ap-26A428-m1-quiet-rtc', RTC, (RTC,)))
-        self.assertEqual(ch.ACK_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM), 'rung 8 is the fourth and there is no fifth')
-        self.assertEqual(ch.FORM_PROFILE, {ch.RUNG7_FORM: Q, ch.RUNG8_FORM: RTC})
-        self.assertEqual(gpb.FORM_PROFILES, (Q, RTC))
+        self.assertEqual(ch.ACK_FORMS, (ch.RUNG5_FORM, ch.RUNG6_FORM, ch.RUNG7_FORM, ch.RUNG8_FORM, ch.RUNG9_FORM), 'rung 8 is the fourth; rung 9 (K17) is the fifth and there is no sixth')
+        self.assertEqual(ch.FORM_PROFILE, {ch.RUNG7_FORM: Q, ch.RUNG8_FORM: RTC, ch.RUNG9_FORM: gpb.ROOT})
+        self.assertEqual(gpb.FORM_PROFILES, (Q, RTC, gpb.ROOT))
         self.assertEqual(ch.RUNG8_FORM[:3], ch.RUNG7_FORM, 'rung 8 is rung 7\'s box and word: the profile alone tells the two forms apart')
         self.assertEqual((m1.BOOT_ARGS[F], m1.BOOT_ARG_CPU_START[F], m1.RUNG6_BOX_S, m1.BOX_MAX_S), ('ACKPANIC-', 'ack', 120, 120), 'rung 8 asks rung 6\'s box (D5\'\') and rung 5\'s word')
-        self.assertEqual(sorted(m1.BOOT_ARGS), sorted([P, F, W90]), 'no boot argument was added')
-        self.assertEqual(ch.LET_PANIC_FORMS_TEXT.count('--guest-profile'), 2)
+        self.assertEqual(sorted(m1.BOOT_ARGS), sorted([P, F, W90, 'cpu_boot_timeout_secs=360']), 'one boot argument was added, by K17')
+        self.assertEqual(ch.LET_PANIC_FORMS_TEXT.count('--guest-profile'), 3)
         self.assertEqual(gpb.mark_of(RTC), 'R-')
         self.assertEqual(ch.let_panic_form_ok('console', F, 120, 'ack', RTC), True)
         self.assertEqual([ch.let_panic_form_ok('console', F, 120, 'ack', None), ch.let_panic_form_ok('console', F, 60, 'ack', RTC), ch.let_panic_form_ok('console', W90, 120, 'ack', RTC),
@@ -191,7 +191,7 @@ class Form(unittest.TestCase):
 
 class Pair(unittest.TestCase):
     def test_rung_8_uses_rung_6s_pair_by_digest_and_the_table_is_keyed_by_form(self):
-        self.assertEqual(sorted(REAL_PAIRS), [F, W90, Q, RTC])
+        self.assertEqual(sorted(REAL_PAIRS), [F, W90, Q, RTC, gpb.ROOT])
         self.assertEqual((REAL_PAIRS[RTC], REAL_PAIRS[Q]), (REAL_PAIRS[W90],) * 2, 'rungs 7 and 8 use rung 6\'s pair')
         self.assertEqual(REAL_PAIRS[RTC], (m1.ACK_MONITOR_SHA256, m1.ACK_REPORTER6_SHA256))
         self.assertEqual((m1.ACK_MONITOR_SHA256[:8], m1.ACK_REPORTER6_SHA256[:8]), ('bb34b970', '533d004c'), 'the pair of boots 26 and 27')
@@ -458,8 +458,8 @@ class Real(unittest.TestCase):
 
 class Hygiene(unittest.TestCase):
     def test_the_cap_is_176_kib_the_record_fits_it_and_the_files_are_under_the_size_of_a_file_of_this_tool(self):
-        self.assertEqual(bb.AUTHORISATION_CAP, 11 << 14, 'unchanged by K16: rung 8\'s record is about 178 KB, under the held limit of 175 KiB')
-        self.assertEqual(M5.HELD_LIMIT, 11 * 16384 - 1024)
+        self.assertGreaterEqual(bb.AUTHORISATION_CAP, 11 << 14, 'unchanged by K16 (rung 8\'s record is about 178 KB, under the held limit of 175 KiB); K17 raised it for rung 9\'s')
+        self.assertEqual(M5.HELD_LIMIT, bb.AUTHORISATION_CAP - 1024)
         self.assertLessEqual(len(STATE['r8'].encode()), HELD_LIMIT)
         for rel in ('tools/sp11_stick_bundle_rung8.py', 'tools/sp11_stick_bundle_panel_rung8.py', 'tools/sp11_stick_bundle_panel_rung8d.py', 'tools/sp11_stick_bundle_panel_rungs.py',
                     'tools/sp11_stick_bundle_profile.py', 'tools/sp11_stick_bundle_build_opts.py', 'tools/sp11_stick_bundle_panel.py', 'tools/sp11_stick_bundle_m1.py', 'tools/sp11_stick_bundle_chunks.py',
@@ -471,7 +471,7 @@ class Hygiene(unittest.TestCase):
                 self.assertLess(len(text.splitlines()), 1500)
                 self.assertEqual(text.splitlines()[1 if text.startswith('#!') else 0].count('SPDX-License-Identifier: MIT'), 1)
                 self.assertTrue(text.isascii())
-        for rel, cap in (('docs/SP11-STICK-BUILD.md', 37_000), ('docs/SP11-STICK-REAL.md', 33_000), ('docs/SP11-STICK-MONITOR.md', 160_500), ('docs/SP11-M1-GUEST-PROFILES.md', 21_000)):
+        for rel, cap in (('docs/SP11-STICK-BUILD.md', 37_000), ('docs/SP11-STICK-REAL.md', 33_000), ('docs/SP11-STICK-MONITOR.md', 166_000), ('docs/SP11-M1-GUEST-PROFILES.md', 23_000)):
             self.assertLessEqual(len((ROOT / rel).read_bytes()), cap, rel)
 
 

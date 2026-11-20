@@ -244,7 +244,7 @@ class Options(unittest.TestCase):
         return caught.exception
 
     def test_the_list_has_two_words_for_the_panel_as_the_console_and_nothing_else_is_passed_on(self):
-        self.assertEqual((m1.BOOT_ARGS, m1.BOOT_ARG_PANEL), ({'cpus=1': 'CPUS1-', 'cpu_boot_timeout_secs=120': 'ACKPANIC-', 'cpu_boot_timeout_secs=90': 'ACKPANIC-'}, 'console'))
+        self.assertEqual((m1.BOOT_ARGS, m1.BOOT_ARG_PANEL), ({'cpus=1': 'CPUS1-', 'cpu_boot_timeout_secs=120': 'ACKPANIC-', 'cpu_boot_timeout_secs=90': 'ACKPANIC-', 'cpu_boot_timeout_secs=360': 'ACKPANIC-'}, 'console'))
         m1.check_options(7, False, 5, 'console', 0, 'cpus=1')
         m1.check_options(7, False, 5, 'console', 0, None)
         for word in ('cpus=2', 'cpus=0', 'cpus=1 ', ' cpus=1', 'CPUS=1', 'cpus=01', 'cpus==1', 'cpus=1;', 'cpus=1\n', 'cpumask=1', 'maxcpus=1', '', 'cpus=1 cpumask=1', 'cpus=1 serial=3',
@@ -498,7 +498,7 @@ class Words(unittest.TestCase):
         self.assertEqual(r3.WINDOW, 'A= in 0X300734004..0X30073400C')
         self.assertEqual(r3.LINE, pn.command_line('console', 'cpus=1'))
         self.assertEqual(r3.WORD, 'cpus=1')
-        self.assertEqual(sorted(m1.BOOT_ARGS), ['cpu_boot_timeout_secs=120', 'cpu_boot_timeout_secs=90', r3.WORD])
+        self.assertEqual(sorted(m1.BOOT_ARGS), ['cpu_boot_timeout_secs=120', 'cpu_boot_timeout_secs=360', 'cpu_boot_timeout_secs=90', r3.WORD])
         esr = r3.BOOT21_STOP['b']          # the decode of the film's reader: EC 0x24, ISV, word, SRT 23, WnR, DFSC 0x05
         self.assertEqual((esr >> 26, (esr >> 24) & 1, (esr >> 22) & 3, (esr >> 16) & 0x1F, (esr >> 6) & 1, esr & 0x3F), (0x24, 1, 2, 23, 1, 5))
 

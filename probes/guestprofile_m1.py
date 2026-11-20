@@ -5,7 +5,7 @@ The M1 monitor backs 120 device models and no more of the J700 tree. A kernel th
 used a catch-all: it WITHDREW the nodes that nothing backs (probes/deferred.py) and the kernel never attaches to them. Each ROOT SET below is one tuple of such
 roots, with the function declarations that go with them; a profile of the MENU is the base board j700ap-26A428 plus a fixed union of whole sets. A profile is a virtual
 board description: it changes the device tree and, with it, the one boot_args word that holds the tree's length. No device model, PARAMS word or monitor byte
-changes (tools/test-sp11-m1-guest-profile.py, with the kernelcache), except in a profile of RTC_MENU, which binds the PMU's real-time clock. Nothing here says that a
+changes (tools/test-sp11-m1-guest-profile.py, with the kernelcache), except in a profile of RTC_MENU or ROOT_MENU, which bind the PMU's real-time clock (ROOT_MENU's also selects the credential manager's software mode). Nothing here says that a
 withdrawn device is unneeded on the SP11: the A16 evidence for a root is a comment of the A16 chain, which is INFERRED for this unit.
 
 The clock binding (RTC_MENU) is the A16 chain's own (-bootfb-rtc): the SPMI controller model of nub-spmi0 serves the PMU's counter and its two offset fields instead of an
@@ -119,9 +119,9 @@ def bind_rtc(profile):
     return replace(profile, spmi_boot=tuple(replace(spec, rtc=True) if spec.node == RTC_NODE else spec for spec in profile.spmi_boot))
 
 
-def compose(name, chosen, base=BASE, rtc=False):
-    """`base` plus the whole sets `chosen`, in canonical order whatever the order given, with the clock bound when `rtc`. MenuError 'unknown' for a name that is no set and 'needs' for
-    a set whose needs are not all chosen."""
+def compose(name, chosen, base=BASE, rtc=False, acm=False):
+    """`base` plus the whole sets `chosen`, in canonical order whatever the order given, with the clock bound when `rtc` and the credential manager's software mode when `acm`. MenuError
+    'unknown' for a name that is no set and 'needs' for a set whose needs are not all chosen."""
     chosen = set(chosen)
     if missing := sorted(chosen - set(ORDER)):
         raise MenuError('unknown', f'no root set {missing[0]!r}')
@@ -135,12 +135,19 @@ def compose(name, chosen, base=BASE, rtc=False):
         raise MenuError('shape', 'a root set drops a declaration that the base board does not make')
     composed = replace(base, name=name, deferred_subtrees=base.deferred_subtrees + tuple(r for n in order for r in ROOT_SETS[n].roots),
                        deferred_functions=kept + tuple(f for n in order for f in ROOT_SETS[n].functions))
-    return bind_rtc(composed) if rtc else composed
+    composed = bind_rtc(composed) if rtc else composed
+    return replace(composed, acm_software_mode=True) if acm else composed
 
 
 def rtc_of(profile, base=BASE):
     """True when `profile` binds the clock, that is, when its boot specs are not the base board's. Whether they are exactly the binding of bind_rtc is sets_of's check."""
     return profile.spmi_boot != base.spmi_boot
+
+
+def acm_of(profile, base=BASE):
+    """True when `profile` selects the credential manager's software mode (the boot argument acm_fastsim=1, which the loader adds only for a RAM-disk root: probes/xnuboot.py build() and
+    probes/credential.py software_cmdline). It is the one field of the menu that is neither a root set nor the clock; whether the profile is exactly base plus this flag is sets_of's check."""
+    return profile.acm_software_mode != base.acm_software_mode
 
 
 def sets_of(profile, base=BASE):
@@ -157,8 +164,9 @@ def sets_of(profile, base=BASE):
             chosen.append(name)
         elif len(absent) < len(s.roots) + len(s.functions):
             raise MenuError('split', f'root set {name} is only partly withdrawn: {absent[0]}{" and others" if len(absent) > 1 else ""} stay{"s" if len(absent) == 1 else ""} published')
-    if profile != compose(profile.name, chosen, base, rtc=rtc_of(profile, base)):
-        raise MenuError('shape', f'{profile.name} is not {base.name} and the whole root sets {", ".join(chosen) or "(none)"}{" with the clock bound at " + RTC_NODE if rtc_of(profile, base) else ""}')
+    if profile != compose(profile.name, chosen, base, rtc=rtc_of(profile, base), acm=acm_of(profile, base)):
+        raise MenuError('shape', f'{profile.name} is not {base.name} and the whole root sets {", ".join(chosen) or "(none)"}{" with the clock bound at " + RTC_NODE if rtc_of(profile, base) else ""}'
+                                 f'{" and the credential manager in software mode" if acm_of(profile, base) else ""}')
     return tuple(chosen)
 
 
@@ -179,24 +187,36 @@ RTC_MENU = {
 }
 MENU_PROFILES = {name: compose(name, sets) for name, sets in MENU.items()}
 RTC_PROFILES = {name: compose(name, sets, rtc=True) for name, sets in RTC_MENU.items()}
+# The profile of the root mount (rung 9): quiet with the clock bound as in RTC_MENU and the credential manager's software mode. The mode changes no node and no model; it adds the boot
+# argument acm_fastsim=1, and only when the loader builds a RAM-disk root (probes/xnuboot.py), so a build of this profile without a root has no effect of it and the stick builder refuses one
+# (tools/sp11_stick_bundle_profile.py). Whether the mount needs it is UNKNOWN: the A16 route added it with its first RAM root, and the stock kernel's credential manager reads that argument
+# together with sepfw-load-at-boot, which the RAM-root data sets to 0 (docs/SP11-M1-GUEST-PROFILES.md section 8).
+ROOT_MENU = {
+    PREFIX + 'quiet-rtc-acm': ('accel', 'audio'),
+}
+ROOT_PROFILES = {name: compose(name, sets, rtc=True, acm=True) for name, sets in ROOT_MENU.items()}
 
+
+def binds_clock(name):
+    """True for a profile that holds the clock model, which the loader builds unseeded and `seeded` seeds: RTC_MENU and ROOT_MENU, and no other."""
+    return name in RTC_MENU or name in ROOT_MENU
 
 def seed(models):
     """`models` (a loader's device_models) with the one clock model seeded at RTC_EPOCH_US. ValueError, from probes/devicemodel.py seed_rtc_models, unless exactly one unseeded
-    clock model is in them: a profile of RTC_MENU has one and any other has none."""
+    clock model is in them: a profile of RTC_MENU or ROOT_MENU has one and any other has none."""
     return devicemodel.seed_rtc_models(models, RTC_EPOCH_US)
 
 
 def seeded(models):
-    """`models` as they go into PARAMS: seeded at RTC_EPOCH_US when they hold a clock model (a profile of RTC_MENU) and the same object when they do not, so that every other
+    """`models` as they go into PARAMS: seeded at RTC_EPOCH_US when they hold a clock model (a profile of RTC_MENU or ROOT_MENU) and the same object when they do not, so that every other
     guest is byte for byte what it was."""
     return seed(models) if any(m.kind == devicemodel.SPMI_PMU_RTC_V1 for m in models) else models
 
 
 def register():
-    """Add the profiles of the menu and of RTC_MENU to guestprofile.PROFILES, where the loader's configure_guest finds them; returns them. Idempotent. Only the M1 stick builder calls it
+    """Add the profiles of the menu, of RTC_MENU and of ROOT_MENU to guestprofile.PROFILES, where the loader's configure_guest finds them; returns them. Idempotent. Only the M1 stick builder calls it
     (tools/sp11_stick_bundle_profile.py): probes/guestprofile.py does not import this file, so the A16 route, whose tools copy and hash that file alone, never sees the menu."""
-    registered = {**MENU_PROFILES, **RTC_PROFILES}
+    registered = {**MENU_PROFILES, **RTC_PROFILES, **ROOT_PROFILES}
     for name, profile in registered.items():
         if gp.PROFILES.setdefault(name, profile) is not profile:
             raise RuntimeError(f'{name} is registered with another profile')

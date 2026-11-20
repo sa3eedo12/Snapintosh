@@ -44,8 +44,11 @@ def build_opts(p, kind, template=False):
     else:
         p.add_argument('--kernelcache', required=True)
         p.add_argument('--guest-profile', default=gpb.DEFAULT, metavar='NAME',
-                       help=f'EXPERIMENTAL, the records of rungs 7 and 8 only: the guest\'s device tree (docs/SP11-M1-GUEST-PROFILES.md): one of {", ".join(gpb.NAMES)}; any other name, and the profile '
-                            'in any form but those of rungs 7 (quiet) and 8 (quiet-rtc), is GUEST_PROFILE_REFUSED')
+                       help=f'EXPERIMENTAL, the records of rungs 7 to 9 only: the guest\'s device tree (docs/SP11-M1-GUEST-PROFILES.md): one of {", ".join(gpb.NAMES)}; any other name, and the profile '
+                            'in any form but those of rungs 7 (quiet), 8 (quiet-rtc) and 9 (quiet-rtc-acm), is GUEST_PROFILE_REFUSED')
+        for flag, what in (('--ramdisk', 'the raw APFS root image (the profile pins its SHA-256)'), ('--root-hash', 'the raw 208-byte root-hash payload (the profile pins its SHA-256)'),
+                           ('--trust-cache', 'the profile\'s static trust cache, in the firmware directory that the loader reads')):
+            p.add_argument(flag, default=None, help=f'EXPERIMENTAL, rung 9 only (docs/SP11-STICK-ROOT.md; needs SP11_ROOT_BUILD=1 and --bigfile): {what}')
         p.add_argument('--panel', choices=('handed', 'withheld', 'console'), required=True,
                        help='D9: SNAP_NO_FB; with --m1-run also `console`: the panel handed and serial=2 in the command line (probes/run.py --console panel)')
         p.add_argument('--boot-arg', default=None, metavar='WORD',

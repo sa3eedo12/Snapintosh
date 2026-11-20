@@ -6,15 +6,14 @@ panel (D9) are in one table, PANEL, which the panel variant of the run extends: 
 something false for it.
 
  - reading_lines is the paragraph before section 0: which sections the operator reads, and who the coordinator is (defined at its first use).
- - stand_lines is section 0a: where things stand after the one run of the monitor entry (boot 20), with its labels and nothing beyond them.
+ - stand_lines is section 0a: where things stand, with its labels and nothing beyond them.
  - decision_lines is section 0: that approving the SHA-256 of the text IS decision D4, and the decisions already taken, with their dates.
  - hazard_lines is section 0b, in plain words.
  - outcome_lines is section 5a: M1 as docs/SP11-MONITOR-PORT.md sections 2 and 14 define it, the expected ends, and the pages that are a pass, a finding, a failure
    and no result.
  - page_lines is section 5b: the lines of the pages. tools/test-sp11-stick-monitor-text.py reads the C sources of the wrapper and the reporter and fails when a
    line prefix (PAGE_LINES), a kind of stop (STOP_KINDS) or a status name (GATE_STATUSES, SP11_STATUSES) that the text gives is not in them.
- - action_lines is section 5c: what the coordinator stages and what the operator does, in order. The digits it asks him to compare are the first eight bytes
-   of the payload digests that section 1 names, computed here from the same facts.
+ - action_lines is section 5c: what the coordinator stages and what the operator does, in order. The digits it asks him to compare are the first eight bytes of the payload digests.
  - PRE_CALL_SILENCE, RESTART_AND_STAGE2_RULES and HARDWARE_RULES are the bullets of section 5 that only this kind has or words differently.
 
 Every number that the text takes from a build (digests, the ID registers of the NV2 record, the time box, the budget) comes in through the arguments; nothing
@@ -218,8 +217,8 @@ def reading_lines(real=None):
 
 
 def stand_lines(real=None):
-    """Section 0a, in every record of this kind (the panel, the box and the kernel do not change it): what the one run of the monitor entry showed, with its labels,
-    and nothing beyond it. The numbers are those of the operator's film of boot 20 (record 31e5d4c2...a802, 2026-11-18), read at full resolution. A panel choice may add
+    """Section 0a, in every record of this kind: what the one run of the monitor entry showed, with its labels,
+    and nothing beyond it. The numbers are those of the operator's film of boot 20 (record 31e5d4c2...a802). A panel choice may add
     a paragraph of its own after the second one (its `stand` words, given `real`); the first run's has none. A record of a guest that boot 21 ran as well has its own heading
     (`stand_head`), its own last sentence of the second paragraph (`stand_loop`) and no line for the stick (`stand_stick` False: its paragraph says it)."""
     w = words(real)
@@ -273,6 +272,7 @@ def hazard_lines(real, box_s, low, high):
               'an exception that the kernel takes (section 5a).', first=3, rest=5),
         *wrap(f'- The guest is given {w["guest_gets"]}. An access outside its RAM{w.get("outside", "")} is meant to fault at stage 2 and stop the run.', first=3, rest=5),
         *(wrap('- ' + said(real, 'hazard', box_s), first=3, rest=5) if w.get('hazard') else ()),
+        *(wrap('- ' + w['carry'], first=3, rest=5) if w.get('carry') else ()),
         *wrap('- No disk write is meant to be possible: the code of the wrapper, the monitor and the reporter stores to RAM, EL2 system registers and GIC registers only '
               f'(section 3), and the guest is given RAM{w.get("ram_also", "")} only {w.get("ram_note", RAM_NOTE)}. Stage 2 is all that stops '
               'the guest: an SMC would not be trapped and would reach '
@@ -457,7 +457,7 @@ def action_lines(r):
                     f'PAYLOAD VERIFY=OK and PAYLOAD CALL 0 {mon}.{step4(r["guest"], r["label"]) if step4 else ""} A mismatch, no PAYLOAD VERIFY=OK, or a PAYLOAD REFUSED line: start '
                     'FORCE OFF at once and tell the '
                     'coordinator; the call may already have begun. Do not retry.', hang=7),
-        *item('5.', 'Touch nothing while the pages run (section 5b: about 3 s of checks, the 8 s after NEXT GIC STORES AFTER 8 S, MON CALL, then '
+        *item('5.', f'Touch nothing while the pages run (section 5b: {said(real, "checks", box_s) or "about 3 s of checks"}, the 8 s after NEXT GIC STORES AFTER 8 S, MON CALL, then '
                     f'{said(real, "wait", box_s) or "a page that stands still for the prepare, the box and the stop"}). The stop rules of section 5 say when a silence ends '
                     f'the run.{said(real, "step5", box_s)} If at any time the Surface is too hot to hold comfortably, '
                     'FORCE OFF at once and tell the coordinator: that outranks "touch nothing" and every wait of these steps, and once PAYLOAD CALL 0 has printed, the approval '
@@ -466,7 +466,7 @@ def action_lines(r):
                     f'{said(real, "step6", box_s)} Do not run the '
                     'bundle a second time. Then give the coordinator every video (the countdown to the first UPTIME heartbeat after STAGE=DONE), say the time of day, and hand '
                     'over the stick untouched: open, mount, edit or delete nothing on it before the coordinator has read it (row f).', hang=7),
-        *item('7.', 'If the panel goes black or the Surface restarts at any point: write down the last line you saw, the last UPTIME shown if any, and the time on the video, '
+        *item('7.', f'{said(real, "step7_head", box_s) or "If the panel goes black or the Surface restarts at any point:"} write down the last line you saw, the last UPTIME shown if any, and the time on the video, '
                     'then FORCE OFF, DO NOT RETRY, and tell the coordinator. ONE RESTART BEFORE THE REPORT IS NOT A RESULT (section 5a).' + said(real, 'step7', box_s),
                     hang=7),
         *wrap(f'THIS APPROVAL COVERS ONE BOOT. A boot that printed PAYLOAD CALL 0 {mon} has spent it, whatever follows. A boot whose film does not show whether PAYLOAD CALL 0 '
