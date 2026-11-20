@@ -12,6 +12,7 @@ import contextlib
 import dataclasses
 import hashlib
 import io
+import mmap
 import os
 import re
 import struct
@@ -20,11 +21,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sp11_stick_bundle as sb  # noqa: E402
+import sp11_stick_bundle_source as src  # noqa: E402
 
 PARAMS_WORDS, PARAMS_WATCHDOG, PARAMS_MEM_LOW, PARAMS_MEM_HIGH = 1154, 24, 30, 31    # word indexes in struct params (probes/xnuboot/report_layout.c)
 AFFINITY = 0xFF00FFFFFF     # Aff3:Aff2:Aff1:Aff0 of MPIDR_EL1, the part ACPI states
 ZERO_MIN = 0x10000      # a shorter zero stretch stays data: every ZERO chunk is a table entry, and a table holds 1024
-KNOWN_REFUSALS = {n for _, n, _ in sb.ERRORS} | {'BUILT_SHAPE', 'PARAMS_MISMATCH', 'TIME_BOX_MISMATCH', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING'}   # the builder adds its own
+KNOWN_REFUSALS = {n for _, n, _ in sb.ERRORS} | {'BUILT_SHAPE', 'PARAMS_MISMATCH', 'TIME_BOX_MISMATCH', 'ENV_SNAP_SET', 'KERNELCACHE_MISSING', 'ROOT_RTC', *src.REFUSALS}   # the builder adds its own
 # (--panel, --boot-arg, --time-box-s) of the records that set the monitor's let_panic PARAMS word (tools/sp11_stick_bundle_m1.py, K12 to K15): rung 4's, with the plain monitor and
 # exactly this box, and the three of the acknowledging monitor, ACK_FORMS, each with exactly its box: rung 5's (a 60 s box, XNU's wait for CPU 1 at 120 s, longer than the box), rung 6's
 # (a 120 s box and a wait of 90 s, which ends inside it) and rung 7's (a 120 s box and the wait of 120 s, which does not, with the guest profile of FORM_PROFILE and with it only).
@@ -114,11 +116,13 @@ def gather(built, lay):
     writes = {}
     for from_tables, items in ((False, built['chunks'].items()), (True, built['tables'].chunks())):
         for pa, blob in items:
-            if not isinstance(pa, int) or isinstance(pa, bool) or not isinstance(blob, (bytes, bytearray, memoryview)) or not len(blob):
+            if isinstance(blob, mmap.mmap) and not from_tables:     # the root image of the RAM-disk profiles, mapped by probes/ramdisk.py: never copied (docs/SP11-STICK-ROOT.md)
+                blob = src.BufferSource(blob)
+            if not isinstance(pa, int) or isinstance(pa, bool) or not isinstance(blob, (bytes, bytearray, memoryview, src.Source)) or not len(blob):
                 raise Refused('BUILT_SHAPE', f'the chunk at {pa!r} is not a non-empty bytes-like value')
             if pa in writes or (from_tables and (pa % 0x4000 or len(blob) != 0x4000)):
                 raise Refused('BUILT_SHAPE', f'two chunks at {pa:#x}, or a table page that is not one aligned 16 KiB page')
-            writes[pa] = (kind_of(lay, pa, len(blob), from_tables), memoryview(blob).cast('B'))
+            writes[pa] = (kind_of(lay, pa, len(blob), from_tables), blob if isinstance(blob, src.Source) else memoryview(blob).cast('B'))
     if not writes:
         raise Refused('BUILT_SHAPE', 'build() returned no chunks')
     return writes
@@ -149,14 +153,14 @@ def flatten(writes):
             runs[-1][3].append(blob[o:o + e - s])
         else:
             runs.append([s, e, kind, [blob[o:o + e - s]]])
-    return [(s, k, b''.join(parts)) for s, _, k, parts in runs]
+    return [(s, k, src.joined(parts)) for s, _, k, parts in runs]
 
 
 def pad_runs(runs):
     """Starts must be multiples of 16 and sizes are padded to 16 with zeros. A pad never reaches the next run: that starts on a multiple of 16 too."""
     if any(start % sb.DEST_ALIGN for start, _, _ in runs):
         raise Refused('BUILT_SHAPE', f'a chunk starts at an address that is not a multiple of {sb.DEST_ALIGN}')
-    return [(start, kind, data + bytes(-len(data) % sb.DEST_ALIGN)) for start, kind, data in runs]
+    return [(start, kind, data + bytes(-len(data) % sb.DEST_ALIGN) if isinstance(data, bytes) else data.padded(-len(data) % sb.DEST_ALIGN)) for start, kind, data in runs]
 
 
 def split_zero(kind, start, data):
@@ -176,7 +180,26 @@ def split_zero(kind, start, data):
 
 
 def chunks_from_built(built, lay):
-    return [c for start, kind, data in pad_runs(flatten(gather(built, lay))) for c in split_zero(kind, start, data)]
+    """The chunks of GUEST.DAT in ascending order. A run held as a Source (the root image of a RAM-disk guest, src.STREAM_RUN_MIN or more) is cut by src.split_run under what
+    the table has left after the other runs; every other run is cut as it always was."""
+    runs = pad_runs(flatten(gather(built, lay)))
+    lazy = [r for r in runs if isinstance(r[2], src.Source)]
+    if not lazy:
+        return [c for start, kind, data in runs for c in split_zero(kind, start, data)]
+    small = {start: split_zero(kind, start, data) for start, kind, data in runs if not isinstance(data, src.Source)}
+    room = (sb.CHUNKS_MAX - sum(map(len, small.values()))) // len(lazy)
+    out = []
+    for start, kind, data in runs:
+        if start in small:
+            out += small[start]
+            continue
+        if kind in (sb.KIND_PARAMS, sb.KIND_DEVICE_TREE):
+            raise Refused('BUILT_SHAPE', f'the chunk at {start:#x} is a PARAMS or DEVICE_TREE chunk that is {len(data)} bytes: those stay whole and are never a window of a Source')
+        try:
+            out += src.split_run(kind, start, data, ZERO_MIN, room)
+        except src.TableFull as error:
+            raise Refused('ROOT_TABLE_FULL', str(error)) from None
+    return out
 
 
 def guest_from_chunks(place, chunks):
@@ -265,6 +288,16 @@ def place_layout(xb, place):
         raise Refused('PLACE_LAYOUT', str(error)) from None
 
 
+def seed_rtc(built, epoch_us):
+    """`built` with the single unseeded RTC model of its device models set to `epoch_us` (microseconds since the Unix epoch, the unit probes/devicemodel.py seed_rtc_models takes):
+    ROOT_RTC when the guest has no such model, or the value is out of that function's range. Called before PARAMS is serialised."""
+    from devicemodel import seed_rtc_models        # on sys.path once probes/xnuboot.py has been loaded
+    try:
+        return dict(built, device_models=seed_rtc_models(built['device_models'], epoch_us))
+    except (ValueError, KeyError, TypeError) as error:
+        raise Refused('ROOT_RTC', f'the RTC seed is refused: {error}') from None
+
+
 def real_built(a, xb, place, facts):
     """probes/run.py's sequence with the choices as arguments. EXPERIMENTAL, host only: it ran on the J700 26A428 kernelcache (docs/SP11-STICK-REAL.md)."""
     stale = sorted(k for k in os.environ if k.startswith('SNAP_'))
@@ -288,7 +321,7 @@ def real_built(a, xb, place, facts):
         if a.panel == 'console':        # the panel as the kernel's console, as probes/run.py makes it for the A16's native panel console: serial bit 0 clear, text mode kept
             xb.BOOT_CMDLINE = loader_cmdline.replace('serial=3', 'serial=2') + (f' {boot_arg}' if boot_arg is not None else '')      # the builder read-back (read_panel) holds the word to its list
         with contextlib.redirect_stdout(io.StringIO()):     # the loader narrates its layout on stdout: not for the record the operator approves
-            built = xb.build(str(a.kernelcache))
+            built = xb.build(str(a.kernelcache), **(getattr(a, 'root_inputs', None) or {}))      # the root carry's ramdisk, root_hash and ramdisk_mode (tools/sp11_stick_bundle_root.py); nothing for every other build
     except (OSError, ValueError, SystemExit) as error:
         raise Refused('BUILT_SHAPE', f'probes/xnuboot.py build() refused: {error}') from None
     finally:
@@ -311,6 +344,8 @@ def real_built(a, xb, place, facts):
         if not let_panic_form_ok(a.panel, boot_arg, a.time_box_s, getattr(a, 'cpu_start', 'stop'), getattr(a, 'guest_profile', None)):
             raise Refused('LET_PANIC_REFUSED', f'let_panic is for {LET_PANIC_FORMS_TEXT} only')
         built['let_panic'] = True
+    if getattr(a, 'rtc_epoch_us', None) is not None:        # the A16 route seeds the virtual RTC at upload (probes/run.py); a stick has no upload, so the epoch is baked into PARAMS here
+        built = seed_rtc(built, a.rtc_epoch_us)
     built['chunks'][xb.PARAMS_PA] = xb.params_blob(built)       # run.py serialises the parameters once more, after its run-time overrides
     return built
 

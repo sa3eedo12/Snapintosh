@@ -35,7 +35,7 @@ TOOLS = ('/opt/homebrew/opt/llvm/bin',)
 MIB = 1 << 20
 MONITOR_FLAGS = ['--target=aarch64-unknown-none-elf', '-ffreestanding', '-fno-pic', '-mgeneral-regs-only', '-Wall', '-Wextra', '-Werror',
                  '-fno-stack-protector', '-mcmodel=tiny']
-DOC_MAX = 45500
+DOC_MAX = 46000     # 45000 until the root carry's paragraph in section 2 and its citations (45,6xx bytes): raised on purpose
 
 
 def find_tool(name):

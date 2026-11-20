@@ -54,7 +54,18 @@ _Static_assert(sizeof(SP11_STICK_MONITOR_LABEL_PREFIX) - 1 == 6, "the marker and
 #ifndef SP11_STICK_MONITOR_BOX_MAX_S
 #define SP11_STICK_MONITOR_BOX_MAX_S 120u
 #endif
+#ifndef SNAP_SP11_STICK_ROOT_CARRY
+#define SNAP_SP11_STICK_ROOT_CARRY 0
+#endif
+/* The root carry (SNAP_SP11_STICK_ROOT_CARRY, docs/SP11-STICK-ROOT.md) raises the ceiling a -D may set: a guest that mounts a 1.8 GiB RAM root runs for minutes, and
+ * D5' asks for 300 s first and 10 to 20 minutes after it. Every use of the box here is a 64-bit compare and the monitor's own arithmetic is 64-bit (VERIFIED by reading:
+ * probes/xnuboot/clock_timer.c:25, cpu_boot.c:289), so the 178 s that the 32-bit guest counters of compat/watchdog.c wrap at limits the guest's view of its own watchdog and not this
+ * cap (a guest that never sets the enable bit of that counter is not affected: INFERRED for wdt=-1, UNKNOWN on the unit). The default stays 120 s; the ceiling is not the cap. */
+#if !SNAP_SP11_STICK_ROOT_CARRY
 _Static_assert(SP11_STICK_MONITOR_BOX_MAX_S >= 1 && SP11_STICK_MONITOR_BOX_MAX_S <= 120, "the time box is 1 to 120 s");
+#else
+_Static_assert(SP11_STICK_MONITOR_BOX_MAX_S >= 1 && SP11_STICK_MONITOR_BOX_MAX_S <= 1200, "the time box is 1 to 1200 s with the root carry");
+#endif
 #define SM_WINDOW_BYTES 0x10000u        /* the monitor stores nothing at or above out + this (probes/xnuboot/report_layout.c): the extension slots follow */
 #define SM_EXT_SLOTS 2u                 /* the GIC record's slot and this one's */
 #define SM_STACK_AT 0x41000u            /* REPORT.DAT offset of the call's stack: [AT, AT + BYTES), the file's last 256 KiB */

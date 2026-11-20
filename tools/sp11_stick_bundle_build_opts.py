@@ -28,6 +28,8 @@ def build_opts(p, kind, template=False):
                                                                    'tools/sp11_stick_wrapper_build.py --monitor, which made the SNAPMON-M1.BIN and SNAPREP-M1.BIN given '
                                                                    'as --monitor and --reporter; needs ram, el2_sysreg and gic in --stores and a time box of 1 to 120 s')),
                      ('--time-box-s', dict(type=int, required=True, help='D5')), ('--descriptor', dict(help='a boot-ready board descriptor (real needs one)')),
+                     ('--bigfile', dict(action='store_true', help='EXPERIMENTAL (docs/SP11-STICK-ROOT.md): the bundle for the wrapper built with --root-carry: files of up to 2 GiB, and q1n1\'s manifest '
+                                                                  'tool called with the 8 MiB chunk cap of the runner built with Q1N1_SP11_BIGFILE; the default is the 256 MiB of the pair the records pin')),
                      ('--m1-efi', dict(action='append', default=[], metavar='NAME=SHA256', help='with --m1-run, once for SLBOUNCE-DEVHE-MARK.EFI and Q1N1-PAYLOAD.EFI: '
                                                                                               'the EFI files that run before the wrapper, named in section 1b')),
                      ('--cpu-start', dict(choices=('stop', 'ack'), default='stop', help='with --m1-run: what the monitor of the pair does with the guest\'s first CPU-start write, '

@@ -5,7 +5,7 @@
     python3 tools/sp11_stick_bundle.py layout                  the layout, one "name value" per line (what the C harness prints)
     python3 tools/sp11_stick_bundle.py errors                  the refusal table
     python3 tools/sp11_stick_bundle.py check-pin PIN.DAT
-    python3 tools/sp11_stick_bundle.py check-guest GUEST.DAT PIN.DAT [--hash chunks,file]
+    python3 tools/sp11_stick_bundle.py check-guest GUEST.DAT PIN.DAT [--hash chunks,file] [--bigfile]
 
 The host half of probes/sp11-stick-bundle.h; docs/SP11-STICK-BUNDLE.md is the note. The check_*() functions are a second,
 independent implementation of the C checks, in the same order, so a record that is wrong twice gets the same refusal code
@@ -13,7 +13,10 @@ from both. tools/test-sp11-stick-bundle.py runs both on the same bytes and compa
 nothing here includes or parses the header, so a constant defined here and not there fails that test. Chunk payloads are
 opaque bytes. Output is deterministic: no timestamps, no randomness. A packer refuses to emit a record its own checker would
 refuse. Evidence: EXPERIMENTAL (host tests only; hardware NOT RUN)."""
+import contextlib
 import hashlib
+import mmap
+import os
 import struct
 import sys
 
@@ -24,6 +27,7 @@ RUNNER_VERSION = 1
 RUNNER_ARGS_BYTES = 192
 FILES = 5
 FILE_MAX = 256 * MIB
+FILE_MAX_BIG = 2048 * MIB       # SNAP_SP11_STICK_ROOT_CARRY=1 (probes/sp11-stick-bundle.h): the wrapper of the root carry; file_max() is what every check below uses
 PATH_MAX = 256
 LINE_MAX = 100
 REPORTER_LINES = 40
@@ -204,6 +208,45 @@ def sha256(data):
     return hashlib.sha256(data).digest()
 
 
+WINDOW = 16 * MIB       # a digest of a multi-GiB buffer is fed in windows: the same digest, and no copy of a slice that large
+
+
+def sha256_range(buf, offset=0, size=None):
+    """SHA-256 of buf[offset:offset + size] (all of buf by default) in windows of WINDOW bytes: bytes, a bytearray or an mmap, or any object that has len() and slices to bytes
+    (the pread view of tools/sp11_stick_bundle_root.py, which keeps the resident set of a multi-GiB pass small)."""
+    h = hashlib.sha256()
+    try:
+        view = memoryview(buf)
+    except TypeError:
+        end = len(buf) if size is None else offset + size
+        for at in range(offset, end, WINDOW):
+            h.update(buf[at:min(at + WINDOW, end)])
+        return h.digest()
+    with view:
+        end = len(view) if size is None else offset + size
+        for at in range(offset, end, WINDOW):
+            h.update(view[at:min(at + WINDOW, end)])
+    return h.digest()
+
+
+_big = False
+
+
+def file_max():
+    """The most one file of the bundle may have: FILE_MAX, or FILE_MAX_BIG inside `with bigfile():`, the limit of the wrapper built with the root carry."""
+    return FILE_MAX_BIG if _big else FILE_MAX
+
+
+@contextlib.contextmanager
+def bigfile(on=True):
+    global _big
+    held, _big = _big, bool(on)
+    try:
+        yield
+    finally:
+        _big = held
+
+
 # ---- Builders ---------------------------------------------------------------------------------------------------------
 def placement(guest_base, guest_size, reserve_size=RESERVE_MIN):
     """The placement rule as fields: guest, reserve directly above it, then the work area, one contiguous range."""
@@ -253,6 +296,8 @@ def pack_guest(load_base, load_size, chunks):
     entries, data, expect = [], bytearray(), table_end
     for c in chunks:
         if c.get('data') is None:
+            if 'source' in c:
+                raise ValueError('a chunk held as a Source needs the streaming writer (tools/sp11_stick_bundle_root.py), not pack_guest')
             size, offset, digest, flags = c['size'], 0, bytes(32), CHUNK_ZERO
         else:
             size, flags = len(c['data']), 0
@@ -276,7 +321,7 @@ def pack_guest(load_base, load_size, chunks):
 def guest_pin_fields(guest):
     """The three PIN.DAT fields that bind it to this GUEST.DAT (the whole-file digest, the size and the table digest)."""
     head = get(guest, GUEST_LAYOUT, 'index_sha256'), get(guest, GUEST_LAYOUT, 'entry_count')
-    return dict(guest_file_size=len(guest), guest_chunk_count=head[1], guest_file_sha256=sha256(guest), guest_index_sha256=head[0])
+    return dict(guest_file_size=len(guest), guest_chunk_count=head[1], guest_file_sha256=sha256_range(guest), guest_index_sha256=head[0])
 
 
 def unpack(buf, layout):
@@ -333,7 +378,7 @@ def check_file(path, base, size, role):
         return E.FILE_ROLE
     if not base or base & 0xFFF or size > M64 - base:
         return E.FILE_BASE
-    if not size or size > FILE_MAX or (role == ROLE_REPORT and size != REPORT_BYTES):
+    if not size or size > file_max() or (role == ROLE_REPORT and size != REPORT_BYTES):
         return E.FILE_SIZE
     return 0
 
@@ -407,7 +452,7 @@ def _pin_values_ok(b):
         return False
     if any(_zero(_pin(b, x)) for x in ('descriptor_sha256', 'guest_file_sha256', 'guest_index_sha256')):
         return False
-    if not GUEST_HEAD_BYTES + CHUNK_BYTES <= gsz <= FILE_MAX:
+    if not GUEST_HEAD_BYTES + CHUNK_BYTES <= gsz <= file_max():
         return False
     prev_end = 0
     for i in range(min(a, AVOID_MAX)):
@@ -551,7 +596,7 @@ def _guest_check(f, length, bind):
     file_size = g('file_size')
     if length < file_size:
         return E.GUEST_TRUNCATED
-    if length > file_size or file_size > FILE_MAX:
+    if length > file_size or file_size > file_max():
         return E.GUEST_SIZE
     count = g('entry_count')
     if not 1 <= count <= CHUNKS_MAX:
@@ -645,9 +690,9 @@ def check_digests(f, pin, policy):
             continue
         if c['file_offset'] > len(f) or c['size'] > len(f) - c['file_offset']:
             return E.CHUNK_EOF, None
-        if sha256(f[c['file_offset']:c['file_offset'] + c['size']]) != c['sha256']:
+        if sha256_range(f, c['file_offset'], c['size']) != c['sha256']:
             return E.CHUNK_DIGEST, i
-    if policy & HASH_FILE and sha256(f) != _pin(pin, 'guest_file_sha256'):
+    if policy & HASH_FILE and sha256_range(f) != _pin(pin, 'guest_file_sha256'):
         return E.FILE_DIGEST, None
     return 0, None
 
@@ -703,6 +748,13 @@ def xorshift(state):
 
 
 def main(argv):
+    big = '--bigfile' in argv      # the limits of the wrapper built with the root carry (docs/SP11-STICK-ROOT.md); the default is the pair that the records pin
+    argv = [a for a in argv if a != '--bigfile']
+    with bigfile(big):
+        return _main(argv)
+
+
+def _main(argv):
     if len(argv) == 2 and argv[1] == 'layout':
         print('\n'.join(layout_lines()))
     elif len(argv) == 2 and argv[1] == 'errors':
@@ -713,7 +765,9 @@ def main(argv):
         print(f'{code} {error_name(code)}')
         return 1 if code else 0
     elif len(argv) in (4, 6) and argv[1] == 'check-guest':
-        guest, pin = open(argv[2], 'rb').read(), open(argv[3], 'rb').read()
+        with open(argv[2], 'rb') as stream:
+            guest = mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) if os.fstat(stream.fileno()).st_size else b''     # a multi-GiB GUEST.DAT is mapped, never read whole
+        pin = open(argv[3], 'rb').read()
         if code := check_pin(pin):
             print(f'{code} {error_name(code)} (PIN.DAT)')
             return 1

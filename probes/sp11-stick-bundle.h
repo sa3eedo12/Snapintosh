@@ -33,7 +33,25 @@
 #define SP11SB_RUNNER_VERSION 1u
 #define SP11SB_RUNNER_ARGS_BYTES 192u       /* sizeof(struct q1n1_payload_args), ABI v1 */
 #define SP11SB_FILES 5u                     /* the runner's maximum; the bundle uses every slot */
+#if SNAP_SP11_STICK_MONITOR
+/* The root carry (docs/SP11-STICK-ROOT.md), an opt-in of the monitor entry build (SNAP_SP11_STICK_MONITOR=1) and of no other: the wrapper is inside the SNAPMON.BIN that a record pins,
+ * so its limit is part of that digest, and the 256 MiB of every pair that exists stays the default. With SNAP_SP11_STICK_ROOT_CARRY=1 a file may be 2 GiB, which the runner delivers
+ * only with q1n1's own opt-in Q1N1_SP11_BIGFILE (8 MiB chunk cap, 256 operations). File sizes, offsets and destinations are uint64_t everywhere in this interface, so the larger
+ * limit changes no width. tools/sp11_stick_wrapper_build.py --root-carry is the one place that sets it (and refuses it without --monitor). */
+#ifndef SNAP_SP11_STICK_ROOT_CARRY
+#define SNAP_SP11_STICK_ROOT_CARRY 0
+#endif
+#if SNAP_SP11_STICK_ROOT_CARRY != 0 && SNAP_SP11_STICK_ROOT_CARRY != 1
+#error "SNAP_SP11_STICK_ROOT_CARRY accepts only 0 and 1"
+#endif
+#if SNAP_SP11_STICK_ROOT_CARRY
+#define SP11SB_FILE_MAX UINT64_C(0x80000000)    /* 2 GiB per file */
+#else
 #define SP11SB_FILE_MAX UINT64_C(0x10000000)    /* 256 MiB per file */
+#endif
+#else
+#define SP11SB_FILE_MAX UINT64_C(0x10000000)    /* 256 MiB per file */
+#endif
 #define SP11SB_PATH_MAX 256u                /* char path[256] in the preload table */
 #define SP11SB_LINE_MAX 100u
 #define SP11SB_REPORTER_LINES 40u           /* the runner's budget per payload */

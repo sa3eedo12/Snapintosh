@@ -24,6 +24,7 @@ import argparse
 import dataclasses
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import re
@@ -44,6 +45,7 @@ import sp11_stick_bundle_record_gic as gq  # noqa: E402
 import sp11_stick_bundle_panel as pn  # noqa: E402
 import sp11_stick_bundle_profile as gpb  # noqa: E402
 import sp11_stick_bundle_rung7 as r7b  # noqa: E402
+import sp11_stick_bundle_root as root  # noqa: E402
 from sp11_stick_bundle_build_opts import build_opts  # noqa: E402,F401  (the options moved there: this file's own size; tests and run() read them from here)
 
 Refused = ch.Refused
@@ -84,7 +86,8 @@ def number(value, what, bad='OPTIONS_BAD'):
         raise Refused(bad, f'{what} is not a number: {value!r}') from None
 
 
-def read_regular(path, what, cap=sb.FILE_MAX, minimum=1):
+def read_regular(path, what, cap=None, minimum=1):
+    cap = sb.file_max() if cap is None else cap      # the limit of the bundle being built (sb.bigfile()), not of the module's import
     try:
         info = Path(path).lstat()
     except OSError as error:
@@ -128,19 +131,24 @@ def q1n1_tree():
     return next((t for t in candidates if (t / 'tools/sp11_payload_manifest.py').is_file() and (t / 'tools/preload.py').is_file()), None)
 
 
-def q1n1_manifest_tool():
+def q1n1_manifest_tool(chunk_cap_kib=None):
+    """The manifest tool of the q1n1 tree. With `chunk_cap_kib` (the bigfile bundle) the tool must take that argument (the runner of q1n1's Q1N1_SP11_BIGFILE): a tree that
+    does not is Q1N1_TREE_ABSENT, because its tool would refuse every file over 256 MiB."""
     tree = q1n1_tree()
     if tree is None:
         raise Refused('Q1N1_TREE_ABSENT', 'set Q1N1_SP11_TREE to a q1n1 checkout that holds tools/sp11_payload_manifest.py')
     held = sys.modules.pop('preload', None)         # the tool imports `preload` from its own directory
     sys.path.insert(0, str(tree / 'tools'))
     try:
-        return load_path('q1n1_sp11_payload_manifest', tree / 'tools/sp11_payload_manifest.py')
+        tool = load_path('q1n1_sp11_payload_manifest', tree / 'tools/sp11_payload_manifest.py')
     finally:
         sys.path.remove(str(tree / 'tools'))
         sys.modules.pop('preload', None)
         if held is not None:
             sys.modules['preload'] = held
+    if chunk_cap_kib is not None and 'chunk_cap_kib' not in inspect.signature(tool.build).parameters:
+        raise Refused('Q1N1_TREE_ABSENT', 'the manifest tool of this q1n1 tree has no chunk_cap_kib: --bigfile needs the tree with Q1N1_SP11_BIGFILE (docs/SP11-PAYLOAD-BIGFILE.md)')
+    return tool
 
 
 # ---- Firmware dumps --------------------------------------------------------------------------------------------------------
@@ -359,16 +367,16 @@ def common_extents(dumps):
     return sorted(cur)
 
 
-def proposals(dumps, guest, reserve, fb, avoid, declared):
+def proposals(dumps, guest, reserve, fb, avoid, declared, top=0):
     """What could be placed, listed and never chosen (D1): the largest extent below 4 GiB and the largest above it, each with the biggest
-    guest that leaves room for the reserve and the work area, verified against every dump."""
+    guest that leaves room for the reserve and the work area, verified against every dump. `top` keeps that many bytes below 2^36 free (the root carry's data files)."""
     lines, ext = [], common_extents(dumps)
     for name, pick in (('low', [x for x in ext if x[1] <= 1 << 32]), ('bank', [x for x in ext if x[0] >= 1 << 32])):
         if not pick:
             lines.append(f'PROPOSAL {name} none')
             continue
         start, end = max(pick, key=lambda x: (x[1] - x[0], -x[0]))
-        most = (min(end, sb.IPA_LIMIT) - start - reserve - sb.WORK_BYTES) // sb.GUEST_ALIGN * sb.GUEST_ALIGN
+        most = (min(end, sb.IPA_LIMIT - top) - start - reserve - sb.WORK_BYTES) // sb.GUEST_ALIGN * sb.GUEST_ALIGN
         use = min(most, guest) if name == 'bank' else most
         if use < sb.GUEST_MIN:
             lines.append(f'PROPOSAL {name} none: the extent {start:#x}..{end:#x} is too small')
@@ -669,32 +677,36 @@ def report_of(a, kind, p, files, digest, manifest, staged):
 
 
 def build(a, kind):
-    """Cheap refusals first (the q1n1 tree, the options, --out, a missing authorisation), then the pipeline, and only then the files."""
-    tool = None if a.no_manifest else q1n1_manifest_tool()
+    """Cheap refusals first (the q1n1 tree, the options, --out, a missing authorisation), then the pipeline, and only then the files. With --bigfile (EXPERIMENTAL, docs/SP11-STICK-ROOT.md) the files may
+    be up to 2 GiB, the limit of the wrapper built with --root-carry, and q1n1's manifest tool is called with the 8 MiB chunk cap of the runner built with Q1N1_SP11_BIGFILE."""
+    big = bool(getattr(a, 'bigfile', False))
+    cap = root.CHUNK_CAP_KIB if big else None
+    tool = None if a.no_manifest else q1n1_manifest_tool(cap)
     if a.no_manifest and (a.base_tree or a.file):
         raise Refused('OPTIONS_BAD', '--base-tree and --file need the manifest: drop --no-manifest')
     out = check_out(a)
-    p = prepare(a, kind, lambda: need_authorisation(a))
-    digest = approve(a, p['record'])
-    files = finish(p, digest)
-    manifest = staged = None
-    make_out(out)
-    try:
-        for n in NAMES:
-            put(out, f'bundle/SP11/{n}', files[n])
-        if tool:
-            try:
-                manifest, listed = tool.build([out / 'bundle/SP11' / n for n in NAMES])
-            except ValueError as error:
-                raise Refused('STAGE_REFUSED', f'q1n1\'s manifest tool: {error}') from None
-            if [e[:3] for e in listed] != [(f'\\SP11\\{n}', len(files[n]), sha(files[n])) for n in NAMES]:
-                raise Refused('STAGE_REFUSED', 'q1n1\'s manifest tool lists other files than the ones written')
-            put(out, 'bundle/SP11/PAYLOAD.MAN', manifest)
-            staged = stage_tree(a, out, p, files, manifest) if a.base_tree else None
-        put(out, REPORT_NAME, (json.dumps(report_of(a, kind, p, files, digest, manifest, staged), indent=1, sort_keys=True) + '\n').encode())
-    except BaseException:
-        shutil.rmtree(out, ignore_errors=True)
-        raise
+    with sb.bigfile(big):
+        p = prepare(a, kind, lambda: need_authorisation(a))
+        digest = approve(a, p['record'])
+        files = finish(p, digest)
+        manifest = staged = None
+        make_out(out)
+        try:
+            for n in NAMES:
+                put(out, f'bundle/SP11/{n}', files[n])
+            if tool:
+                try:
+                    manifest, listed = tool.build([out / 'bundle/SP11' / n for n in NAMES], **({'chunk_cap_kib': cap} if cap else {}))
+                except ValueError as error:
+                    raise Refused('STAGE_REFUSED', f'q1n1\'s manifest tool: {error}') from None
+                if [e[:3] for e in listed] != [(f'\\SP11\\{n}', len(files[n]), sha(files[n])) for n in NAMES]:
+                    raise Refused('STAGE_REFUSED', 'q1n1\'s manifest tool lists other files than the ones written')
+                put(out, 'bundle/SP11/PAYLOAD.MAN', manifest)
+                staged = stage_tree(a, out, p, files, manifest) if a.base_tree else None
+            put(out, REPORT_NAME, (json.dumps(report_of(a, kind, p, files, digest, manifest, staged), indent=1, sort_keys=True) + '\n').encode())
+        except BaseException:
+            shutil.rmtree(out, ignore_errors=True)
+            raise
     return out, files, manifest, staged
 
 
@@ -712,11 +724,16 @@ def build_parser():
     c.add_argument('--facts')
     c.add_argument('--dump', action='append', default=[])
     c.add_argument('--declared', action='append', default=[])
+    c.add_argument('--root-carry', action='store_true', help=f'EXPERIMENTAL (docs/SP11-STICK-ROOT.md): the runner of the root carry puts its data files in the top {root.DATA_TOP_BYTES >> 30} GiB below 2^36: refuse a placement '
+                                                              'that reaches them, and propose none that does')
     build_opts(sub.add_parser('synthetic'), 'synthetic')
     build_opts(sub.add_parser('real'), 'real')
     t = sub.add_parser('authorisation-template').add_subparsers(dest='kind', required=True)
     for kind in ('synthetic', 'real'):
         build_opts(t.add_parser(kind), kind, template=True)
+    g = sub.add_parser('root-guest', help='EXPERIMENTAL, needs SP11_ROOT_BUILD=1: only a GUEST.DAT with the root and a report (docs/SP11-STICK-ROOT.md): no PIN.DAT, no record, no bundle').add_subparsers(dest='kind', required=True)
+    for kind in ('synthetic', 'real'):
+        root.add_options(g.add_parser(kind), kind)
     return ap
 
 
@@ -730,17 +747,27 @@ def run(a):
         pin = bare_pin(place, avoid)
         if code := sb._pin_geometry(pin):      # PLACE_ALIGN, PLACE_LAYOUT, PLACE_LIMIT: the interface's placement arithmetic, before any map
             raise Refused(sb.error_name(code), 'the placement arithmetic of docs/SP11-STICK-BUNDLE.md section 5')
+        if a.root_carry:
+            root.check_data_top(place)
         results = check_maps(pin, dumps, fb, declared)
         print(f'PLACE base={place["guest_base"]:#x} guest_mib={place["guest_size"] // MIB} reserve_mib={place["reserve_size"] // MIB} '
               f'work_mib={place["work_size"] // MIB} end={place["place_base"] + place["place_size"]:#x}')
         print('\n'.join(f'MAP {n} descriptors={c} ' + ('PASS' if not code else f'REFUSED={sb.error_name(code)}') for n, c, code in results))
-        print('\n'.join(proposals(dumps, place['guest_size'], place['reserve_size'], fb, avoid, declared)))
+        print('\n'.join(proposals(dumps, place['guest_size'], place['reserve_size'], fb, avoid, declared, root.DATA_TOP_BYTES if a.root_carry else 0)))
         failed = [sb.error_name(code) for _, _, code in results if code]
         print(f'RESULT maps={len(results) - len(failed)}/{len(results)}')
         if failed:
             raise Refused(failed[0], f'{len(failed)} of {len(results)} maps')
     elif a.cmd == 'authorisation-template':
-        print(prepare(a, a.kind)['record'], end='')
+        with sb.bigfile(getattr(a, 'bigfile', False)):
+            print(prepare(a, a.kind)['record'], end='')
+    elif a.cmd == 'root-guest':
+        report = root.run(a, a.kind)
+        print(f'BUILT root-guest kind={a.kind} out={os.path.relpath(Path(os.path.abspath(a.out)), ROOT) if ROOT in Path(os.path.abspath(a.out)).parents else a.out}')
+        print(f'FILE GUEST.DAT {report["guest"]["file_size"]} sha256 {report["guest"]["sha256"]}')
+        print(f'CHUNKS {report["guest"]["chunks"]} ROOT_CHUNKS {report["root"]["chunks"]} ({report["root"]["zero_chunks"]} ZERO) RUNNER_OPERATIONS {report["runner"]["operations"]} of 256')
+        print('NOT A BUNDLE: no PIN.DAT, no PAYLOAD.MAN, no record, no authorisation')
+        print('HARDWARE=NOT RUN')
     else:
         out, files, manifest, staged = build(a, a.cmd)
         print(f'BUILT kind={a.cmd} out={os.path.relpath(out, ROOT) if ROOT in out.parents else out}')

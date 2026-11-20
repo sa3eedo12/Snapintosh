@@ -222,7 +222,7 @@ GICR-range structure. MCFG: eight allocations, segments 0 to 7 (buses 0..255 for
 GICD, GICR and ITS pass, then `check_hamoa_platform` refuses at `ecam-mismatch`: a descriptor holds at most four ECAM entries
 (`MAX_ECAM = 4`[tools/board_descriptor.py:84]) and the adapter demands set equality (`if got != want.ecam:`[probes/bootcontract.py:539]):
 D11 proper, open for any `from_hamoa` use and X6. Not M1's: `PIN.DAT` does the board-info job, and the WI 3 builder reads both tables itself
-(`tools/sp11_stick_bundle_build.py:173-207`).
+(`tools/sp11_stick_bundle_build.py:181-215`).
 
 **Build evidence** (run here): `GUEST_CPU_COUNT=1U` and `=4U` FAIL at static assertions (`probes/secondary.h:27-29`); the M1
 profile builds (section 4). So "one vCPU" means six records, one released: M1 runs vCPU 0 on q1n1's CPU (no `SNAP_BOOT_RELOCATE`) with

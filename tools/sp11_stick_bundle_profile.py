@@ -10,6 +10,7 @@ profile is whole root sets (GUEST_PROFILE_SPLIT) and a read-back of the device t
 import contextlib
 import hashlib
 import io
+import struct
 import sys
 from pathlib import Path
 
@@ -79,18 +80,31 @@ def resolve(a):
     return name
 
 
-def read_back(xb, built, name):
+def root_additions(root):
+    """{node: {property: value}} that the loader adds to the device tree for a RAM-disk root in the IOKit mode (probes/xnuboot.py build(), probes/ramdisk.py
+    populate_ramdisk_policy): `root` is dict(extents=(base, size), boot_uuid=str, payload=bytes). boot-uuid and apfs-preboot-uuid are the profile's UUID and a NUL, the two
+    policy words are zero (no protected data, no SEP firmware: the profile's recipes), the payload is the raw root-hash blob."""
+    uuid = root['boot_uuid'].encode('ascii') + b'\0'
+    return {'/device-tree/chosen': {'boot-ramdmg-size': struct.pack('<Q', root['extents'][1]), 'boot-ramdmg-extents': struct.pack('<QQ', *root['extents']), 'boot-uuid': uuid,
+                                    'apfs-preboot-uuid': uuid, 'protected-data-access': bytes(4), 'sepfw-load-at-boot': bytes(4)},
+            '/device-tree/chosen/secure-boot-hashes': {'system-volume-auth-blob': bytes(root['payload'])}}
+
+
+def read_back(xb, built, name, root=None):
     """The device tree in built['chunks'] against the tree before deferral, which `xb` builds again from the same state: the loader withdrew the roots of profile `name`
     and the declarations of its deferred functions, and nothing else. For a profile other than the default (the default is the bundle of every earlier record and is
     not touched; it returns None), GUEST_PROFILE_READBACK when: a pin is not the digest of its subtree before deferral; a withdrawn root or a node under one is still published; a node
     that is not under a withdrawn root is not; a property or a child list of a retained node differs from the tree before deferral, but for the declarations withdrawn; or the
     chunk is not the serialisation of the tree it parses to; the device models are not the loader's own (with the clock model seeded at RTC_EPOCH_US for a profile of RTC_MENU and
     with no clock model for any other) or the PARAMS chunk is not their serialisation; for the profile quiet, the windows of the withdrawn nodes are not the table of
-    tools/sp11_stick_bundle_windows.py, which the record of rung 7 names in four places. Returns the number of nodes of the published tree."""
+    tools/sp11_stick_bundle_windows.py, which the record of rung 7 names in four places. Returns the number of nodes of the published tree.
+    `root` (the root carry, docs/SP11-STICK-ROOT.md; None for every other build) is dict(extents=(base, size), boot_uuid=str, payload=bytes): the properties that the loader adds for a
+    RAM-disk root (probes/xnuboot.py, iokit mode) are then expected with exactly these values, and no other property may differ."""
     if name == DEFAULT:
         return
     from appledt import DeviceTree
     profile = gp.get_profile(name)
+    added = root_additions(root) if root is not None else {}
 
     def fail(detail):
         raise ch.Refused('GUEST_PROFILE_READBACK', f'{name}: {detail}')
@@ -125,8 +139,9 @@ def read_back(xb, built, name):
             fail(f'the declaration {prop} of {node} is not withdrawn as the profile says')
     for node, props in published.nodes.items():
         was = {k: bytes(v.value) for k, v in before.nodes[node].items() if (node, k) not in functions}
+        was.update(added.get(node, {}))       # the root's own properties, expected with exactly their values (no `root`: nothing is added)
         if {k: bytes(v.value) for k, v in props.items()} != was:
-            fail(f'the properties of {node} are not those of the generated tree')
+            fail(f'the properties of {node} are not those of the generated tree' + (' and the properties of the RAM root' if added.get(node) else ''))
         if list(published.children[node]) != [c for c in before.children[node] if c not in gone]:
             fail(f'the children of {node} are not those of the generated tree without the withdrawn roots')
     if published.serialize() != bytes(blob):

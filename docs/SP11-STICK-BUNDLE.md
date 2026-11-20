@@ -27,7 +27,10 @@ this note: they belong to the run that made them.
 
 The bundle is the manifest of q1n1's stick runner: at most 5 files of at most 256 MiB, called in manifest order, the first a payload,
 a name `<stem>.BIN` marking a payload and every other file data that is never called (`#define Q1N1_PAYLOAD_MAX_FILES`[q1n1:platform/uefi/sp11-payload.h:78],
-`#define Q1N1_PAYLOAD_MAX_FILE_BYTES`[q1n1:platform/uefi/sp11-payload.h:112], its value with the big-file gate off; VERIFIED). The position in the manifest is the role.
+`#define Q1N1_PAYLOAD_MAX_FILE_BYTES`[q1n1:platform/uefi/sp11-payload.h:112], its value with the big-file gate off; VERIFIED). The position in the manifest is the role. With the runner's own opt-in `Q1N1_SP11_BIGFILE` the limit is 256
+operations of an 8 MiB chunk, 2 GiB (`#define Q1N1_PAYLOAD_MAX_FILE_BYTES`[q1n1:platform/uefi/sp11-payload.h:92]), and the wrapper of the root carry (`SNAP_SP11_STICK_ROOT_CARRY=1`,
+[SP11-STICK-ROOT.md](SP11-STICK-ROOT.md)) accepts the same: every size in this note is then 2 GiB where it says 256 MiB, in the C header (`SP11SB_FILE_MAX`) and in the Python twin
+(`sb.FILE_MAX_BIG`, `with sb.bigfile():`). That is a different pair from the one the records pin: with the gate at 0, the default, nothing below changes.
 
 | Index | File | Kind | Content | Size rule |
 | --- | --- | --- | --- | --- |
@@ -171,7 +174,7 @@ report records the policy used. A read-only payload hashed 144 MiB at EL2 in 0.7
 
 | Rule | Check | Code |
 | --- | --- | --- |
-| Grid | `guest_base` and `guest_size` multiples of 32 MiB (`REGION_ALIGN = 0x2000000`[probes/xnuboot.py:451]); `reserve_size` of 16 MiB; `work_base` of 64 KiB; `place_base` and `place_size` of 16 MiB (the Shape rule implies it, but this rule runs first: a misaligned one is PLACE_ALIGN, not PLACE_LAYOUT, `(pb \| ps) & (SP11SB_RESERVE_ALIGN - 1)`[probes/sp11-stick-bundle.h:514]) | PLACE_ALIGN |
+| Grid | `guest_base` and `guest_size` multiples of 32 MiB (`REGION_ALIGN = 0x2000000`[probes/xnuboot.py:451]); `reserve_size` of 16 MiB; `work_base` of 64 KiB; `place_base` and `place_size` of 16 MiB (the Shape rule implies it, but this rule runs first: a misaligned one is PLACE_ALIGN, not PLACE_LAYOUT, `(pb \| ps) & (SP11SB_RESERVE_ALIGN - 1)`[probes/sp11-stick-bundle.h:532]) | PLACE_ALIGN |
 | Shape | `guest_size` >= 192 MiB (a floor: the SPTM data of the small layout ends at 167 MiB, `probes/xnuboot.py:323`; `place()` is the authority and its `large` branch needs 256 MiB), `reserve_size` >= 48 MiB, `work_size` = 240 MiB, `work_base` = the end of the reserve, `place_base` = `guest_base`, `place_size` = the sum | PLACE_LAYOUT |
 | Stage-2 limit | the end is at most 2^36 (`IPA_LIMIT = 1 << 36`[probes/monitor_work.py:12]); ending exactly there is allowed and starting at or beyond it is not, as `shadow/stage2.c` checks | PLACE_LIMIT |
 | One descriptor | inside exactly one EFI descriptor of type 7 (conventional) of the final map, and no other descriptor touches it | PLACE_NOT_CONV |
@@ -320,7 +323,7 @@ SNAPREP reads REPORT.DAT in the order REPORT_SIZE (the length), REPORT_MAGIC, RE
 | 2 | `FILE_COUNT` | BWR | the table lists other than 5 files (the runner itself refuses more than 5) |
 | 3 | `FILE_ROLE` | BWR | slot i is not `\SP11\` plus the role name of i, any case, nothing after it |
 | 4 | `FILE_BASE` | -WR | a base is zero, not page aligned, or base + size wraps |
-| 5 | `FILE_SIZE` | BWR | a size is zero or over 256 MiB, or REPORT.DAT is not 528384 bytes |
+| 5 | `FILE_SIZE` | BWR | a size is zero or over 256 MiB (2 GiB with the root carry), or REPORT.DAT is not 528384 bytes |
 | 10 | `PIN_TRUNCATED` | BWR | PIN.DAT is shorter than 1024 bytes |
 | 11 | `PIN_MAGIC` | BWR | the magic is not `SNAPBPIN` |
 | 12 | `PIN_VERSION` | BWR | the version is not 1 |
@@ -384,7 +387,7 @@ SNAPREP reads REPORT.DAT in the order REPORT_SIZE (the length), REPORT_MAGIC, RE
 | 91 | `REPORT_MAGIC` | --R | the magic is not `SNAPBRPT` |
 | 92 | `REPORT_VERSION` | --R | the version is not 1 |
 | 93 | `REPORT_RESERVED` | --R | a byte of page 0 after the head is nonzero |
-| 94 | `REPORT_VALUE` | --R | an unknown stage, refusal or verdict code; `chunks_copied` or `chunks_hashed` over `chunks_total`, or `chunks_total` over 1024; a policy bit; more than 30 lines; a refusal with stage MONITOR_RETURNED or DONE, `(refusal && stage > SP11SB_STAGE_MONITOR_ENTERED)`[probes/sp11-stick-bundle.h:755] (a refusal that carries MONITOR_ENTERED itself is accepted; no tick or byte counter is checked) |
+| 94 | `REPORT_VALUE` | --R | an unknown stage, refusal or verdict code; `chunks_copied` or `chunks_hashed` over `chunks_total`, or `chunks_total` over 1024; a policy bit; more than 30 lines; a refusal with stage MONITOR_RETURNED or DONE, `(refusal && stage > SP11SB_STAGE_MONITOR_ENTERED)`[probes/sp11-stick-bundle.h:773] (a refusal that carries MONITOR_ENTERED itself is accepted; no tick or byte counter is checked) |
 
 ## 9. Versioning
 

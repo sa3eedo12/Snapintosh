@@ -82,11 +82,16 @@ BOX_MAX_S = 120         # the longest time box that a wrapper built from this tr
 # (SNAPMON-M1.BIN, the pair of every record up to rung 4, K12) and the acknowledging pair that was made at the cap of 5 (the ack-only tree's). Their wrappers refuse a box over 5 s before they
 # call the monitor, so a record with a longer box for one of them is refused here and not on the unit (OPTIONS_BAD), and the record's text names 5 s for them; any other pair has BOX_MAX_S.
 LOW_CAP_MONITORS = {'1d32f5071506a00c91be8c7e218a6db9ba6d280c1cf25be31aac41a3c599171c': 5, '54305009c913e74af955d76b83ff99b338541498cf0866d67a33a4c53e0b017a': 5}
+# The pair built with `tools/sp11_stick_wrapper_build.py --root-carry` (docs/SP11-STICK-ROOT.md): its wrapper takes files of up to 2 GiB and a box of up to ROOT_CARRY_BOX_MAX_S s, and it is
+# a different pair from every pair of ACK_PAIRS: no form of this module names it, so every record that exists refuses it (M1_REPORT_MISMATCH) and every box over BOX_MAX_S stays refused
+# (check_options). The digests are those of the build with the monitor of rungs 5 to 7 (053a239f...); a monitor that changes makes a new pair.
+ROOT_CARRY_BOX_MAX_S = 1200
+ROOT_CARRY_PAIRS = {'6af26a840736a7148e8b213ffc5c2e4e57fc4f4e3fbfb271380f382205e0e456': '562b9b6eeaf97b87a4fb844d4368543a2f6ba8c28f5363451ba244a97d50bb80'}
 
 
 def box_cap(monitor_sha256):
-    """The longest time box that the wrapper of the pair with this SNAPMON-M1(-ACK).BIN digest accepts: 5 s for LOW_CAP_MONITORS, BOX_MAX_S for any other."""
-    return LOW_CAP_MONITORS.get(monitor_sha256, BOX_MAX_S)
+    """The longest time box that the wrapper of the pair with this SNAPMON-M1(-ACK).BIN digest accepts: 5 s for LOW_CAP_MONITORS, ROOT_CARRY_BOX_MAX_S for ROOT_CARRY_PAIRS, BOX_MAX_S for any other."""
+    return ROOT_CARRY_BOX_MAX_S if monitor_sha256 in ROOT_CARRY_PAIRS else LOW_CAP_MONITORS.get(monitor_sha256, BOX_MAX_S)
 
 
 def check_pair_box(time_box_s, monitor_sha256):

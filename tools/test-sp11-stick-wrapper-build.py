@@ -635,7 +635,15 @@ class Hygiene(unittest.TestCase):
             except UnicodeDecodeError:
                 continue
             for needle in needles:
-                self.assertNotIn(needle, text, f'{path.relative_to(ROOT)} mentions {needle}: the monitor build must not know the stick wrapper')
+                if path.name == 'sp11-stick-bundle.h' and needle == 'SNAP_SP11_STICK':
+                    # the interface header gained one block inside `#if SNAP_SP11_STICK_MONITOR` (the file limit of the root carry, docs/SP11-STICK-ROOT.md): it must be that one, since an edit
+                    # outside that gate changes the sources of the GIC pair that the approved note names (tools/sp11_stick_gatescan.py), and it is the only place the header names a gate
+                    start, end = text.find('#if SNAP_SP11_STICK_MONITOR\n/* The root carry'), text.find('#define SP11SB_PATH_MAX')
+                    self.assertTrue(0 <= start < end and text.count('#if SNAP_SP11_STICK_MONITOR') == 1, 'one gated block, before SP11SB_PATH_MAX')
+                    text_here = text[:start] + text[end:]
+                else:
+                    text_here = text
+                self.assertNotIn(needle, text_here, f'{path.relative_to(ROOT)} mentions {needle}: the monitor build must not know the stick wrapper')
 
 
 DOC = ROOT / 'docs/SP11-STICK-WRAPPER.md'

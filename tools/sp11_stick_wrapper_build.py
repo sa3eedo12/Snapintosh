@@ -25,6 +25,10 @@ tools/sp11_m1_profile.py build --cpu-start ack ...), the output is SNAPMON-M1-AC
 -DSNAP_SP11_CPU_START_ACK=1 so that a payload can say which monitor it was built for. The default, --cpu-start stop, refuses an `ack`
 profile build and `ack` refuses any other: CPU_START_MISMATCH, whichever way round. A `stop` build is what it was before the option existed.
 
+With --root-carry (only with --monitor, EXPERIMENTAL, docs/SP11-STICK-ROOT.md) both payloads are compiled with -DSNAP_SP11_STICK_ROOT_CARRY=1 -DSP11_STICK_MONITOR_BOX_MAX_S=1200u: the
+wrapper accepts files of up to 2 GiB (probes/sp11-stick-bundle.h) and a time box of up to 1200 s (probes/sp11-stick-monitor.h), and the build report gains a `root_carry` key. The
+default build, its bytes and its report are what they were before the option existed: the pair that the records pin is a different pair from this one.
+
 The recipe is q1n1's and is read from its Makefile, not copied: PAYLOAD_CFLAGS and PAYLOAD_LDFLAGS (the flags, --emit-relocs among
 them), payloads/start.S first, payloads/payload.ld, then llvm-objcopy -O binary, then q1n1's tools/sp11_payload_elfcheck.py on each ELF.
 A change of that recipe changes the bytes, and therefore the digest an authorisation names; the tool prints the digest of every q1n1 file
@@ -71,6 +75,9 @@ ACK_NAMES = ('SNAPMON-M1-ACK.BIN', 'SNAPREP-M1-ACK.BIN')
 M1_NAMES = MONITOR_NAMES + ACK_NAMES
 CPU_STARTS = ('stop', 'ack')
 ACK_DEFINE = '-DSNAP_SP11_CPU_START_ACK=1'     # tools/sp11_m1_profile.py CPU_START_DEFINES['ack'], the monitor's compile-time gate
+ROOT_CARRY_BOX_MAX_S = 1200             # the cap that --root-carry compiles in: SP11_STICK_MONITOR_BOX_MAX_S, at the ceiling of probes/sp11-stick-monitor.h
+ROOT_CARRY_DEFINES = ('-DSNAP_SP11_STICK_ROOT_CARRY=1', f'-DSP11_STICK_MONITOR_BOX_MAX_S={ROOT_CARRY_BOX_MAX_S}u')
+ROOT_CARRY_FILE_MAX = 2 << 30           # SP11SB_FILE_MAX of that build
 MONITOR_OFFSET = 0x20000                # where the monitor starts in SNAPMON-M1.BIN: a multiple of 4 KiB, so its vectors (at +0x800) are 2 KiB aligned
 MONITOR_MAX = 8 * 1024 * 1024           # a sanity bound on the appended image; the runner's own cap is far higher
 MONITOR_CALL = 'sp11_monitor'           # the symbol the wrapper calls, defined by --defsym
@@ -388,10 +395,11 @@ def monitor_defines(monitor, offset):
             *[f'-DSP11_MONITOR_SHA{i}={int.from_bytes(digest[8 * i:8 * i + 8], "little"):#x}ULL' for i in range(4)]]
 
 
-def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset=MONITOR_OFFSET, cpu_start='stop'):
+def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset=MONITOR_OFFSET, cpu_start='stop', root_carry=False):
     """Build SNAPMON-M1.BIN (the wrapper padded to `offset`, then the monitor) and SNAPREP-M1.BIN below `out_arg`; returns the report dict,
     which is also written as build-report.json. With cpu_start 'ack' they are SNAPMON-M1-ACK.BIN and SNAPREP-M1-ACK.BIN, built for (and only for) a profile
-    build of the acknowledging monitor, and the report says so; a 'stop' build and its report are what they were before the choice existed."""
+    build of the acknowledging monitor, and the report says so; a 'stop' build and its report are what they were before the choice existed. With `root_carry` both are
+    compiled with ROOT_CARRY_DEFINES, which makes them a different pair from the one without."""
     if cpu_start not in CPU_STARTS:
         raise Refused('CPU_START_MISMATCH', f'--cpu-start is one of {", ".join(CPU_STARTS)}, not {cpu_start!r}')
     ack = cpu_start == 'ack'
@@ -411,14 +419,15 @@ def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset
     pic = relink_check(monitor_objects(directory, record['flags']), tree, out / 'monitor-pic', monitor)
     check_layout(out / 'monitor-pic' / 'xnuboot-relocs.elf')       # the ELF that was proved to flatten to these bytes, not only the record's
     pinned = monitor_defines(monitor, offset)
-    extra = [*pinned, '-DSW_GIC_DRY_REGS=0']
+    carry = list(ROOT_CARRY_DEFINES) if root_carry else []
+    extra = [*pinned, '-DSW_GIC_DRY_REGS=0', *carry]
     wrapper = build_one(image_name, tree, cflags, ldflags, defines, out, extra, [f'--defsym={MONITOR_CALL}={offset:#x}'])
     if len(wrapper) > offset:
         raise Refused('WRAPPER_TOO_BIG', f'the wrapper is {len(wrapper)} bytes; the monitor starts at {offset:#x}')
     (out / ('wrapper-m1-ack.bin' if ack else 'wrapper-m1.bin')).write_bytes(wrapper)
     image = wrapper + bytes(offset - len(wrapper)) + monitor
     (out / image_name).write_bytes(image)
-    files = {image_name: image, reporter_name: build_one(reporter_name, tree, cflags, ldflags, defines, out)}
+    files = {image_name: image, reporter_name: build_one(reporter_name, tree, cflags, ldflags, defines, out, carry)}
     report = {'files': {n: {'bytes': len(d), 'sha256': sha(d)} for n, d in files.items()},
               'wrapper': {'bytes': len(wrapper), 'sha256': sha(wrapper), 'padding': offset - len(wrapper)},
               'monitor': {'offset': offset, 'bytes': len(monitor), 'sha256': sha(monitor), 'elf_sha256': record['monitor']['elf_sha256'],
@@ -427,13 +436,15 @@ def build_monitor(out_arg, profile, monitor_arg, record_arg, force=False, offset
               'q1n1_inputs': {rel: sha((tree / rel).read_bytes()) for rel in Q1N1_INPUTS}, 'cflags': [f.replace(str(tree), '<q1n1>') for f in cflags],
               'ldflags': ldflags, 'gic_macros': defines, 'hardware': 'NOT RUN', 'profile': record['profile'],
               'added': ['-DSNAP_PLATFORM_SP11=1', '-DSNAP_SP11_STICK=1', '-DSNAP_SP11_STICK_GIC=1', '-DSNAP_SP11_STICK_MONITOR=1',
-                        *([ACK_DEFINE] if ack else []), '-DSW_GIC_DRY_REGS=0', *pinned],
+                        *([ACK_DEFINE] if ack else []), '-DSW_GIC_DRY_REGS=0', *pinned, *carry],
               'variant': 'm1: the wrapper arms the GIC (the quarantine of this CPU\'s other enabled interrupts, classes G, R and C, the check of ICC_HPPIR1_EL1), calls the '
                          'appended monitor and puts the GIC back (docs/SP11-STICK-MONITOR.md)'}
     if ack:
         report['cpu_start'] = 'ack'
         report['variant'] += ('; the monitor is the EXPERIMENTAL CPU-start acknowledge build: it takes the guest\'s 32-bit stores to the PMGR CPU-start block and starts '
                               'no CPU, which is a diagnostic and not a model of the hardware (docs/SP11-MONITOR-PROFILE.md section 10)')
+    if root_carry:
+        report['root_carry'] = {'file_max': ROOT_CARRY_FILE_MAX, 'box_max_s': ROOT_CARRY_BOX_MAX_S, 'defines': carry}
     (out / REPORT_NAME).write_text(json.dumps(report, indent=1, sort_keys=True) + '\n')
     return report
 
@@ -450,13 +461,17 @@ def main(argv=None):
     parser.add_argument('--cpu-start', choices=CPU_STARTS, default='stop',
                         help='with --monitor: stop (the default: the profile build must be a `stop` one) or ack (EXPERIMENTAL: the profile build must be a '
                              'tools/sp11_m1_profile.py --cpu-start ack one; the output is SNAPMON-M1-ACK.BIN and SNAPREP-M1-ACK.BIN)')
+    parser.add_argument('--root-carry', action='store_true',
+                        help='with --monitor (EXPERIMENTAL, docs/SP11-STICK-ROOT.md): compile both payloads for files of up to 2 GiB and a time box of up to 1200 s: a different pair from the one the records pin')
     args = parser.parse_args(argv)
     if bool(args.monitor) != bool(args.monitor_build) or (args.monitor and args.gic):
         parser.error('--monitor and --monitor-build go together, and replace --gic')
     if args.cpu_start != 'stop' and not args.monitor:
         parser.error('--cpu-start belongs to the monitor entry variant: give --monitor and --monitor-build')
+    if args.root_carry and not args.monitor:
+        parser.error('--root-carry belongs to the monitor entry variant: give --monitor and --monitor-build')
     try:
-        report = build_monitor(args.out, args.profile, args.monitor, args.monitor_build, args.force, args.monitor_offset, args.cpu_start) if args.monitor \
+        report = build_monitor(args.out, args.profile, args.monitor, args.monitor_build, args.force, args.monitor_offset, args.cpu_start, args.root_carry) if args.monitor \
             else build(args.out, args.profile, args.force, args.gic)
     except Refused as error:
         print(error.detail, file=sys.stderr)
@@ -470,6 +485,8 @@ def main(argv=None):
     for rel, digest in report['q1n1_inputs'].items():
         print(f'INPUT q1n1:{rel} sha256 {digest}')
     print('MONITOR=APPENDED (called by the wrapper)' if args.monitor else 'MONITOR=NONE (the wrapper never enters one)')
+    if args.root_carry:
+        print(f'ROOT_CARRY file_max={ROOT_CARRY_FILE_MAX} box_max_s={ROOT_CARRY_BOX_MAX_S} (a different pair from the one the records pin)')
     print('HARDWARE=NOT RUN')
     return 0
 

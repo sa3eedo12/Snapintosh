@@ -274,7 +274,7 @@ def pair_sources(blind=False):
 
 
 WRAPPER_TOOL = 'tools/sp11_stick_wrapper_build.py'      # held to a digest: it gained --cpu-start (docs/SP11-MONITOR-PROFILE.md section 10)
-WRAPPER_TOOL_SHA256 = '0c272f55fa9ddf39ab4d26767985b57c5a4a3aaaf6394772a7a74aa8aaeaf726'
+WRAPPER_TOOL_SHA256 = '53f94e9a99f4ab04cd27b4ff20f31cf89df43b105071393a6eaae04ba9f2c10e'     # re-pinned: gained --root-carry
 
 
 def source_problems(commit, files):
