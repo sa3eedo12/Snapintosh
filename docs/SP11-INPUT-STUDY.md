@@ -1,8 +1,10 @@
 # Surface Pro 11 input study: the Surface Aggregator link, the G1 spike plan and the G2 decision
 
-**Evidence study only. UNIMPLEMENTED; hardware status NOT RUN for the spike, the codec and the driver; one read-only payload run (boot 29, [section 5.4](#54-what-boot-29-showed)) read the engines' clock words, the interrupt words and the pin controller on one unit.** Apart from that one run, nothing here ran on a Surface Pro. The one piece of
+**Evidence study only. UNIMPLEMENTED; hardware status NOT RUN for the spike, the codec and the driver; one read-only payload run (boot 29, [section 5.4](#54-what-boot-29-showed-a-read-only-payload-observed-once-the-decodes-are-inferred)) read the engines' clock words, the interrupt words and the pin controller on one unit.** Apart from that one run, nothing here ran on a Surface Pro. The one piece of
 code that backs it is host-side: the frame codec `compat/sam-frame.{h,c}` with its tests
 (`python3 tools/test-sam-frames.py`). It is not linked into any build, so the A16 monitor is unchanged.
+
+**Update.** The host model of the link (`tools/sam_session.py`, `tools/sam_hid_desc.py`, `tools/sam_transcript.py`) and of the engine's clock and write rows (`tools/geni_uart_plan.py`), and the staged plan I0 to I3 that replaces the G1 phases of section 5, are in [SP11-INPUT-PLAN.md](SP11-INPUT-PLAN.md) (EXPERIMENTAL, hardware NOT RUN). Where the two documents differ, the plan governs; the places are marked below.
 
 Labels are those of [SURFACE-PRO-11.md](SURFACE-PRO-11.md): VERIFIED means "read in a pinned public source or in this
 repository", never "seen on a Surface Pro". OBSERVED is a third-party report on one unit, INFERRED is reasoning
@@ -136,7 +138,7 @@ known payload type [L10], [L21].
 | D0 entry / exit | SAM, SAM, 0, `0x34` / `0x33`; response u8 | [L16] |
 | Display on / off | SAM, SAM, 0, `0x16` / `0x15`; response u8. Display-off quiets events and arms the wake line | [L16] |
 | Probe order in Linux | firmware version, D0 entry, display on, then the wake interrupt and the clients | [L17] |
-| Enable an event source | registry category `0x21`, target of the device (KIP `0x02`), 0, `0x01` (enable) or `0x02` (disable); payload 5 bytes: category, flags, request id (2), instance; response u8, non-zero is a failure. Flags bit 0 asks for sequenced events | [L16], [L11] |
+| Enable an event source | registry category `0x21`, target of the device (KIP `0x02`), 0, `0x01` (enable) or `0x02` (disable); payload 5 bytes: category, flags, request id (2), instance; response u8, non-zero is a failure. Flags bit 0 asks for sequenced events (the KIP hub sets it; the HID client passes flags 0, so HID events arrive unsequenced: plan section 1.2) | [L16], [L11] |
 | SAM-level registry | category `0x01`, SAM, 0, `0x0b`/`0x0c`; KIP-level `0x27`/`0x28` (declared by Linux) | [L11] |
 | Cover attached? | KIP `0x0e`, SAM `0x01`, 0, `0x2c`; response u8 (non-zero connected); the same command id arrives as an event with the state in byte 0; devices need about 250 ms after connect | [L19] |
 | HID input report | event, category `0x15`, command `0x00`, payload = the raw report | [L20] |
@@ -198,7 +200,7 @@ until G1) and it says nothing about SP11 hardware.
 ## 5. G1: the UART2 spike plan
 
 G1 asks whether raw SAM frames can be read from UART2 at EL2 or the monitor can be given the link, and what is
-unknown if not. Because q1n1 already offers guarded MMIO from the Mac [Q2], the first phase needs no new code in the
+unknown if not. **Superseded in part by [SP11-INPUT-PLAN.md](SP11-INPUT-PLAN.md) section 4:** its stages I0 (the read-only survey), I1a (the clock on), I1b (a passive capture), I2a to I2e (the handshake, one authorisation per step) and I3 (the guest) replace phases 1 to 3 below; step 0 is done (the unit's own SSDT and DSDT values are in plan section 1.2); and the read list of 5.1 lacks what the plan reads first, the DFS flag, the 24 level words and GPLL0 (the engine's root clock is a DFS clock in the pinned Linux: plan section 2.1). The tables below stay as the study's record of the registers. Because q1n1 already offers guarded MMIO from the Mac [Q2], the first phase needs no new code in the
 monitor: it is a read-only snapshot taken over the X3 proxy session, then decoded with `tools/sam_frames.py`. The
 overlap rule of the plan allows it once X3 closes. Everything below that has not been measured is UNKNOWN.
 
@@ -251,7 +253,9 @@ page rule would hold here if the table says FIFO mode.
 | GCC `0x00142284`, `0x00142288` | divider (bits 3:0, read-only in Linux, so firmware-owned) and the rate generator command register | UNKNOWN | the engine clock rate for the baud check |
 
 GCC register addresses are `0x00100000` plus the offsets in [L9] (halt `0x42274`, `0x23000`, `0x23004`; vote
-`0x52020`; divider `0x42284`; rate generator `0x42288`). RPMh and interconnect votes (the "qup-core" and
+`0x52020`; divider `0x42284`; rate generator `0x42288`). The rate generator is the root of a DFS clock in the pinned Linux
+(a flag at its `+0x14` decides whether any rate word may be written), so its command, configuration and divider words are
+not enough to know the rate: [plan section 2.1](SP11-INPUT-PLAN.md#21-what-must-be-on-what-boot-29-saw-what-a-write-must-do). RPMh and interconnect votes (the "qup-core" and
 "qup-config" paths and the `CX` power domain, [L2]) cannot be read this way: whether firmware's votes survive
 ExitBootServices and the slbounce hand-off is UNKNOWN, and is inferred only from whether the clocks and registers
 above behave.
@@ -273,6 +277,8 @@ arrives and the firmware-version request never gets an ACK, with pins, format an
 alone can only show (a) and (b). A result of "unreachable" must record the exact guarded reads, not a summary.
 
 ### 5.2 Phase 2: observe receive data (needs the owner's authorization)
+
+This phase is the plan's I1b (a passive capture that never sends and never acknowledges); phase 3 below is its I2a.
 
 Draining the receive FIFO consumes bytes: a sequenced frame that is not acknowledged is re-sent by the EC after 1 s,
 but an unsequenced event is lost. Windows stays installed, and the EC's state left by an experiment is UNKNOWN
@@ -432,7 +438,7 @@ The Microsoft HID-over-SPI specification that [T2] cites was not read. Nothing i
 
 | Unknown | Measured by |
 | --- | --- |
-| the engine's protocol, mode, clock and pin state after ExitBootServices (boot 29: the clock words read OFF, INFERRED; the protocol and mode were not read because the engine was gated off; the pins were read raw: [section 5.4](#54-what-boot-29-showed)) | G1 phase 1, after a clock-on write that nothing authorises yet |
+| the engine's protocol, mode, clock and pin state after ExitBootServices (boot 29: the clock words read OFF, INFERRED; the protocol and mode were not read because the engine was gated off; the pins were read raw: [section 5.4](#54-what-boot-29-showed-a-read-only-payload-observed-once-the-decodes-are-inferred); the plan's U1 to U24 refine this table: plan section 5) | G1 phase 1, after a clock-on write that nothing authorises yet |
 | this unit's baud, format, flow control and GPIOs | G1 step 0 (the DSDT `MSHW0084` resource) |
 | whether the CRC, framing and policy match real frames | G1 phase 2 (first valid frame) |
 | whether the EC answers a host that skipped the Windows initialization | G1 phase 3 |
