@@ -1524,7 +1524,7 @@ plug-in, breaks F5 and F6 into 23 work items (16 testable on the host from publi
 headers, 5 on hardware or a value only the unit can give) and holds the command-stream port (W11 to W17) behind a q1n1 a7xx reference that must pass X8b first.
 Its section 7 is the first-contact safety plan for X8a to X8e, with a host model of its stages in the q1n1 fork (a register model
 and a fake device, no command that connects to hardware). One item is implemented, in part: the compiler-side a7xx sampler
-encoder of F7. F2, F3, F5, F6 and F8 are UNIMPLEMENTED.
+encoder of F7. F2, F3, F5, F6 and F8 are UNIMPLEMENTED. Version 3 of the port plan ([SP11-GPU-PORT-PLAN-V3.md](SP11-GPU-PORT-PLAN-V3.md), with the hardware stages E1 to E7 in [SP11-GPU-BRINGUP-STAGES.md](SP11-GPU-BRINGUP-STAGES.md)) replaces the stage ladder of that section 7 and finds that the GMU image needs its own SMMU mapping before the GMU can start (EXPERIMENTAL; hardware NOT RUN: boots 1 to 31, nothing newer run).
 
 ### WS-G: input
 
@@ -1553,6 +1553,17 @@ Status of WS-G (host side only; hardware status NOT RUN):
   build): `compat/sam-frame.{h,c}`, `tools/sam_frames.py` and
   `python3 tools/test-sam-frames.py`. There is no driver, and no report reaches
   `IOHIDDevice` (UNIMPLEMENTED).
+- G1 to G3, staged form: [SP11-INPUT-PLAN.md](SP11-INPUT-PLAN.md) replaces the
+  study's G1 phases with the stages I0 (a read-only survey), I1a (the engine
+  clock), I1b (a passive capture), I2a to I2e (the handshake, one authorisation
+  per step) and I3a to I3e (the guest HID). The engine's root clock is a DFS
+  clock in the pinned Linux, so a clock write depends on a flag that no run has
+  read. Its host model and plan tools (`tools/sam_session.py`,
+  `tools/sam_hid_desc.py`, `tools/sam_transcript.py` and
+  `tools/geni_uart_plan.py`, with `tools/test-sam-session.py` and
+  `tools/test-sam-session-rows.py`) are EXPERIMENTAL and linked into no build;
+  hardware NOT RUN (boots 1 to 31; boot 29 read the input engines' clock words
+  only; nothing newer run).
 
 ### WS-H: power and thermal
 
@@ -1794,6 +1805,7 @@ SKIP is not a pass. The same commands, with their build lines, are in
 | Wi-Fi (J1) | `python3 tools/test-sp11-wifi-board.py`; `python3 tools/test-sp11-wifi-study.py`; `python3 tools/test-sp11-wifi-unixnu.py` | The Python standard library. The pinned-source classes need `SP11_LINUX_TREE=<checkout>`, `SP11_WIFI_BOARD_DIR=<dir>`, `SP11_SNAPQCC2072_TREE=<checkout>` and `SP11_UNIXNU_REF=<dir>` (see [BUILDING.md](BUILDING.md#7-host-tests)); each class is SKIP without its variable | That the module is a WCN7850 or that the board data fits it: nothing reads a register and no radio code exists |
 | UniXNU survey (D4, K1, K2) | `python3 tools/test-sp11-unixnu-study.py` | Python 3.10 or newer; `SP11_UNIXNU_REF=<directory of the pinned UniXNU checkouts>` and `SP11_LINUX_TREE=<checkout>` enable the citation, catalog, size, licence and copy checks (SKIP without; the catalog check needs Python 3.11 for `tomllib`) | That UniXNU builds or boots anything, that any OBSERVED result reproduces, or anything about the unit's firmware |
 | Input frames (G3) | `python3 tools/test-sam-frames.py` | clang with ASan and UBSan; `llvm-nm` and `aarch64-elf-gcc` for two optional checks | That a real controller speaks this policy: no real frame has been seen |
+| Input session model and UART plan (G1 to G3) | `python3 tools/test-sam-session.py` and `python3 tools/test-sam-session-rows.py` | Python 3 only | That the EC speaks this session policy, that the engine's clock is a DFS clock on this unit and what its levels read, and that the plan's rows work on the unit: no engine register past the clock words has been read |
 | a7xx `CP_PROTECT` (F4) | `python3 tools/test-gen-a7xx-cp-protect.py` | The pinned-source group fetches four Linux files into `build/ref/` (network) | Any GPU behaviour |
 | X1-85 first-contact host model (X8a) | `tools/test-sp11-gpu-x8a.py` and `tools/test-sp11-gpu-x8a-mutants.py` of the q1n1 fork (not this repository); the umbrella and air2ir3 results are in [SP11-GPU-PORT-PLAN.md](SP11-GPU-PORT-PLAN.md) section 8 | The q1n1 fork checkout; the umbrella suites there need the KDK, a built plug-in or a Mesa build for some (SKIP or NOT RUN without) | Any GPU behaviour: the model is a register model and a fake device with no command that connects to hardware |
 | Boot media (X0, X1) | `python3 tools/test-sp11-boot-media.py` | The real-artifact test needs `SP11_SHELL_EFI`, `SP11_SLBOUNCE_EFI` and `SP11_SLTEST_EFI` | That a stick boots |
@@ -2123,8 +2135,16 @@ maintainer's acceptance ([section 11.2](#112-decisions-for-the-project-owner)).
   with the ownership and cutover plan: F1),
   [SP11-GPU-PORT-PLAN.md](SP11-GPU-PORT-PLAN.md) (the plan of the X1-85 GPU port
   for the kext and the plug-in, and the first-contact safety plan: F2 to F6),
+  [SP11-GPU-PORT-PLAN-V3.md](SP11-GPU-PORT-PLAN-V3.md) and
+  [SP11-GPU-BRINGUP-STAGES.md](SP11-GPU-BRINGUP-STAGES.md) (version 3 of that
+  plan and its hardware stages E1 to E7, which replace the first-contact stages
+  S0 to S7: F2 to F6),
   [SP11-INPUT-STUDY.md](SP11-INPUT-STUDY.md) (the Surface Aggregator link, the
   G1 spike plan and the G2 decision),
+  [SP11-INPUT-PLAN.md](SP11-INPUT-PLAN.md) (the staged plan for the Type Cover
+  link and its host tools, which replaces the study's G1 phases: G1 to G3),
+  [SP11-AFTER-ISC.md](SP11-AFTER-ISC.md) (what the guest's launchd needs after
+  rung 10's ISC and the variants of a rung 11: M1),
   [SP11-WIFI-STUDY.md](SP11-WIFI-STUDY.md) (the stretch Wi-Fi: the WCN7850
   hand-off survey, carry-over from the A16's QCC2072, firmware and board data,
   the X12 sub-gates and K6: WS-J) and

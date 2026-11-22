@@ -234,7 +234,11 @@ Snapintosh builds on the published work of others:
 | [docs/SP11-NVME-WINDOW.md](docs/SP11-NVME-WINDOW.md) | the Surface Pro 11 NVMe window: the audit of A16 assumptions, the safety contract and the per-machine questions |
 | [docs/SP11-DISPLAY-STUDY.md](docs/SP11-DISPLAY-STUDY.md) | reusing the firmware display pipeline on the Surface Pro 11, and the X2 display read list |
 | [docs/SP11-GPU-A7XX-STUDY.md](docs/SP11-GPU-A7XX-STUDY.md) | the a8xx-to-a7xx GPU delta for the Surface Pro 11, with the ownership and cutover plan |
+| [docs/SP11-GPU-PORT-PLAN-V3.md](docs/SP11-GPU-PORT-PLAN-V3.md) | version 3 of the Surface Pro 11 GPU port plan: what Linux's gen70500 path needs, the work breakdown, risks, unknowns and open decisions |
+| [docs/SP11-GPU-BRINGUP-STAGES.md](docs/SP11-GPU-BRINGUP-STAGES.md) | the GPU bring-up stages E1 to E7 and their data: Linux's a7xx `hw_init` order, the GMU image layout and the restore rules |
 | [docs/SP11-INPUT-STUDY.md](docs/SP11-INPUT-STUDY.md) | how the Surface Pro 11 keyboard, touchpad, touchscreen and pen reach the SoC, the UART2 spike plan and the native-versus-forwarded decision |
+| [docs/SP11-INPUT-PLAN.md](docs/SP11-INPUT-PLAN.md) | the staged plan for the Type Cover link (survey, clock, passive capture, handshake, guest HID), the GENI clock and write rows with their undo, and the host tools that model them |
 | [docs/SP11-WIFI-STUDY.md](docs/SP11-WIFI-STUDY.md) | the Surface Pro 11 Wi-Fi stretch goal: a WCN7850-class module (not the A16's QCC2072), the hand-off survey, what carries over, firmware and board data, safety and gate X12 |
 | [docs/SP11-120HZ-STUDY.md](docs/SP11-120HZ-STUDY.md) | the Surface Pro 11 OLED's 120 Hz mode as a stretch goal: public record, EDID decoding, link budget, gate X13 |
 | [docs/SP11-UNIXNU-STUDY.md](docs/SP11-UNIXNU-STUDY.md) | the public UniXNU project as evidence for, and an alternative route to, the Surface Pro 11 plan (decision D4, kill criteria K1 and K2); its evidence table is [docs/SP11-UNIXNU-EVIDENCE.md](docs/SP11-UNIXNU-EVIDENCE.md) |
+| [docs/SP11-AFTER-ISC.md](docs/SP11-AFTER-ISC.md) | what the stock kernel and launchd need once rung 10's ISC is there: the boot tasks, the stops to expect and the variants of a rung 11 (a host analysis; rung 10 itself is prepared and not booted) |
