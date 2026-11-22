@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: MIT -->
 EXPERIMENTAL - a plan and a host-side preparation; nothing in it is hardware-validated and nothing in it authorizes a hardware step
 
+Version 3 of this plan ([SP11-GPU-PORT-PLAN-V3.md](SP11-GPU-PORT-PLAN-V3.md), with the hardware stages E1 to E7 in [SP11-GPU-BRINGUP-STAGES.md](SP11-GPU-BRINGUP-STAGES.md)) applies an independent fact-check to this one. This document stays the inventory (the K, P and W ids); where v3 supersedes a statement here it is marked "v3" in place, and v3's section 0 lists them. Hardware status is unchanged: boots 1 to 31, nothing newer run.
+
 # SP11 GPU port plan: the kext, the Metal plug-in and the first contact with the X1-85
 
 This is the planning half of workstream F items F5 (the Adreno kext) and F6 (the Metal plug-in) of
@@ -79,7 +81,7 @@ material was read or is reproduced; comments in the kext that quote private kern
 | Repository | Owns | Does not own |
 | --- | --- | --- |
 | `KEXT` (10,604 lines, 49 files) | The IOGPU accelerator subclass, the draw and fence submission to the monitor, resource residency and the GPU address allocator over the monitor's mapped window, GPU recovery policy, the IOMobileFramebuffer display with beam-synchronised presentation, the optional backlight service | Any register of the GPU, the GMU, the SMMU or the display engine (the monitor and q1n1 write them); the IB validator, its tables and the register header (compiled from the umbrella) |
-| `PLUG` (23,275 lines, 109 files; 44 of them host harnesses) | The Metal device, command buffers and encoders; the PM4 builder (sysmem draw, blit, compute, clear, fill); descriptors; the shader-cache glue to air2ir3; staging arenas and the UBO mirror | The compiler (air2ir3), the validator that checks its output, the kext |
+| `PLUG` (23,275 lines, 109 files; `harness/` has 44 files, 40 of them programs: v3 3.3) | The Metal device, command buffers and encoders; the PM4 builder (sysmem draw, blit, compute, clear, fill); descriptors; the shader-cache glue to air2ir3; staging arenas and the UBO mirror | The compiler (air2ir3), the validator that checks its output, the kext |
 | `A2I` | AIR to ir3, the chip profiles | Everything else |
 
 ## 2. The inventory
@@ -99,7 +101,7 @@ driver. Each row ends with its label and the work item of section 3.
 | K6 | `KEXT` builds `REPO compat/adreno-ib-command.c`, `adreno-ib.c`, `adreno-submit.c` (`build.sh`, `profiles/*.sh`) | The IB firewall: 20 admitted opcodes, 316 register names (284 draw + 32 compute) built from the A8XX header, the X2's 52-word protect table (`REPO compat/adreno-ib-tables.h`), the a8xx T# layout (`REPO compat/adreno-ib-command/validate.c:39-43,91-125`), the marker set | X2 | A7XX header, the 48-word `a730_protect` (generated, GPL-2.0-only: `REPO compat/adreno-a7xx-protect-tables.h`, included by nothing), the A6XX T# layout, the same three marker words. 90 of the 316 names moved and 23 have no A7XX register (STUDY 4.4). Owner unassigned (STUDY 5 #14); the first inclusion of the GPL header into a monitor or kext build is a licence decision | VERIFIED tables; W4 (a), kext link check W4 (b) |
 | K7 | `REPO gpu/adreno-kext/include/AdrenoContract.h:105-134` (shared by kext and plug-in) | Static assertions tie the contract to A8XX names: T# base alignment, the `CP_RB_CNTL` BUFSZ range, `ADRENO_IB_RBBM_INT_ERRORS` (10 `RBBM_INT_0_STATUS` bits), `ADRENO_IB_CP_GLOBAL_FAULTS` (14 `CP_INTERRUPT_STATUS_GLOBAL` bits), the RBBM idle rule | A8XX | a7xx has no `CP_INTERRUPT_STATUS_GLOBAL`; it has `CP_INTERRUPT_STATUS` `0x823` and `CP_HW_FAULT` `0x821`; the RBBM status offsets moved (`RBBM_STATUS` `0x210`, `RBBM_INT_0_STATUS` `0x201`; STUDY 2.1) | VERIFIED; W5 (a) |
 | K8 | `KEXT src/AdrenoDisplay.h:13,197-204`; `src/AdrenoDisplay.h:68-70` and `src/AdrenoDisplayBeam.h:2,52`; `src/AdrenoDisplay.h:140-142` | Display coupling: a fixed 2880 x 1800, 60 Hz, 32-bit BGRA mode (`kWidth`, `kHeight`, `kRefreshHz`), a 302 x 189 mm panel, the scanout position read from DPU INTF_5 (`DPU_INTF_PA == 0x0AE3A000`), the backlight over DPCD through the monitor | The A16's eDP panel and DPU | The SP11 reuses the firmware's eDP and DPU pipeline (PLAN E and P rows); its panel is 2880 x 1920 and the 120 Hz item is a stretch goal (X13). The INTF index, its base and the mode must come from the guest tree, not constants: UNKNOWN until X13a/X5 read them | UNKNOWN; W6 (c) |
-| K9 | `KEXT src/AdrenoMemoryMap.cpp` (coherent-maintenance skipping), `REPO compat/adreno-coherent.h:1-25` | Cache maintenance is skipped only after the monitor proves IO-coherence at prepare time (`SNAP_ADRENO_COHERENT`, default 0) | X2 test | The X1-85 has the cached-coherent quirk and a `dma-coherent` SMMU node; the unit's own tables are UNVERIFIED; reuse the gated self-test and keep non-coherent leaves unless it passes (STUDY 2.10) | INFERRED; W7 (c) |
+| K9 | `KEXT src/AdrenoMemoryMap.cpp` (coherent-maintenance skipping), `REPO compat/adreno-coherent.h:1-25` | Cache maintenance is skipped only after the monitor proves IO-coherence at prepare time (`SNAP_ADRENO_COHERENT`, default 0) | X2 test | The X1-85 has the cached-coherent quirk and a `dma-coherent` SMMU node; the unit's own IORT says non-coherent (OBSERVED once, a table; v3 3.2); reuse the gated self-test and keep non-coherent leaves unless it passes (STUDY 2.10) | INFERRED; W7 (c) |
 | K10 | `KEXT src/AdrenoX2/submission.cpp`, `pipeline.cpp`, `lifecycle.cpp`; `REPO compat/adreno-guest.h` | The guest ABI: HVC fence, FILL32, cache, IB, recover, stop. No register appears; the ring and the CP are the monitor's | chip-independent | Unchanged for a7xx as long as the monitor keeps the ABI; the a7xx CP work (SQE start, CP init, protect programming) is monitor and q1n1 work (F2, F3), not kext work | OBSERVED; none in the kext |
 
 ### 2.2 SnapMetal (the plug-in)
@@ -160,7 +162,7 @@ why they are not code: `HFI` and `GMU` none; `DVFS` and `governor` appear only i
 | Category | In `KEXT` / `PLUG`? | Where it lives today | a7xx counterpart and source | Item |
 | --- | --- | --- | --- | --- |
 | Register offsets and blocks | `PLUG` programs 315 names by macro (P9); `KEXT` none | `REPO compat/adreno.h:52-72` (monitor PAs: `RBBM_STATUS` `0x03d00048`, `CP_SQE_CNTL` `0x03d02054`, GMU power status `0x03d7dfa0`, CX GDSC `0x03d99084`); q1n1 `tools/adreno_x2.py` | `RBBM_STATUS` `0x03d00840`, `RBBM_INT_0_STATUS` `0x03d00804`, `CP_SQE_CNTL` `0x03d02020`, `GMU_SPTPRAC_PWR_CLK_STATUS` `0x03d7e340`; the CX GDSC is GPUCC base `0x03d90000` + `0x9108` and the GX GDSC + `0x905c` (STUDY 2.1; `LNX drivers/clk/qcom/gpucc-x1e80100.c` gdsc table; arithmetic, INFERRED for the sum) | W3, F2 |
-| GMU and HFI handshake | none | Monitor (`REPO compat/gpu-dvfs.h:14-17`: HFI `GX_BW_PERF_VOTE`), q1n1 `tools/a16gpu_stage3.py` (gmu-smmu, gmu-boot, hfi, oob) | a7xx: the host programs the GPU RSC and two PDC registers (19 writes with a8xx returning first, UNX), fixed-layout HFI performance table, protocol "1.10" (STUDY 2.3; `LNX adreno/a6xx_gmu.c:692-745,798-800`, `a6xx_hfi.c:247-255,331-353`) | F2 (c); X8a stages in section 7 |
+| GMU and HFI handshake | none | Monitor (`REPO compat/gpu-dvfs.h:14-17`: HFI `GX_BW_PERF_VOTE`), q1n1 `tools/a16gpu_stage3.py` (gmu-smmu, gmu-boot, hfi, oob) | a7xx: the host programs the GPU RSC and two PDC registers (19 writes with a8xx returning first, UNX), fixed-layout HFI performance table, protocol "1.10" only on the legacy path, none on the non-legacy start (v3 3.1 row 7) (STUDY 2.3; `LNX adreno/a6xx_gmu.c:692-745,798-800`, `a6xx_hfi.c:247-255,331-353`) | F2 (c); X8a stages in section 7 |
 | CP microcode and firmware names | none | q1n1 loads GMU and SQE; README "Device firmware" | `gen70500_sqe.fw` 1.62, `gen70500_gmu.bin` 4.03.11 (WHENCE text); no zap name in the catalog, the Denali image `qcdxkmsuc8380.mbn` is device-bound (STUDY 1.5, 2.7). Supplied locally, never committed | F2 (c) |
 | UBWC configuration | none (off in v1, P12) | `LNX` is the only writer on a7xx (`a6xx_gpu.c:748`, called at 1344); the A16 path skips it | X1E80100: UBWC 4.0, bank bit 16 (`LNX drivers/soc/qcom/ubwc_config.c:65-68,179-180`); Mesa `highest_bank_bit` 16 (STUDY 2.5) | W22 (c) |
 | IB and command-stream formats | `PLUG` (P4-P11); `KEXT` compiles the validator | `PLUG` builder, `REPO compat/adreno-submit.h` wire format, the validator | PKT4/PKT7 unchanged; the opcode set (20) is defined for A7XX; `CP_SET_MARKER` layout differs, same three words (STUDY 2.14). Register content is the port (section 3) | W3-W17 |
@@ -249,6 +251,8 @@ AGENTS.md non-negotiable 5: one hardware client at a time; AC power or at least 
 `--gpu-dvfs-ceiling` respected; never one `CP_MEMCPY` over 1 MiB (a 4 MiB copy hung the A16 GPU); tracked sources unchanged
 between prepare and boot; explicit permission for persistent firmware writes and any clock or voltage outside the limits.
 
+**Superseded in part by v3.** The stage ladder S0 to S7 of this section is replaced by E1 to E7 ([SP11-GPU-BRINGUP-STAGES.md](SP11-GPU-BRINGUP-STAGES.md) sections 2 and 3): S0 is boot 30 (7.1.1, unchanged); S1 and the R5 reads are inside E2; the GMU image and its clocks become E3a to E3c, and the GMU's own SMMU mapping is a prerequisite that this section does not name. Sections 7.2 and 7.3 stay valid and 7.4 holds except where marked; the authorisation table of 7.5 and the list of 7.7 are superseded.
+
 ### 7.1 Order of reads before the first write (stage S0, read-only)
 
 | Step | Read | Why this position | Stop rule |
@@ -313,9 +317,9 @@ copy above 1 MiB, or not dword aligned, before a word is written; the plug-in's 
 
 ### 7.4 DVFS ceiling and thermal guard
 
-The first vote is the lowest level of the descriptor's table. Candidates valid for every speed bin are 550, 390 and 300 MHz
+The first vote is the lowest level of the descriptor's table (v3: Linux's own first DDR bandwidth vote is at the highest OPP, so this is a recorded deviation: v3 3.1 row 16). Candidates valid for every speed bin are 550, 390 and 300 MHz
 (STUDY 2.12); the ceiling is the operator's choice and any raise needs a separate authorisation. The thermal guard of PLAN H1
-stays on; its sensor and trip values are UNKNOWN until read, and S5 does not run without them in the descriptor. Boot 29's
+stays on; its sensor and trip values were UNKNOWN until read (v3: the public tree maps the GPU to tsens3 sensors 5 to 12 with a passive trip of 95 C and a critical trip of 115 C, VERIFIED; the chassis limit stays UNKNOWN: v3 8.3), and S5 does not run without them in the descriptor. Boot 29's
 thermal payload ([SP11-STICK-LOG.md](SP11-STICK-LOG.md) section 27.2) read the four temperature controllers at EL2 once (50 sensors enabled; by
 hand the raw words read about 38 C to 43 C, INFERRED to be tenths of a degree); it did not say which sensor belongs to the
 GPU, and the trip values are still unread.
@@ -358,7 +362,7 @@ a7xx cold-boot order for the GMU (`a6xx_gmu.c:953-1058`) and the HFI table of `a
 [UNIMPLEMENTED], and each a reason a first S1 or S3 may stop on the unit: the GMU RCG rate (Linux asks 200 MHz, rounded to
 220 MHz from GPU_CC_PLL1; S1 leaves it parked on XO) and PLL1, the GCC GPLL0 votes (S1 refuses a hub RCG whose parent is not
 ready), the RSC wake and the RSC and PDC programming, the GMU-stream SMMU context, the a7xx GBIF CX table, Linux's HFI message
-list (the descriptor supplies the messages) and thermal sensing (the cycle.py guard).
+list (the descriptor supplies the messages) and thermal sensing (the cycle.py guard). v3 adds to this list the CX GBIF table written through the GPU window, the ACD message, the DDR bandwidth vote, the full `hw_init` list and the order of its reglist (v3 3.1).
 
 ## 8. Host validation of this work
 

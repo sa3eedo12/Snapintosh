@@ -33,7 +33,7 @@ Each finding is detailed, with citations, in the section named at its end.
    on a7xx the host driver programs the GPU RSC and two PDC registers itself. Today's X2 bring-up only wakes the RSC.
    An SP11 bring-up must add this programming or prove that the boot firmware left the RSC ready. (§2.3)
 5. **HFI** [VERIFIED]. The GPU performance table travels in a fixed-layout message on a7xx and in a generic typed
-   table message on a8xx; whether gen70500 firmware accepts the protocol version Linux advertises is UNVERIFIED. (§2.3)
+   table message on a8xx; Linux's "1.10" query belongs to the legacy start only and gen70500 sends no version message (superseded: [SP11-GPU-PORT-PLAN-V3.md](SP11-GPU-PORT-PLAN-V3.md) 3.1 row 7); whether gen70500 firmware accepts the non-legacy sequence is UNVERIFIED. (§2.3)
 6. **CP_PROTECT** [VERIFIED]. X1-85 uses the 48-slot `a730_protect`, shared by six catalog entries; the encoding
    macros are `A6XX_PROTECT_*`; the register XML declares only 32 slots. The generated GPL header carries the table;
    nothing includes it. (§2.6)
@@ -185,7 +185,7 @@ reported id before comparing (line 50); so does an id that carries a bin in its 
 image, `qcdxkmsuc8380.mbn`, in the device's own device tree (PLAN N2 in section 1.1 and E25 in section 4.2). [INFERRED] Linux allows the zap
 file to come from a `firmware-name` property because such images can be signed per device, and requires the property
 when the catalog has no zap name (`LNX adreno/adreno_gpu.c:69-100`); the X1-85 catalog has none. Whether SP11 needs a
-zap image at all at EL2 is UNVERIFIED (§2.7).
+zap image at all at EL2 is UNVERIFIED (§2.7). Update: the two public blobs are now staged locally (never committed) and the GMU image's header was walked, which found that its largest block loads at GMU address `0x4000` (v3 3.1 row 14 and 7).
 
 ### 1.6 Facts a first read-back should establish [UNIMPLEMENTED; NOT RUN except the power-status part of item 4, section 1.7]
 
@@ -330,11 +330,11 @@ All rows are [VERIFIED] against `LNX adreno/a6xx_gmu.c` (lines in the last colum
   programming (`a6xx_gmu.c:716-745`, `798-800`) or show that the boot firmware left the RSC ready. The five sequencer
   words are firmware-adjacent constants and are deliberately not reproduced here. [UNVERIFIED] The state the SP11 boot
   firmware leaves.
-- [VERIFIED] HFI: the query advertises protocol "1.10" (`LNX adreno/a6xx_hfi.c:247-255`). a7xx and older send the
+- [VERIFIED] HFI: the query advertises protocol "1.10" (`LNX adreno/a6xx_hfi.c:247-255`; superseded: that query is made only by the legacy start, and gen70500 runs the non-legacy `a6xx_hfi_start`, which sends no version message: v3 3.1 row 7). a7xx and older send the
   fixed-layout performance-table message with a vote, an ACD word and a frequency per level (`a6xx_hfi.c:331-353`); a8xx
   sends the generic table message typed as a GPU performance table, three words per GX level and two per CX level
   (function at 280-329, send at 323), selected by the a8xx test at 336. A second generic table is sent at line 922
-  (purpose not read). [UNVERIFIED] Which protocol version gen70500 firmware negotiates.
+  (purpose not read). [UNVERIFIED] Which protocol version gen70500 firmware negotiates (v3: whether it accepts the non-legacy sequence is its U3).
 - [OBSERVED] `REPO compat/adreno.h:1-37` states the monitor never writes the GMU, GPUCC, RSCC or GX clock controller;
   q1n1's host stages (gmu-smmu, gmu-boot, hfi, oob, cp-fence, quiesce) do. [INFERRED] The a7xx differences above all
   land in those host stages, not in the monitor.
@@ -363,7 +363,7 @@ All rows are [VERIFIED] against `LNX adreno/a6xx_gmu.c` (lines in the last colum
 - [VERIFIED] Neither the X1-85 nor the X2 entry sets the 4 GiB-VA quirk (defined at `LNX adreno/adreno_gpu.h:64`;
   entries in §1.1).
 - [UNVERIFIED] Whether the SP11 firmware leaves the SMMU registers, context-bank layout and TTBR formats compatible
-  with the mirror's assumptions, and whether the GMU's own stream id 5 needs the same treatment as the X2's.
+  with the mirror's assumptions, and whether the GMU's own stream id 5 needs the same treatment as the X2's (superseded in part: in Linux's design the GMU image needs a DRAM region mapped through its own SMMU context, so the treatment is mandatory before the GMU can start: v3 3.1 row 14).
 
 ### 2.5 UBWC
 
@@ -446,7 +446,7 @@ All rows are [VERIFIED] against `LNX adreno/a6xx_gmu.c` (lines in the last colum
   caps any single `CP_MEMCPY` at 1 MiB because a 4 MiB copy once hung the GPU.
 - [VERIFIED] For the X1-85 the catalog has the cached-coherent quirk and `adreno_smmu` is `dma-coherent` in hamoa; the
   CPU PMU is the generic `arm,armv8-pmuv3` (`hamoa.dtsi:371-372`) on `qcom,oryon` cores (line 73), the same kind of
-  node the header cites for the X2. [UNVERIFIED] The unit's firmware tables, and whether its PMU exposes that event.
+  node the header cites for the X2. [UNVERIFIED] The unit's firmware tables (v3: its IORT declares the GPU non-coherent, OBSERVED once; v3 3.2), and whether its PMU exposes that event.
   [INFERRED] Reuse the gated self-test and keep non-coherent leaves unless it passes.
 
 ### 2.11 Display
@@ -481,7 +481,7 @@ kext side and the compositor handoff.
 - [INFERRED] Only 550, 390 and 300 MHz are valid for every bin, so they are the natural candidates for a conservative
   `--gpu-dvfs-ceiling` on a unit whose bin is not yet read. Which ceiling to use, and any raise, is an operator
   decision under AGENTS.md rule 5 and PLAN section 8 (the row for any raise of GPU or CPU clock or voltage ceilings).
-- [UNVERIFIED] The X1E80100 GPU thermal sensors and trip points were not read. The thermal guard of PLAN H1 (WS-H)
+- [UNVERIFIED] The X1E80100 GPU thermal sensors and trip points were not read (superseded: the pinned public tree maps the GPU to tsens3 sensors 5 to 12 with a passive trip of 95 C and a critical trip of 115 C, VERIFIED; the chassis limit stays UNKNOWN: v3 3.1 row 13 and 8.3). The thermal guard of PLAN H1 (WS-H)
   stays mandatory.
 
 ### 2.13 Platform resources of the GPU node
@@ -834,7 +834,7 @@ document authorizes them.
 
 | # | Question | Settled by |
 | --- | --- | --- |
-| 1 | Which GMU and SQE firmware versions the unit provides, and whether it accepts the HFI version Linux advertises (§1.5, §2.3) | X8a, on the unit; this study read only the public `WHENCE` text |
+| 1 | Which GMU and SQE firmware versions the unit provides, and whether it accepts the HFI version Linux advertises (§1.5, §2.3; superseded in part: gen70500 is sent no version message, v3 3.1 row 7) | X8a, on the unit; this study read only the public `WHENCE` text |
 | 2 | Whether the boot firmware leaves the GPU RSC and PDC programmed, or EL2 must program them as Linux does for a7xx (§2.3) | An X8a read-back of that state before any write; boot 30 could not read it (the RSCC is behind the CX domain, which reads off, section 1.7), so it needs the CX domain on first |
 | 3 | Whether the unit needs the SECVID write, and whether the zap image is needed at EL2 (§2.7) | X8a and X8b observation (PLAN row F2, note N2) |
 | 4 | Whether the unit requires the CP_PROTECT table to equal Linux's, and whether its firmware keeps ranges Linux does not list (§2.6) | A supervised read-back; nothing in this study proves it |
