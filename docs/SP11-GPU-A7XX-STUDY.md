@@ -212,7 +212,7 @@ section 7.1.1), not the plan's X8a tool, which has not run on hardware.
 
 | What this study lists | What boot 30 showed | Label |
 | --- | --- | --- |
-| the GPU's clocks in GCC (the plan's R2) | the GPU configuration AHB clock is on, which is what a GPUCC read needs; the memory-NoC clock word has bit 31 and its enable bit both set (printed `ODD`; INFERRED a hardware-gated clock); the SNOC branch and the `GMIP` word read OFF | OBSERVED ON THE UNIT (the words); INFERRED (the readings) |
+| the GPU's clocks in GCC (the plan's R2) | the GPU configuration AHB clock is on, which is what a GPUCC read needs; the memory-NoC clock word has bit 31 and its enable bit both set (printed `ODD`; INFERRED a hardware-gated clock); the SNOC branch and the `QMIP` word read OFF | OBSERVED ON THE UNIT (the words); INFERRED (the readings) |
 | the CX power-status word (item 4; the plan's R3) | the CX domain's status word reads `0x22F801`: bit 31 (power on) clear and bit 0 (software collapse) set, no hardware control: powered down by request | OBSERVED ON THE UNIT (the word); INFERRED (the reading) |
 | the GX power-status word (item 4) | the GX domain's word reads `0x22F801` too, with `UP=0 DN=1` on the payload's own line: not up | OBSERVED ON THE UNIT (the word); INFERRED (not up) |
 | the clocks the GMU node needs (the plan's R3 and R4) | the GMU, XO, hub and HLOS branch clocks read OFF (bit 31 set); the payload's verdict is `R4 CX=OFF` | OBSERVED ON THE UNIT (the words); INFERRED (the verdict) |

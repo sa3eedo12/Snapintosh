@@ -277,7 +277,7 @@ hand-held film, so a digit may be misread; the words are in the log, not repeate
 
 | Step | What boot 30 showed | Label |
 | --- | --- | --- |
-| R2 (GCC) | the GCC words answered at EL2, no fault; the GPU configuration AHB branch (`0x71004`) is on, so GPUCC could be read; the memory-NoC word has bit 31 and its enable bit both set (printed `ODD`), the SNOC branch and the `GMIP` word read OFF | OBSERVED (the words); INFERRED (the readings) |
+| R2 (GCC) | the GCC words answered at EL2, no fault; the GPU configuration AHB branch (`0x71004`) is on, so GPUCC could be read; the memory-NoC word has bit 31 and its enable bit both set (printed `ODD`), the SNOC branch and the `QMIP` word read OFF | OBSERVED (the words); INFERRED (the readings) |
 | R3 (GPUCC) | the first read of GPUCC on the unit answered with no fault and no hang: the CX GDSC word is `0x22F801` (bit 31 clear, bit 0 set, no hardware control: powered down by request); the GX word is the same with `UP=0 DN=1`; the GMU, XO, hub and HLOS branches read OFF, `DMT` reads ON and `AHB` reads 0 (printed `ODD`) | OBSERVED (the words); INFERRED (the readings) |
 | R4 (the gate) | not proven, and the stop rule above is what happened: the payload printed `R4 CX=OFF PWR=0 SC=1 HW=0 CLK=0X58 SM=0X2`, and the survey ended with "CX off", having read nothing behind the GDSC; 52 loads of the nominal 78 | OBSERVED (the line, the count); INFERRED (the verdict) |
 | R5 (CX_MISC, GMU, RSCC, SMMU) | not read: four `GATED BY CX=OFF` lines. The GMU power-status words, the RSC sequencer state, `TCM_RET_CNTL` and the SMMU identity are all still unread | OBSERVED (not read); UNKNOWN (the values) |
